@@ -42,18 +42,19 @@ def index():
 @app.route("/upload", methods=["POST"])
 def upload():
     album_id = request.form.get("album_id", "").strip()
+    caption_text = request.form.get("caption", "").strip()
     if not album_id:
         return "Missing album_id", 400
 
     os.makedirs("static/uploads", exist_ok=True)
     albums = load_json(ALBUMS_FILE, {})
     photos = []
-    for img in request.files.getlist("images"):
+    for i, img in enumerate(request.files.getlist("images")):
         if img and img.filename:
             filename = f"{uuid.uuid4()}_{img.filename}"
             save_path = os.path.join("static/uploads", filename)
             img.save(save_path)
-            photos.append({"url": f"/static/uploads/{filename}", "caption": ""})
+            photos.append({"url": f"/static/uploads/{filename}", "caption": caption_text if i == 0 else ""})
 
     albums[album_id] = {"photos": photos}
     save_json(ALBUMS_FILE, albums)
