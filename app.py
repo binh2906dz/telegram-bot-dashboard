@@ -70,7 +70,7 @@ def delete(album_id):
 def healthz():
     return "OK", 200
 
-# ===== BOT HANDLERS (PTB v20.7) =====
+# ===== BOT HANDLERS =====
 
 if BOT_TOKEN:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
