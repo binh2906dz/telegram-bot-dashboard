@@ -20,7 +20,6 @@ ALBUMS_FILE = "albums.json"
 SUBS_FILE = "subscribers.json"
 CONFIG_FILE = "config.json"
 
-
 def load_json(file, default):
     try:
         with open(file) as f:
@@ -28,11 +27,9 @@ def load_json(file, default):
     except Exception:
         return default
 
-
 def save_json(file, data):
     with open(file, "w") as f:
         json.dump(data, f, indent=2)
-
 
 # ===== FLASK ROUTES =====
 
@@ -41,7 +38,6 @@ def index():
     albums = load_json(ALBUMS_FILE, {})
     subs = load_json(SUBS_FILE, [])
     return render_template("index.html", albums=albums, subs=subs)
-
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -63,7 +59,6 @@ def upload():
     save_json(ALBUMS_FILE, albums)
     return redirect("/")
 
-
 @app.route("/delete/<album_id>")
 def delete(album_id):
     albums = load_json(ALBUMS_FILE, {})
@@ -71,13 +66,11 @@ def delete(album_id):
     save_json(ALBUMS_FILE, albums)
     return redirect("/")
 
-
 @app.route("/healthz")
 def healthz():
     return "OK", 200
 
-
-# ===== BOT HANDLERS =====
+# ===== BOT HANDLERS (PTB v20.7) =====
 
 if BOT_TOKEN:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
@@ -148,7 +141,7 @@ if BOT_TOKEN:
             return
         try:
             time_str = update.message.text.split("_")[1]
-            h, m = map(int, time_str.split(":"))
+            h, m = map(int, time_str.split(':'))
             h_utc = (h - 7) % 24
             save_json(CONFIG_FILE, {"hour": h_utc, "minute": m})
             await update.message.reply_text(f"Đã set giờ: {h}:{m} (VN)")
@@ -183,6 +176,10 @@ if BOT_TOKEN:
                     )
 
     def run_bot_thread():
+        # Create new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
         async def main():
             ptb_app = Application.builder().token(BOT_TOKEN).build()
             ptb_app.add_handler(CommandHandler("start", start))
@@ -190,33 +187,31 @@ if BOT_TOKEN:
             ptb_app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
             ptb_app.add_handler(CallbackQueryHandler(album_click))
             ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
+            
+            log.info("Bot starting with new event loop...")
+            await ptb_app.initialize()
+            await ptb_app.start()
+            log.info("Bot initialized and started")
+            
             try:
-                await ptb_app.initialize()
-                await ptb_app.start()
-                await ptb_app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+                await ptb_app.updater.start_polling(allowed_updates=["message", "callback_query"])
                 log.info("Bot polling started")
-                # Keep the event loop alive; the updater runs in the background
-                while True:
-                    await asyncio.sleep(60)
             except Exception as e:
-                log.error("Bot polling encountered an error: %s", e)
+                log.error(f"Polling error: {e}")
             finally:
-                try:
-                    await ptb_app.updater.stop()
-                    await ptb_app.stop()
-                    await ptb_app.shutdown()
-                except Exception as e:
-                    log.error("Bot shutdown error: %s", e)
+                await ptb_app.stop()
 
-        asyncio.run(main())
+        try:
+            loop.run_until_complete(main())
+        except Exception as e:
+            log.error(f"Bot thread error: {e}")
 
     threading.Thread(target=run_bot_thread, daemon=True).start()
-    log.info("Bot thread started")
+    log.info("Bot thread created")
 else:
     log.warning("TELEGRAM_BOT_TOKEN not set – bot disabled, Flask only")
-
 
 # ===== MAIN =====
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, use_reloader=False)
