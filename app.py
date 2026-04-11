@@ -5,7 +5,7 @@ import asyncio
 import logging
 import threading
 from datetime import datetime, timezone
-from flask import Flask, request, redirect, render_template
+from flask import Flask, request, redirect, render_template, jsonify
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
@@ -16,10 +16,12 @@ _admin_str = os.environ.get("ADMIN_CHAT_ID", "")
 ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
 
 ALBUMS_FILE = "albums.json"
 SUBS_FILE = "subscribers.json"
 CONFIG_FILE = "config.json"
+
 
 def load_json(file, default):
     try:
@@ -28,9 +30,15 @@ def load_json(file, default):
     except Exception:
         return default
 
+
 def save_json(file, data):
-    with open(file, "w") as f:
-        json.dump(data, f, indent=2)
+    with open(file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def total_posts(albums):
+    return sum(len(a.get("posts", [])) for a in albums.values() if isinstance(a, dict))
+
 
 # ===== FLASK ROUTES =====
 
@@ -38,7 +46,80 @@ def save_json(file, data):
 def index():
     albums = load_json(ALBUMS_FILE, {})
     subs = load_json(SUBS_FILE, [])
-    return render_template("index.html", albums=albums, subs=subs)
+    active_album = request.args.get("album", "")
+    return render_template("index.html", albums=albums, subs=subs,
+                           active_album=active_album, total_posts=total_posts(albums))
+
+
+# --- Album management ---
+
+@app.route("/albums/create", methods=["POST"])
+def create_album():
+    title = request.form.get("title", "").strip()
+    description = request.form.get("description", "").strip()
+    if not title:
+        return "Missing title", 400
+    album_id = f"album_{uuid.uuid4().hex[:8]}"
+    albums = load_json(ALBUMS_FILE, {})
+    albums[album_id] = {
+        "title": title,
+        "description": description,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "posts": [],
+    }
+    save_json(ALBUMS_FILE, albums)
+    return redirect(f"/?album={album_id}")
+
+
+@app.route("/albums/<album_id>/delete", methods=["POST"])
+def delete_album(album_id):
+    albums = load_json(ALBUMS_FILE, {})
+    albums.pop(album_id, None)
+    save_json(ALBUMS_FILE, albums)
+    return redirect("/")
+
+
+# --- Post management ---
+
+@app.route("/albums/<album_id>/posts", methods=["POST"])
+def add_post(album_id):
+    caption = request.form.get("caption", "").strip()
+    albums = load_json(ALBUMS_FILE, {})
+    if album_id not in albums:
+        return "Album not found", 404
+    os.makedirs("static/uploads", exist_ok=True)
+    photos = []
+    for img in request.files.getlist("images"):
+        if img and img.filename:
+            filename = f"{uuid.uuid4().hex}_{img.filename}"
+            save_path = os.path.join("static/uploads", filename)
+            img.save(save_path)
+            photos.append({"url": f"/static/uploads/{filename}"})
+    post = {
+        "id": uuid.uuid4().hex,
+        "caption": caption,
+        "photos": photos,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if "posts" not in albums[album_id]:
+        albums[album_id]["posts"] = []
+    albums[album_id]["posts"].append(post)
+    save_json(ALBUMS_FILE, albums)
+    return redirect(f"/?album={album_id}")
+
+
+@app.route("/albums/<album_id>/posts/<post_id>/delete", methods=["POST"])
+def delete_post(album_id, post_id):
+    albums = load_json(ALBUMS_FILE, {})
+    if album_id in albums:
+        albums[album_id]["posts"] = [
+            p for p in albums[album_id].get("posts", []) if p["id"] != post_id
+        ]
+        save_json(ALBUMS_FILE, albums)
+    return redirect(f"/?album={album_id}")
+
+
+# --- Legacy routes (kept for backward compatibility) ---
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -46,20 +127,33 @@ def upload():
     caption_text = request.form.get("caption", "").strip()
     if not album_id:
         return "Missing album_id", 400
-
     os.makedirs("static/uploads", exist_ok=True)
     albums = load_json(ALBUMS_FILE, {})
+    if album_id not in albums:
+        albums[album_id] = {
+            "title": album_id,
+            "description": "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "posts": [],
+        }
     photos = []
-    for i, img in enumerate(request.files.getlist("images")):
+    for img in request.files.getlist("images"):
         if img and img.filename:
-            filename = f"{uuid.uuid4()}_{img.filename}"
+            filename = f"{uuid.uuid4().hex}_{img.filename}"
             save_path = os.path.join("static/uploads", filename)
             img.save(save_path)
-            photos.append({"url": f"/static/uploads/{filename}", "caption": caption_text if i == 0 else ""})
-
-    albums[album_id] = {"photos": photos}
+            photos.append({"url": f"/static/uploads/{filename}"})
+    if photos:
+        post = {
+            "id": uuid.uuid4().hex,
+            "caption": caption_text,
+            "photos": photos,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        albums[album_id].setdefault("posts", []).append(post)
     save_json(ALBUMS_FILE, albums)
     return redirect("/")
+
 
 @app.route("/delete/<album_id>")
 def delete(album_id):
@@ -68,9 +162,11 @@ def delete(album_id):
     save_json(ALBUMS_FILE, albums)
     return redirect("/")
 
+
 @app.route("/healthz")
 def healthz():
     return "OK", 200
+
 
 # ===== BOT HANDLERS =====
 
@@ -111,28 +207,45 @@ if BOT_TOKEN:
 
         albums = load_json(ALBUMS_FILE, {})
         buttons = []
-        for key in sorted(albums.keys()):
-            date = key.replace("album_", "").replace("_", "-")
-            buttons.append([InlineKeyboardButton(f"Link🔥 {date[8:10]}-{date[5:7]}", callback_data=key)])
+        for key, val in sorted(albums.items()):
+            title = val.get("title", key) if isinstance(val, dict) else key
+            buttons.append([InlineKeyboardButton(f"🔥 {title}", callback_data=key)])
         buttons.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="back")])
 
         await query.edit_message_text("Chọn album:", reply_markup=InlineKeyboardMarkup(buttons))
 
     async def send_album(chat_id, bot, album):
-        media = []
-        for i, p in enumerate(album["photos"]):
-            url = p["url"]
-            if url.startswith("/static/uploads/"):
-                file_path = url.lstrip("/")
-                with open(file_path, "rb") as fh:
-                    photo_data = fh.read()
-            else:
-                photo_data = url
-            if i == 0:
-                media.append(InputMediaPhoto(photo_data, caption=p.get("caption", "")))
-            else:
-                media.append(InputMediaPhoto(photo_data))
-        await bot.send_media_group(chat_id, media)
+        """Send all posts in an album (supports both new posts[] format and legacy photos[] format)."""
+        if "posts" in album:
+            for post in album["posts"]:
+                media = []
+                for i, p in enumerate(post.get("photos", [])):
+                    url = p["url"]
+                    if url.startswith("/static/uploads/"):
+                        file_path = url.lstrip("/")
+                        with open(file_path, "rb") as fh:
+                            photo_data = fh.read()
+                    else:
+                        photo_data = url
+                    caption = post.get("caption", "") if i == 0 else ""
+                    media.append(InputMediaPhoto(photo_data, caption=caption))
+                if media:
+                    await bot.send_media_group(chat_id, media)
+        else:
+            # Legacy format: album["photos"]
+            media = []
+            for i, p in enumerate(album.get("photos", [])):
+                url = p["url"]
+                if url.startswith("/static/uploads/"):
+                    file_path = url.lstrip("/")
+                    with open(file_path, "rb") as fh:
+                        photo_data = fh.read()
+                else:
+                    photo_data = url
+                caption = p.get("caption", "") if i == 0 else ""
+                media.append(InputMediaPhoto(photo_data, caption=caption))
+            if media:
+                await bot.send_media_group(chat_id, media)
 
     async def album_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -159,7 +272,7 @@ if BOT_TOKEN:
             return
         try:
             time_str = update.message.text.split("_")[1]
-            h, m = map(int, time_str.split(':'))
+            h, m = map(int, time_str.split(":"))
             h_utc = (h - 7) % 24
             save_json(CONFIG_FILE, {"hour": h_utc, "minute": m})
             await update.message.reply_text(f"Đã set giờ: {h}:{m} (VN)")
@@ -194,7 +307,6 @@ if BOT_TOKEN:
                     )
 
     def run_bot_thread():
-        # Create new event loop for this thread
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -210,7 +322,7 @@ if BOT_TOKEN:
             ptb_app.run_polling(
                 allowed_updates=["message", "callback_query"],
                 stop_signals=None,
-                drop_pending_updates=True
+                drop_pending_updates=True,
             )
         except Exception as e:
             log.error(f"Bot thread error: {e}")

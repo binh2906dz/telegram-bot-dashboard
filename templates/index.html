@@ -1,100 +1,551 @@
 <!DOCTYPE html>
-<html>
+<html lang="vi">
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dashboard VIP</title>
-<style>
-body {
-  font-family: Arial;
-  background: #111;
-  color: #fff;
-  padding: 15px;
-}
-.card {
-  background: #1c1c1c;
-  padding: 15px;
-  margin-bottom: 15px;
-  border-radius: 10px;
-}
-button {
-  padding: 10px;
-  border: none;
-  border-radius: 6px;
-  background: orange;
-  color: black;
-}
-input {
-  padding: 8px;
-  width: 100%;
-  margin-bottom: 10px;
-}
-.preview img {
-  width: 70px;
-  margin: 5px;
-}
-textarea.caption-input {
-  width: 100%;
-  padding: 8px;
-  margin-bottom: 10px;
-  background: #2a2a2a;
-  color: #fff;
-  border: 1px solid #444;
-  border-radius: 6px;
-  box-sizing: border-box;
-}
-</style>
-</head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Dashboard 🔥</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    :root {
+      --accent: #ff5e00;
+      --accent-light: #ff8533;
+      --card-bg: #1a1d23;
+      --sidebar-bg: #13151a;
+      --body-bg: #0f1117;
+      --border-color: #2a2d35;
+    }
 
+    body {
+      background-color: var(--body-bg);
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ---- Topbar ---- */
+    .topbar {
+      background: var(--sidebar-bg);
+      border-bottom: 1px solid var(--border-color);
+      padding: 12px 20px;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+
+    .topbar .brand {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: var(--accent);
+    }
+
+    /* ---- Stats cards ---- */
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 18px 22px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      transition: transform .15s, box-shadow .15s;
+    }
+
+    .stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(0,0,0,.4); }
+
+    .stat-icon {
+      width: 52px; height: 52px;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem;
+    }
+
+    .stat-icon.orange { background: rgba(255,94,0,.15); color: var(--accent); }
+    .stat-icon.blue   { background: rgba(0,120,255,.15); color: #4d9fff; }
+    .stat-icon.green  { background: rgba(0,200,83,.15);  color: #00c853; }
+
+    .stat-value { font-size: 1.8rem; font-weight: 700; line-height: 1; }
+    .stat-label { font-size: .78rem; color: #888; margin-top: 2px; }
+
+    /* ---- Section header ---- */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #ccc;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    /* ---- Album card ---- */
+    .album-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      overflow: hidden;
+      transition: box-shadow .15s;
+    }
+
+    .album-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.5); }
+
+    .album-card.active-album { border-color: var(--accent); }
+
+    .album-header {
+      padding: 14px 18px;
+      background: rgba(255,255,255,.03);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .album-title { font-weight: 600; font-size: .98rem; }
+    .album-desc  { font-size: .8rem; color: #777; margin-top: 1px; }
+
+    .badge-posts {
+      background: rgba(255,94,0,.2);
+      color: var(--accent);
+      border-radius: 20px;
+      padding: 2px 10px;
+      font-size: .75rem;
+      font-weight: 600;
+    }
+
+    /* ---- Add-post form area ---- */
+    .add-post-panel {
+      background: rgba(255,94,0,.05);
+      border-bottom: 1px solid var(--border-color);
+      padding: 16px 18px;
+    }
+
+    /* ---- Post item ---- */
+    .post-item {
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 14px;
+      background: rgba(255,255,255,.02);
+      position: relative;
+    }
+
+    .post-caption {
+      font-size: .9rem;
+      color: #ccc;
+      margin-bottom: 10px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .photo-thumb {
+      width: 80px; height: 80px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      cursor: pointer;
+      transition: transform .15s;
+    }
+
+    .photo-thumb:hover { transform: scale(1.05); }
+
+    /* ---- Empty state ---- */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #555;
+    }
+
+    .empty-state i { font-size: 2.5rem; display: block; margin-bottom: 12px; }
+
+    /* ---- Btn accent ---- */
+    .btn-accent {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      font-weight: 600;
+    }
+
+    .btn-accent:hover { background: var(--accent-light); color: #fff; }
+
+    /* ---- Upload drop zone ---- */
+    .drop-zone {
+      border: 2px dashed var(--border-color);
+      border-radius: 10px;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      background: rgba(255,255,255,.02);
+    }
+
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--accent);
+      background: rgba(255,94,0,.05);
+    }
+
+    .drop-zone input[type=file] {
+      position: absolute; opacity: 0; width: 100%; height: 100%;
+      top: 0; left: 0; cursor: pointer;
+    }
+
+    /* ---- Preview grid ---- */
+    .preview-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .preview-grid img { width: 70px; height: 70px; object-fit: cover; border-radius: 6px; }
+    .preview-grid .remove-thumb {
+      position: relative;
+    }
+    .preview-grid .remove-thumb::after {
+      content: '×';
+      position: absolute; top: -6px; right: -6px;
+      width: 18px; height: 18px;
+      background: #e33; color: #fff;
+      border-radius: 50%; font-size: 12px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      line-height: 18px; text-align: center;
+    }
+
+    /* ---- Modal ---- */
+    .modal-content {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+    }
+
+    .modal-header { border-bottom: 1px solid var(--border-color); }
+    .modal-footer { border-top: 1px solid var(--border-color); }
+
+    /* ---- Form controls ---- */
+    .form-control, .form-control:focus {
+      background: #0f1117;
+      border-color: var(--border-color);
+      color: #e0e0e0;
+    }
+
+    .form-control:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(255,94,0,.15);
+    }
+
+    textarea.form-control { resize: vertical; }
+
+    /* ---- Spinner ---- */
+    .upload-spinner { display: none; }
+
+    /* ---- Lightbox ---- */
+    #lightbox {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.92);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #lightbox.show { display: flex; }
+    #lightbox img { max-width: 92vw; max-height: 90vh; border-radius: 8px; }
+    #lightbox .close-lb {
+      position: absolute; top: 18px; right: 22px;
+      font-size: 2rem; color: #fff; cursor: pointer;
+    }
+  </style>
+</head>
 <body>
 
-<h2>🔥 DASHBOARD VIP 🔥</h2>
-
-<div class="card">
-<p>👥 Users: {{ subs|length }}</p>
-<p>📦 Albums: {{ albums|length }}</p>
+<!-- ========== TOPBAR ========== -->
+<div class="topbar d-flex align-items-center justify-content-between">
+  <span class="brand"><i class="bi bi-fire me-2"></i>DASHBOARD VIP</span>
+  <div class="d-flex align-items-center gap-2">
+    <span class="badge bg-success rounded-pill"><i class="bi bi-circle-fill me-1" style="font-size:.5rem;"></i>Online</span>
+    <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#createAlbumModal">
+      <i class="bi bi-plus-lg me-1"></i>Tạo Album
+    </button>
+  </div>
 </div>
 
-<div class="card">
-<h3>Upload Album</h3>
+<!-- ========== MAIN CONTENT ========== -->
+<div class="container-fluid px-3 px-md-4 py-4" style="max-width:960px; margin:auto;">
 
-<form action="/upload" method="post" enctype="multipart/form-data">
+  <!-- Stats row -->
+  <div class="row g-3 mb-4">
+    <div class="col-4">
+      <div class="stat-card">
+        <div class="stat-icon orange"><i class="bi bi-people-fill"></i></div>
+        <div>
+          <div class="stat-value">{{ subs|length }}</div>
+          <div class="stat-label">Người đăng ký</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="stat-card">
+        <div class="stat-icon blue"><i class="bi bi-images"></i></div>
+        <div>
+          <div class="stat-value">{{ albums|length }}</div>
+          <div class="stat-label">Albums</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="stat-card">
+        <div class="stat-icon green"><i class="bi bi-file-earmark-image"></i></div>
+        <div>
+          <div class="stat-value">{{ total_posts }}</div>
+          <div class="stat-label">Bài viết</div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-<input name="album_id" placeholder="album_2026_04_11" required>
+  <!-- Albums section -->
+  <div class="section-header">
+    <span class="section-title"><i class="bi bi-collection me-2"></i>Albums</span>
+    <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#createAlbumModal">
+      <i class="bi bi-plus-lg me-1"></i>Tạo Album mới
+    </button>
+  </div>
 
-<textarea name="caption" rows="4" class="caption-input" placeholder="Nội dung / Mô tả (Caption)..."></textarea>
+  {% if albums %}
+    {% for album_id, album in albums.items() %}
+    <div class="album-card mb-3 {% if active_album == album_id %}active-album{% endif %}" id="album-{{ album_id }}">
 
-<input type="file" name="images" multiple onchange="previewImages(event)">
+      <!-- Album header -->
+      <div class="album-header">
+        <div class="flex-grow-1">
+          <div class="album-title">
+            <i class="bi bi-folder2-open me-2" style="color:var(--accent);"></i>
+            {{ album.title if album.title else album_id }}
+          </div>
+          {% if album.description %}
+          <div class="album-desc">{{ album.description }}</div>
+          {% endif %}
+        </div>
+        <span class="badge-posts">{{ album.posts|length if album.posts else 0 }} bài</span>
+        <button class="btn btn-sm btn-success ms-2"
+                onclick="toggleAddPost('{{ album_id }}')"
+                title="Thêm bài viết">
+          <i class="bi bi-plus-lg"></i> Thêm bài
+        </button>
+        <form action="/albums/{{ album_id }}/delete" method="post" class="d-inline ms-1"
+              onsubmit="return confirm('Xóa album «{{ album.title }}»?')">
+          <button type="submit" class="btn btn-sm btn-outline-danger" title="Xóa album">
+            <i class="bi bi-trash3"></i>
+          </button>
+        </form>
+      </div>
 
-<div id="preview" class="preview"></div>
+      <!-- Add-post panel (hidden by default) -->
+      <div class="add-post-panel" id="add-post-panel-{{ album_id }}" style="display:none;">
+        <form action="/albums/{{ album_id }}/posts" method="post"
+              enctype="multipart/form-data"
+              onsubmit="showSpinner(this)">
+          <div class="mb-2">
+            <textarea name="caption" class="form-control" rows="3"
+                      placeholder="Caption / Nội dung bài viết..."></textarea>
+          </div>
+          <div class="mb-2 position-relative drop-zone" id="dz-{{ album_id }}"
+               onclick="document.getElementById('fi-{{ album_id }}').click()"
+               ondragover="event.preventDefault(); this.classList.add('dragover')"
+               ondragleave="this.classList.remove('dragover')"
+               ondrop="handleDrop(event,'{{ album_id }}')">
+            <input type="file" name="images" id="fi-{{ album_id }}" multiple accept="image/*"
+                   style="display:none" onchange="previewImages(event,'{{ album_id }}')">
+            <i class="bi bi-cloud-arrow-up fs-3 d-block mb-1 text-muted"></i>
+            <span class="text-muted" style="font-size:.85rem;">Click hoặc kéo thả ảnh vào đây</span>
+          </div>
+          <div class="preview-grid" id="preview-{{ album_id }}"></div>
+          <div class="d-flex gap-2 mt-3">
+            <button type="submit" class="btn btn-accent btn-sm">
+              <span class="upload-spinner spinner-border spinner-border-sm me-1" role="status"></span>
+              <i class="bi bi-upload me-1"></i>Đăng bài
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm"
+                    onclick="toggleAddPost('{{ album_id }}')">Hủy</button>
+          </div>
+        </form>
+      </div>
 
-<button>Upload</button>
-</form>
+      <!-- Posts list -->
+      <div class="p-3">
+        {% set posts = album.posts if album.posts else [] %}
+        {% if posts %}
+          {% for post in posts %}
+          <div class="post-item mb-2">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <div class="post-caption flex-grow-1 me-2">
+                {% if post.caption %}
+                  {{ post.caption }}
+                {% else %}
+                  <span class="text-muted fst-italic" style="font-size:.8rem;">(Không có caption)</span>
+                {% endif %}
+              </div>
+              <form action="/albums/{{ album_id }}/posts/{{ post.id }}/delete" method="post"
+                    onsubmit="return confirm('Xóa bài viết này?')">
+                <button type="submit" class="btn btn-sm btn-outline-danger"
+                        style="padding:2px 8px;" title="Xóa bài">
+                  <i class="bi bi-x-lg"></i>
+                </button>
+              </form>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              {% for photo in post.photos %}
+              <img src="{{ photo.url }}" class="photo-thumb"
+                   onclick="openLightbox('{{ photo.url }}')"
+                   alt="photo">
+              {% endfor %}
+            </div>
+            <div class="mt-1" style="font-size:.72rem; color:#555;">
+              <i class="bi bi-images me-1"></i>{{ post.photos|length }} ảnh
+              {% if post.created_at %}
+                &nbsp;·&nbsp;<i class="bi bi-clock me-1"></i>{{ post.created_at[:10] }}
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="empty-state">
+            <i class="bi bi-inbox"></i>
+            Chưa có bài viết nào. Nhấn <strong>Thêm bài</strong> để đăng.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+
+  {% else %}
+    <div class="album-card p-0">
+      <div class="empty-state py-5">
+        <i class="bi bi-folder-plus" style="font-size:3rem; color:var(--accent);"></i>
+        <p class="mt-2 mb-3">Chưa có album nào.</p>
+        <button class="btn btn-accent" data-bs-toggle="modal" data-bs-target="#createAlbumModal">
+          <i class="bi bi-plus-lg me-1"></i>Tạo Album đầu tiên
+        </button>
+      </div>
+    </div>
+  {% endif %}
+
+</div><!-- /container -->
+
+<!-- ========== CREATE ALBUM MODAL ========== -->
+<div class="modal fade" id="createAlbumModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form action="/albums/create" method="post">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-folder-plus me-2" style="color:var(--accent);"></i>Tạo Album mới</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Tên Album <span class="text-danger">*</span></label>
+            <input name="title" class="form-control" placeholder="VD: Album tháng 4" required autofocus>
+          </div>
+          <div class="mb-1">
+            <label class="form-label fw-semibold">Mô tả <span class="text-muted">(tuỳ chọn)</span></label>
+            <textarea name="description" class="form-control" rows="2"
+                      placeholder="Mô tả ngắn về album..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+          <button type="submit" class="btn btn-accent">
+            <i class="bi bi-check-lg me-1"></i>Tạo Album
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
-<div class="card">
-<h3>Albums</h3>
-
-{% for k, v in albums.items() %}
-<div style="margin-bottom:10px;">
-<b>{{ k }}</b> ({{ v.photos|length }} ảnh)
-<a href="/delete/{{ k }}"><button>Xóa</button></a>
-</div>
-{% endfor %}
-
+<!-- ========== LIGHTBOX ========== -->
+<div id="lightbox" onclick="closeLightbox()">
+  <span class="close-lb" onclick="closeLightbox()">&times;</span>
+  <img id="lightbox-img" src="" alt="preview">
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-function previewImages(event) {
-  let preview = document.getElementById('preview');
-  preview.innerHTML = "";
-
-  for (let file of event.target.files) {
-    let img = document.createElement("img");
-    img.src = URL.createObjectURL(file);
-    preview.appendChild(img);
+  /* ---- toggle add-post panel ---- */
+  function toggleAddPost(albumId) {
+    const panel = document.getElementById('add-post-panel-' + albumId);
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
   }
-}
-</script>
 
+  /* ---- image preview from <input type=file> ---- */
+  function previewImages(event, albumId) {
+    renderPreviews(event.target.files, albumId);
+  }
+
+  /* ---- drag & drop ---- */
+  function handleDrop(event, albumId) {
+    event.preventDefault();
+    document.getElementById('dz-' + albumId).classList.remove('dragover');
+    const input = document.getElementById('fi-' + albumId);
+    const dt = event.dataTransfer;
+    // Assign files to input (DataTransfer trick)
+    try {
+      const fileList = dt.files;
+      // Create a new DataTransfer to set files on the input
+      const transfer = new DataTransfer();
+      for (const f of fileList) transfer.items.add(f);
+      input.files = transfer.files;
+      renderPreviews(fileList, albumId);
+    } catch(e) {
+      console.warn('Drop assign failed', e);
+    }
+  }
+
+  function renderPreviews(files, albumId) {
+    const preview = document.getElementById('preview-' + albumId);
+    preview.innerHTML = '';
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(file);
+      img.style.cssText = 'width:70px;height:70px;object-fit:cover;border-radius:6px;border:1px solid #2a2d35;';
+      preview.appendChild(img);
+    }
+  }
+
+  /* ---- spinner on form submit ---- */
+  function showSpinner(form) {
+    const spinner = form.querySelector('.upload-spinner');
+    if (spinner) spinner.style.display = 'inline-block';
+  }
+
+  /* ---- lightbox ---- */
+  function openLightbox(src) {
+    document.getElementById('lightbox-img').src = src;
+    document.getElementById('lightbox').classList.add('show');
+  }
+
+  function closeLightbox() {
+    document.getElementById('lightbox').classList.remove('show');
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeLightbox();
+  });
+
+  /* ---- scroll to active album after redirect ---- */
+  window.addEventListener('DOMContentLoaded', function() {
+    const params = new URLSearchParams(window.location.search);
+    const albumId = params.get('album');
+    if (albumId) {
+      const el = document.getElementById('album-' + albumId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Auto-open add-post panel if just came from creating a new album (0 posts)
+        const posts = el.querySelectorAll('.post-item');
+        if (posts.length === 0) toggleAddPost(albumId);
+      }
+    }
+  });
+</script>
 </body>
 </html>
