@@ -176,16 +176,23 @@ if BOT_TOKEN:
                     )
 
     def run_bot_thread():
-        asyncio.set_event_loop(asyncio.new_event_loop())
+        # Create new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        ptb_app = Application.builder().token(BOT_TOKEN).build()
+        ptb_app.add_handler(CommandHandler("start", start))
+        ptb_app.add_handler(CommandHandler("settudongguilink", set_time))
+        ptb_app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
+        ptb_app.add_handler(CallbackQueryHandler(album_click))
+        ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
+
+        log.info("Bot starting with run_polling in thread...")
         try:
-            ptb_app = Application.builder().token(BOT_TOKEN).build()
-            ptb_app.add_handler(CommandHandler("start", start))
-            ptb_app.add_handler(CommandHandler("settudongguilink", set_time))
-            ptb_app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
-            ptb_app.add_handler(CallbackQueryHandler(album_click))
-            ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
-            log.info("Bot starting...")
-            ptb_app.run_polling(allowed_updates=["message", "callback_query"], stop_signals=())
+            ptb_app.run_polling(
+                allowed_updates=["message", "callback_query"],
+                stop_signals=None
+            )
         except Exception as e:
             log.error(f"Bot thread error: {e}")
 
