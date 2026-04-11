@@ -325,6 +325,7 @@ if BOT_TOKEN:
             )
         except Exception as e:
             log.error(f"Bot thread error: {e}")
+            raise
 
 else:
     log.warning("TELEGRAM_BOT_TOKEN not set – bot disabled, Flask only")
