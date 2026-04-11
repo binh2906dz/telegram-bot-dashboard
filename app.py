@@ -4,7 +4,7 @@ import uuid
 import asyncio
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Flask, request, redirect, render_template
 
 logging.basicConfig(level=logging.INFO)
@@ -168,7 +168,7 @@ if BOT_TOKEN:
 
     async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
         global _last_sent
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         cfg = load_json(CONFIG_FILE, {"hour": 0, "minute": 0})
 
         if now.hour == cfg["hour"] and now.minute == cfg["minute"]:
