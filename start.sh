@@ -2,7 +2,7 @@
 set -e
 
 echo "=== STARTING APP ==="
-export PORT="${PORT:-8080}"
+export PORT="${PORT:-5000}"
 echo "Using PORT: $PORT"
 
 echo "Starting Telegram Bot in background..."
