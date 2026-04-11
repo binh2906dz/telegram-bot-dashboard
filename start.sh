@@ -1,8 +1,13 @@
 #!/bin/bash
 set -e
 
-# Start the Telegram bot in the background
+echo "Starting bot..."
 python run_bot.py &
+BOT_PID=$!
+echo "Bot started with PID: $BOT_PID"
 
-# Start the Flask web server using Gunicorn in the foreground
-exec gunicorn app:app -b 0.0.0.0:$PORT --workers 1 --timeout 120 --log-level debug
+echo "PORT is ${PORT:-8080}"
+echo "Starting gunicorn..."
+gunicorn app:app -b 0.0.0.0:${PORT:-8080} --workers 1 --timeout 120 --log-level info
+
+wait
