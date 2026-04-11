@@ -10,8 +10,10 @@ if __name__ == "__main__":
 
     while True:
         try:
+            log.info("Starting run_bot_thread()...")
             run_bot_thread()
         except Exception as e:
             log.exception(f"Bot process crashed: {e}")
-            log.info("Restarting bot in 5 seconds...")
-            time.sleep(5)
+
+        log.info("Bot thread exited. Restarting in 5 seconds...")
+        time.sleep(5)
