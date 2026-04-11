@@ -3,7 +3,6 @@ import json
 import uuid
 import asyncio
 import logging
-import threading
 from datetime import datetime, timezone
 from flask import Flask, request, redirect, render_template, jsonify
 
@@ -327,8 +326,6 @@ if BOT_TOKEN:
         except Exception as e:
             log.error(f"Bot thread error: {e}")
 
-    threading.Thread(target=run_bot_thread, daemon=True).start()
-    log.info("Bot thread created")
 else:
     log.warning("TELEGRAM_BOT_TOKEN not set – bot disabled, Flask only")
 
