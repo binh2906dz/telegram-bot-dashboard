@@ -190,7 +190,23 @@ if BOT_TOKEN:
             ptb_app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
             ptb_app.add_handler(CallbackQueryHandler(album_click))
             ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
-            await ptb_app.run_polling()
+            try:
+                await ptb_app.initialize()
+                await ptb_app.start()
+                await ptb_app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+                log.info("Bot polling started")
+                # Keep the event loop alive; the updater runs in the background
+                while True:
+                    await asyncio.sleep(60)
+            except Exception as e:
+                log.error("Bot polling encountered an error: %s", e)
+            finally:
+                try:
+                    await ptb_app.updater.stop()
+                    await ptb_app.stop()
+                    await ptb_app.shutdown()
+                except Exception as e:
+                    log.error("Bot shutdown error: %s", e)
 
         asyncio.run(main())
 
