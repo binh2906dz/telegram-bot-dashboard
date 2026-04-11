@@ -1,83 +1,206 @@
-# Create full corrected app.py from user's file with fixes applied
-
-content = """# FINAL FIXED VERSION - KEEP ORIGINAL LOGIC, FIXED BOT THREAD (NO UPDATER, NO CRASH)
-
 import os
 import json
 import uuid
 import asyncio
 import logging
-import re
 import threading
-import time
-from datetime import datetime, timezone
-from functools import wraps
-from flask import Flask
+from datetime import datetime
+from flask import Flask, request, redirect, render_template
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-ADMIN_ID = os.environ.get("ADMIN_CHAT_ID", "")
-VN_OFFSET = 7
+_admin_str = os.environ.get("ADMIN_CHAT_ID", "")
+ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
 app = Flask(__name__)
 
-# ===== BOT BUILD =====
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+ALBUMS_FILE = "albums.json"
+SUBS_FILE = "subscribers.json"
+CONFIG_FILE = "config.json"
 
-def _build_bot_application():
 
-    async def start(update, context):
-        cid = update.effective_chat.id
+def load_json(file, default):
+    try:
+        with open(file) as f:
+            return json.load(f)
+    except Exception:
+        return default
 
-        m1 = await context.bot.send_message(cid, "🚀 NƠI BÓNG TỐI BẮT ĐẦU... NƠI BẢN NĂNG THỨC TỈNH 🚀")
+
+def save_json(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+# ===== FLASK ROUTES =====
+
+@app.route("/")
+def index():
+    albums = load_json(ALBUMS_FILE, {})
+    subs = load_json(SUBS_FILE, [])
+    return render_template("index.html", albums=albums, subs=subs)
+
+
+@app.route("/upload", methods=["POST"])
+def upload():
+    album_id = request.form.get("album_id", "").strip()
+    if not album_id:
+        return "Missing album_id", 400
+
+    os.makedirs("static/uploads", exist_ok=True)
+    albums = load_json(ALBUMS_FILE, {})
+    photos = []
+    for img in request.files.getlist("images"):
+        if img and img.filename:
+            filename = f"{uuid.uuid4()}_{img.filename}"
+            save_path = os.path.join("static/uploads", filename)
+            img.save(save_path)
+            photos.append({"url": f"/static/uploads/{filename}", "caption": ""})
+
+    albums[album_id] = {"photos": photos}
+    save_json(ALBUMS_FILE, albums)
+    return redirect("/")
+
+
+@app.route("/delete/<album_id>")
+def delete(album_id):
+    albums = load_json(ALBUMS_FILE, {})
+    albums.pop(album_id, None)
+    save_json(ALBUMS_FILE, albums)
+    return redirect("/")
+
+
+@app.route("/healthz")
+def healthz():
+    return "OK", 200
+
+
+# ===== BOT HANDLERS =====
+
+if BOT_TOKEN:
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+    from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+
+    _last_sent = None
+
+    async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_chat.id
+        subs = load_json(SUBS_FILE, [])
+        if user_id not in subs:
+            subs.append(user_id)
+            save_json(SUBS_FILE, subs)
+
+        m1 = await update.message.reply_text("🚀 NƠI BÓNG TỐI BẮT ĐẦU... NƠI BẢN NĂNG THỨC TỈNH 🚀")
         await asyncio.sleep(1)
-        m2 = await context.bot.send_message(cid, "👿 KHÔNG DÀNH CHO NGƯỜI YẾU TIM - CHỈ DÀNH CHO KẺ DÁM KHÁM PHÁ 👿")
+        m2 = await update.message.reply_text("👿 KHÔNG DÀNH CHO NGƯỜI YẾU TIM - CHỈ DÀNH CHO KẺ DÁM KHÁM PHÁ 👿")
         await asyncio.sleep(1)
-        m3 = await context.bot.send_message(cid, "👀 BƯỚC VÀO ĐÂY BẠN SẼ KHÔNG MUỐN QUAY LẠI 👀")
+        m3 = await update.message.reply_text("👀 BƯỚC VÀO ĐÂY BẠN SẼ KHÔNG MUỐN QUAY LẠI 👀")
         await asyncio.sleep(2)
-
-        for m in (m1, m2, m3):
+        for m in [m1, m2, m3]:
             try:
-                await context.bot.delete_message(cid, m.message_id)
-            except:
+                await m.delete()
+            except Exception:
                 pass
 
-        await context.bot.send_message(cid, "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏")
+        keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
+        await update.message.reply_text(
+            "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
 
-    app_bot = Application.builder().token(BOT_TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", start))
+    async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
 
-    return app_bot
+        albums = load_json(ALBUMS_FILE, {})
+        buttons = []
+        for key in sorted(albums.keys()):
+            date = key.replace("album_", "").replace("_", "-")
+            buttons.append([InlineKeyboardButton(f"Link🔥 {date[8:10]}-{date[5:7]}", callback_data=key)])
+        buttons.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="back")])
 
-# ===== FIXED BOT THREAD =====
-def run_bot_thread():
-    if not BOT_TOKEN:
-        log.error("No BOT TOKEN")
-        return
+        await query.edit_message_text("Chọn album:", reply_markup=InlineKeyboardMarkup(buttons))
 
-    async def main():
-        bot = _build_bot_application()
+    async def send_album(chat_id, bot, album):
+        media = []
+        for i, p in enumerate(album["photos"]):
+            if i == 0:
+                media.append(InputMediaPhoto(p["url"], caption=p.get("caption", "")))
+            else:
+                media.append(InputMediaPhoto(p["url"]))
+        await bot.send_media_group(chat_id, media)
 
-        await bot.initialize()
-        await bot.start()
+    async def album_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
 
-        log.info("Bot started successfully")
+        albums = load_json(ALBUMS_FILE, {})
+        album = albums.get(query.data)
+        await query.delete_message()
 
-        # FIX: use run_polling (NO updater, NO crash)
-        await bot.run_polling()
+        if album:
+            await send_album(query.message.chat.id, context.bot, album)
 
-    asyncio.run(main())
+    async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not ADMIN_ID or update.effective_chat.id != ADMIN_ID:
+            return
+        try:
+            time_str = update.message.text.split("_")[1]
+            h, m = map(int, time_str.split(":"))
+            h_utc = (h - 7) % 24
+            save_json(CONFIG_FILE, {"hour": h_utc, "minute": m})
+            await update.message.reply_text(f"Đã set giờ: {h}:{m} (VN)")
+        except Exception:
+            await update.message.reply_text("Sai format")
+
+    async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
+        global _last_sent
+        now = datetime.utcnow()
+        cfg = load_json(CONFIG_FILE, {"hour": 0, "minute": 0})
+
+        if now.hour == cfg["hour"] and now.minute == cfg["minute"]:
+            key = f"{now.hour}:{now.minute}"
+            if _last_sent != key:
+                _last_sent = key
+                albums = load_json(ALBUMS_FILE, {})
+                if not albums:
+                    return
+                latest = sorted(albums.keys())[-1]
+                subs = load_json(SUBS_FILE, [])
+                success, fail = 0, 0
+                for u in subs:
+                    try:
+                        await send_album(u, context.bot, albums[latest])
+                        success += 1
+                    except Exception:
+                        fail += 1
+                if ADMIN_ID:
+                    await context.bot.send_message(
+                        ADMIN_ID,
+                        f"📊 Report\nUsers: {len(subs)}\nOK: {success}\nFail: {fail}",
+                    )
+
+    def run_bot_thread():
+        async def main():
+            ptb_app = Application.builder().token(BOT_TOKEN).build()
+            ptb_app.add_handler(CommandHandler("start", start))
+            ptb_app.add_handler(CommandHandler("settudongguilink", set_time))
+            ptb_app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
+            ptb_app.add_handler(CallbackQueryHandler(album_click))
+            ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
+            await ptb_app.run_polling()
+
+        asyncio.run(main())
+
+    threading.Thread(target=run_bot_thread, daemon=True).start()
+    log.info("Bot thread started")
+else:
+    log.warning("TELEGRAM_BOT_TOKEN not set – bot disabled, Flask only")
+
 
 # ===== MAIN =====
 if __name__ == "__main__":
-    threading.Thread(target=run_bot_thread, daemon=True).start()
-    app.run(host="0.0.0.0", port=5000)
-"""
-
-file_path = "/mnt/data/app_final_fixed.py"
-with open(file_path, "w") as f:
-    f.write(content)
-
-file_path
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
