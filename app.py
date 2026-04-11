@@ -191,7 +191,8 @@ if BOT_TOKEN:
         try:
             ptb_app.run_polling(
                 allowed_updates=["message", "callback_query"],
-                stop_signals=None
+                stop_signals=None,
+                drop_pending_updates=True
             )
         except Exception as e:
             log.error(f"Bot thread error: {e}")
