@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard VIP</title>
+<style>
+body {
+  font-family: Arial;
+  background: #111;
+  color: #fff;
+  padding: 15px;
+}
+.card {
+  background: #1c1c1c;
+  padding: 15px;
+  margin-bottom: 15px;
+  border-radius: 10px;
+}
+button {
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  background: orange;
+  color: black;
+}
+input {
+  padding: 8px;
+  width: 100%;
+  margin-bottom: 10px;
+}
+.preview img {
+  width: 70px;
+  margin: 5px;
+}
+</style>
+</head>
+
+<body>
+
+<h2>🔥 DASHBOARD VIP 🔥</h2>
+
+<div class="card">
+<p>👥 Users: {{ subs|length }}</p>
+<p>📦 Albums: {{ albums|length }}</p>
+</div>
+
+<div class="card">
+<h3>Upload Album</h3>
+
+<form action="/upload" method="post" enctype="multipart/form-data">
+
+<input name="album_id" placeholder="album_2026_04_11" required>
+
+<input type="file" name="images" multiple onchange="previewImages(event)">
+
+<div id="preview" class="preview"></div>
+
+<button>Upload</button>
+</form>
+</div>
+
+<div class="card">
+<h3>Albums</h3>
+
+{% for k, v in albums.items() %}
+<div style="margin-bottom:10px;">
+<b>{{ k }}</b> ({{ v.photos|length }} ảnh)
+<a href="/delete/{{ k }}"><button>Xóa</button></a>
+</div>
+{% endfor %}
+
+</div>
+
+<script>
+function previewImages(event) {
+  let preview = document.getElementById('preview');
+  preview.innerHTML = "";
+
+  for (let file of event.target.files) {
+    let img = document.createElement("img");
+    img.src = URL.createObjectURL(file);
+    preview.appendChild(img);
+  }
+}
+</script>
+
+</body>
+</html>
