@@ -32,6 +32,16 @@ input {
   width: 70px;
   margin: 5px;
 }
+textarea.caption-input {
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 10px;
+  background: #2a2a2a;
+  color: #fff;
+  border: 1px solid #444;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
 </style>
 </head>
 
@@ -50,6 +60,8 @@ input {
 <form action="/upload" method="post" enctype="multipart/form-data">
 
 <input name="album_id" placeholder="album_2026_04_11" required>
+
+<textarea name="caption" rows="4" class="caption-input" placeholder="Nội dung / Mô tả (Caption)..."></textarea>
 
 <input type="file" name="images" multiple onchange="previewImages(event)">
 
