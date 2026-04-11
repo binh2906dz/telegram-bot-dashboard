@@ -62,10 +62,17 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_album(chat_id, bot, album):
     media = []
     for i, p in enumerate(album["photos"]):
-        if i == 0:
-            media.append(InputMediaPhoto(p["url"], caption=p.get("caption", "")))
+        url = p["url"]
+        if url.startswith("/static/uploads/"):
+            file_path = url.lstrip("/")
+            with open(file_path, "rb") as fh:
+                photo_data = fh.read()
         else:
-            media.append(InputMediaPhoto(p["url"]))
+            photo_data = url
+        if i == 0:
+            media.append(InputMediaPhoto(photo_data, caption=p.get("caption", "")))
+        else:
+            media.append(InputMediaPhoto(photo_data))
 
     await bot.send_media_group(chat_id, media)
 
@@ -73,13 +80,22 @@ async def album_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    if query.data == "back":
+        keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
+        await query.edit_message_text(
+            "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
     albums = load_json("albums.json", {})
     album = albums.get(query.data)
 
+    chat_id = query.message.chat.id
     await query.delete_message()
 
     if album:
-        await send_album(query.message.chat.id, context.bot, album)
+        await send_album(chat_id, context.bot, album)
 
 # ================= SET TIME =================
 async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
