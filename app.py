@@ -22,10 +22,20 @@ SUBS_FILE = "subscribers.json"
 CONFIG_FILE = "config.json"
 
 
+_cache: dict = {}  # {file: {"mtime": float, "data": ...}}
+
+
 def load_json(file, default):
     try:
+        mtime = os.path.getmtime(file)
+        entry = _cache.get(file)
+        if entry and entry["mtime"] == mtime:
+            return entry["data"]
         with open(file) as f:
-            return json.load(f)
+            data = json.load(f)
+        # Re-check mtime after reading so the cached value reflects the on-disk state
+        _cache[file] = {"mtime": os.path.getmtime(file), "data": data}
+        return data
     except Exception:
         return default
 
@@ -33,6 +43,10 @@ def load_json(file, default):
 def save_json(file, data):
     with open(file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    try:
+        _cache[file] = {"mtime": os.path.getmtime(file), "data": data}
+    except Exception:
+        _cache.pop(file, None)
 
 
 def total_posts(albums):
@@ -215,36 +229,32 @@ if BOT_TOKEN:
 
     async def send_album(chat_id, bot, album):
         """Send all posts in an album (supports both new posts[] format and legacy photos[] format)."""
+        # Normalise to a list of (photos_list, caption) tuples
         if "posts" in album:
-            for post in album["posts"]:
-                media = []
-                for i, p in enumerate(post.get("photos", [])):
+            groups = [(post.get("photos", []), post.get("caption", "")) for post in album["posts"]]
+        else:
+            # Legacy format: album["photos"] – treat as a single group
+            groups = [(album.get("photos", []), "")]
+
+        for photos_list, group_caption in groups:
+            media = []
+            open_files = []
+            try:
+                for i, p in enumerate(photos_list):
                     url = p["url"]
                     if url.startswith("/static/uploads/"):
-                        file_path = url.lstrip("/")
-                        with open(file_path, "rb") as fh:
-                            photo_data = fh.read()
+                        f = open(url.lstrip("/"), "rb")
+                        open_files.append(f)
+                        media_src = f
                     else:
-                        photo_data = url
-                    caption = post.get("caption", "") if i == 0 else ""
-                    media.append(InputMediaPhoto(photo_data, caption=caption))
+                        media_src = url
+                    caption = group_caption if i == 0 else ""
+                    media.append(InputMediaPhoto(media_src, caption=caption))
                 if media:
                     await bot.send_media_group(chat_id, media)
-        else:
-            # Legacy format: album["photos"]
-            media = []
-            for i, p in enumerate(album.get("photos", [])):
-                url = p["url"]
-                if url.startswith("/static/uploads/"):
-                    file_path = url.lstrip("/")
-                    with open(file_path, "rb") as fh:
-                        photo_data = fh.read()
-                else:
-                    photo_data = url
-                caption = p.get("caption", "") if i == 0 else ""
-                media.append(InputMediaPhoto(photo_data, caption=caption))
-            if media:
-                await bot.send_media_group(chat_id, media)
+            finally:
+                for f in open_files:
+                    f.close()
 
     async def album_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
