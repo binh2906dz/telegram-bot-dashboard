@@ -9,6 +9,7 @@ from flask import Flask, request, redirect, render_template
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 _admin_str = os.environ.get("ADMIN_CHAT_ID", "")
