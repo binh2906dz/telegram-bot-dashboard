@@ -64,9 +64,12 @@ async def send_album(chat_id, bot, album):
     for i, p in enumerate(album["photos"]):
         url = p["url"]
         if url.startswith("/static/uploads/"):
-            file_path = url.lstrip("/")
-            with open(file_path, "rb") as fh:
-                photo_data = fh.read()
+            file_path = url[1:]
+            try:
+                with open(file_path, "rb") as fh:
+                    photo_data = fh.read()
+            except OSError:
+                continue
         else:
             photo_data = url
         if i == 0:
