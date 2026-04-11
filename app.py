@@ -176,33 +176,16 @@ if BOT_TOKEN:
                     )
 
     def run_bot_thread():
-        # Create new event loop for this thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        async def main():
+        asyncio.set_event_loop(asyncio.new_event_loop())
+        try:
             ptb_app = Application.builder().token(BOT_TOKEN).build()
             ptb_app.add_handler(CommandHandler("start", start))
             ptb_app.add_handler(CommandHandler("settudongguilink", set_time))
             ptb_app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
             ptb_app.add_handler(CallbackQueryHandler(album_click))
             ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
-            
-            log.info("Bot starting with new event loop...")
-            await ptb_app.initialize()
-            await ptb_app.start()
-            log.info("Bot initialized and started")
-            
-            try:
-                await ptb_app.updater.start_polling(allowed_updates=["message", "callback_query"])
-                log.info("Bot polling started")
-            except Exception as e:
-                log.error(f"Polling error: {e}")
-            finally:
-                await ptb_app.stop()
-
-        try:
-            loop.run_until_complete(main())
+            log.info("Bot starting...")
+            ptb_app.run_polling(allowed_updates=["message", "callback_query"], stop_signals=())
         except Exception as e:
             log.error(f"Bot thread error: {e}")
 
