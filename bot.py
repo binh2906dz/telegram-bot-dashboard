@@ -119,7 +119,7 @@ last_sent = None
 
 async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
     global last_sent
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     cfg = load_json("config.json", {"hour": 0, "minute": 0})
 
     if now.hour == cfg["hour"] and now.minute == cfg["minute"]:
