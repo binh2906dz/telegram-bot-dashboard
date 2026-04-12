@@ -43,6 +43,8 @@ SUBS_FILE = "subscribers.json"
 CONFIG_FILE = "config.json"
 BANNED_FILE = "banned.json"
 BOTS_FILE = "bots.json"
+MESSAGES_FILE = "messages.json"
+STATS_FILE = "stats.json"
 
 # ===== CLOUDINARY CONFIG =====
 # Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET
@@ -85,6 +87,24 @@ def save_json(file, data):
 
 def total_posts(albums):
     return sum(len(a.get("posts", [])) for a in albums.values() if isinstance(a, dict))
+
+
+def subs_file(bot_id: str) -> str:
+    """Return per-bot subscriber file path, falling back to global file."""
+    if not bot_id or bot_id == "env_default":
+        return SUBS_FILE
+    return f"subs_{bot_id}.json"
+
+
+def increment_messages_sent(bot_id: str, count: int):
+    """Increment the messages-sent counter for a bot in stats.json."""
+    if count <= 0:
+        return
+    stats = load_json(STATS_FILE, {})
+    b = stats.get(bot_id, {})
+    b["messages_sent"] = b.get("messages_sent", 0) + count
+    stats[bot_id] = b
+    save_json(STATS_FILE, stats)
 
 
 # ===== AUTH HELPERS =====
@@ -201,11 +221,16 @@ def index():
     albums = load_json(ALBUMS_FILE, {})
     subs = load_json(SUBS_FILE, [])
     bots = load_json(BOTS_FILE, [])
+    messages_cfg = load_json(MESSAGES_FILE, {
+        "start_text": "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏",
+        "buttons": [{"text": "🔥 CHẠM LÀ NGHIỆN 🔥", "callback_data": "menu", "url": ""}],
+    })
+    cfg = load_json(CONFIG_FILE, {"hour": 0, "minute": 0})
     active_album = request.args.get("album", "")
     return render_template("index.html", albums=albums, subs=subs,
                            active_album=active_album, total_posts=total_posts(albums),
                            role=session.get("role", ""), username=session.get("username", ""),
-                           bots=bots)
+                           bots=bots, messages_cfg=messages_cfg, cfg=cfg)
 
 
 # --- Album management ---
@@ -488,43 +513,85 @@ def delete_bot(bot_id):
     return jsonify({"ok": True})
 
 
+@app.route("/bots/health", methods=["GET"])
+@owner_required
+def bots_health():
+    """Return health status and per-bot stats for all bots in bots.json."""
+    bots_list = load_json(BOTS_FILE, [])
+    stats = load_json(STATS_FILE, {})
+    result = []
+    for bot in bots_list:
+        token = (bot.get("token") or "").strip()
+        bot_id = bot.get("id", "")
+        status = "ERROR"
+        if token:
+            try:
+                resp = httpx.get(
+                    f"https://api.telegram.org/bot{token}/getMe",
+                    timeout=5,
+                )
+                if resp.status_code == 200:
+                    status = "LIVE"
+                elif resp.status_code == 401:
+                    status = "BAN"
+                else:
+                    status = "ERROR"
+            except Exception:
+                status = "ERROR"
+        bot_subs = load_json(subs_file(bot_id), [])
+        if not bot_subs:
+            bot_subs = load_json(SUBS_FILE, [])
+        bot_stats = stats.get(bot_id, {})
+        result.append({
+            "id": bot_id,
+            "status": status,
+            "subs_count": len(bot_subs),
+            "messages_sent": bot_stats.get("messages_sent", 0),
+        })
+    return jsonify(result)
+
+
+@app.route("/messages", methods=["GET"])
+@login_required
+def get_messages():
+    """Return current custom message configuration."""
+    cfg = load_json(MESSAGES_FILE, {
+        "start_text": "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏",
+        "buttons": [{"text": "🔥 CHẠM LÀ NGHIỆN 🔥", "callback_data": "menu", "url": ""}],
+    })
+    return jsonify(cfg)
+
+
+@app.route("/messages", methods=["POST"])
+@login_required
+def save_messages():
+    """Save custom start message text and inline button configuration."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"ok": False, "error": "Dữ liệu không hợp lệ"}), 400
+    start_text = str(data.get("start_text", "")).strip()
+    raw_buttons = data.get("buttons", [])
+    clean_buttons = []
+    for btn in raw_buttons:
+        if not isinstance(btn, dict):
+            continue
+        text = str(btn.get("text", "")).strip()
+        if not text:
+            continue
+        url = str(btn.get("url", "")).strip()
+        cb = str(btn.get("callback_data", "")).strip()
+        clean_buttons.append({"text": text, "url": url, "callback_data": cb})
+    save_json(MESSAGES_FILE, {"start_text": start_text, "buttons": clean_buttons})
+    return jsonify({"ok": True})
+
+
 # ===== BOT HANDLERS =====
 
 if BOT_TOKEN or load_json(BOTS_FILE, []):
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
     from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-    # ---- Shared handlers (no per-bot admin check needed) ----
-
-    async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_chat.id
-        # Reject banned users
-        banned = load_json(BANNED_FILE, [])
-        if user_id in banned:
-            await update.message.reply_text("⛔ Bạn đã bị cấm sử dụng bot này.")
-            return
-        subs = load_json(SUBS_FILE, [])
-        if user_id not in subs:
-            subs.append(user_id)
-            save_json(SUBS_FILE, subs)
-
-        m1 = await update.message.reply_text("🚀 NƠI BÓNG TỐI BẮT ĐẦU... NƠI BẢN NĂNG THỨC TỈNH 🚀")
-        await asyncio.sleep(1)
-        m2 = await update.message.reply_text("👿 KHÔNG DÀNH CHO NGƯỜI YẾU TIM - CHỈ DÀNH CHO KẺ DÁM KHÁM PHÁ 👿")
-        await asyncio.sleep(1)
-        m3 = await update.message.reply_text("👀 BƯỚC VÀO ĐÂY BẠN SẼ KHÔNG MUỐN QUAY LẠI 👀")
-        await asyncio.sleep(2)
-        for m in [m1, m2, m3]:
-            try:
-                await m.delete()
-            except Exception:
-                pass
-
-        keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
-        await update.message.reply_text(
-            "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
+    # ---- Shared handlers (no per-bot subscriber state needed) ----
 
     async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -571,9 +638,23 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         await query.answer()
 
         if query.data == "back":
-            keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
+            msg_cfg = load_json(MESSAGES_FILE, {})
+            back_text = msg_cfg.get("start_text", "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏")
+            back_btns = msg_cfg.get("buttons", [])
+            if back_btns:
+                keyboard = []
+                for btn in back_btns:
+                    t = btn.get("text", "")
+                    u = btn.get("url", "")
+                    cb = btn.get("callback_data", "")
+                    if t and u:
+                        keyboard.append([InlineKeyboardButton(t, url=u)])
+                    elif t and cb:
+                        keyboard.append([InlineKeyboardButton(t, callback_data=cb)])
+            else:
+                keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
             await query.edit_message_text(
-                "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏",
+                back_text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
             return
@@ -588,11 +669,59 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
 
     # ---- Per-bot application factory ----
 
-    def _build_ptb_app(token: str, bot_admin_id):
+    def _build_ptb_app(token: str, bot_admin_id, bot_cfg_id: str = "env_default"):
         """Build and return a PTB Application for one bot token, with admin handlers
-        bound to bot_admin_id via closures."""
+        and subscriber state bound to bot_cfg_id via closures."""
 
         _last_sent = [None]  # mutable list so the nested coroutine can update it
+        _subs_file = subs_file(bot_cfg_id)
+
+        async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            user_id = update.effective_chat.id
+            banned = load_json(BANNED_FILE, [])
+            if user_id in banned:
+                await update.message.reply_text("⛔ Bạn đã bị cấm sử dụng bot này.")
+                return
+            bot_subs = load_json(_subs_file, [])
+            if user_id not in bot_subs:
+                bot_subs.append(user_id)
+                save_json(_subs_file, bot_subs)
+
+            m1 = await update.message.reply_text("🚀 NƠI BÓNG TỐI BẮT ĐẦU... NƠI BẢN NĂNG THỨC TỈNH 🚀")
+            await asyncio.sleep(1)
+            m2 = await update.message.reply_text("👿 KHÔNG DÀNH CHO NGƯỜI YẾU TIM - CHỈ DÀNH CHO KẺ DÁM KHÁM PHÁ 👿")
+            await asyncio.sleep(1)
+            m3 = await update.message.reply_text("👀 BƯỚC VÀO ĐÂY BẠN SẼ KHÔNG MUỐN QUAY LẠI 👀")
+            await asyncio.sleep(2)
+            for m in [m1, m2, m3]:
+                try:
+                    await m.delete()
+                except Exception:
+                    pass
+
+            # Load custom message config in real-time
+            msg_cfg = load_json(MESSAGES_FILE, {})
+            start_text = msg_cfg.get("start_text", "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏")
+            custom_buttons = msg_cfg.get("buttons", [])
+            if custom_buttons:
+                keyboard = []
+                for btn in custom_buttons:
+                    t = btn.get("text", "")
+                    u = btn.get("url", "")
+                    cb = btn.get("callback_data", "")
+                    if t and u:
+                        keyboard.append([InlineKeyboardButton(t, url=u)])
+                    elif t and cb:
+                        keyboard.append([InlineKeyboardButton(t, callback_data=cb)])
+                if not keyboard:
+                    keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
+            else:
+                keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
+
+            await update.message.reply_text(
+                start_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
 
         async def set_time_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not bot_admin_id or update.effective_chat.id != bot_admin_id:
@@ -611,14 +740,17 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not bot_admin_id or update.effective_chat.id != bot_admin_id:
                 return
-            subs = load_json(SUBS_FILE, [])
+            bot_subs = load_json(_subs_file, [])
             albums = load_json(ALBUMS_FILE, {})
             total = total_posts(albums)
+            stats = load_json(STATS_FILE, {})
+            sent = stats.get(bot_cfg_id, {}).get("messages_sent", 0)
             await update.message.reply_text(
                 f"📊 Thống kê Bot:\n"
-                f"👥 Người đăng ký: {len(subs)}\n"
+                f"👥 Người đăng ký: {len(bot_subs)}\n"
                 f"📁 Albums: {len(albums)}\n"
-                f"📝 Bài viết: {total}"
+                f"📝 Bài viết: {total}\n"
+                f"📤 Tin đã gửi: {sent}"
             )
 
         async def sendall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -628,17 +760,18 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
             if not message_text:
                 await update.message.reply_text("Cú pháp: /sendall <nội dung tin nhắn>")
                 return
-            subs = load_json(SUBS_FILE, [])
-            if not subs:
+            bot_subs = load_json(_subs_file, [])
+            if not bot_subs:
                 await update.message.reply_text("Chưa có người đăng ký nào.")
                 return
             success, fail = 0, 0
-            for user_id in subs:
+            for user_id in bot_subs:
                 try:
                     await context.bot.send_message(user_id, message_text)
                     success += 1
                 except Exception:
                     fail += 1
+            increment_messages_sent(bot_cfg_id, success)
             await update.message.reply_text(
                 f"📢 Đã gửi thông báo!\n✅ Thành công: {success}\n❌ Thất bại: {fail}"
             )
@@ -650,10 +783,10 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                 await update.message.reply_text("Cú pháp: /ban <user_id>")
                 return
             target_id = int(context.args[0])
-            subs = load_json(SUBS_FILE, [])
-            if target_id in subs:
-                subs.remove(target_id)
-                save_json(SUBS_FILE, subs)
+            bot_subs = load_json(_subs_file, [])
+            if target_id in bot_subs:
+                bot_subs.remove(target_id)
+                save_json(_subs_file, bot_subs)
             banned = load_json(BANNED_FILE, [])
             if target_id not in banned:
                 banned.append(target_id)
@@ -671,18 +804,19 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                     if not albums:
                         return
                     latest = sorted(albums.keys())[-1]
-                    subs = load_json(SUBS_FILE, [])
+                    bot_subs = load_json(_subs_file, [])
                     success, fail = 0, 0
-                    for u in subs:
+                    for u in bot_subs:
                         try:
                             await send_album(u, context.bot, albums[latest])
                             success += 1
                         except Exception:
                             fail += 1
+                    increment_messages_sent(bot_cfg_id, success)
                     if bot_admin_id:
                         await context.bot.send_message(
                             bot_admin_id,
-                            f"📊 Report\nUsers: {len(subs)}\nOK: {success}\nFail: {fail}",
+                            f"📊 Report\nUsers: {len(bot_subs)}\nOK: {success}\nFail: {fail}",
                         )
 
         async def daily_backup_job(context: ContextTypes.DEFAULT_TYPE):
@@ -728,7 +862,8 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                     continue
                 _aid_raw = cfg_entry.get("admin_id")
                 _aid = int(_aid_raw) if _aid_raw and str(_aid_raw).isdigit() else ADMIN_ID
-                ptb_apps.append(_build_ptb_app(token, _aid))
+                _bid = cfg_entry.get("id", "env_default")
+                ptb_apps.append(_build_ptb_app(token, _aid, _bid))
 
             if not ptb_apps:
                 log.warning("No valid bot tokens found – bot disabled")
