@@ -1,10 +1,16 @@
+import io
 import os
 import json
 import uuid
 import asyncio
 import logging
-from datetime import datetime, timezone
-from flask import Flask, request, redirect, render_template, jsonify
+import zipfile
+from datetime import datetime, timezone, timedelta
+from flask import Flask, request, redirect, render_template, jsonify, Response
+
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
@@ -20,6 +26,15 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
 ALBUMS_FILE = "albums.json"
 SUBS_FILE = "subscribers.json"
 CONFIG_FILE = "config.json"
+
+# ===== CLOUDINARY CONFIG =====
+cloudinary.config(
+    cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME", "dklzj37zf"),
+    api_key=os.environ.get("CLOUDINARY_API_KEY", "769787428559636"),
+    api_secret=os.environ.get("CLOUDINARY_API_SECRET", "1AA05R--Hd9qClIRiN1_wB8LaI4"),
+    secure=True,
+)
+CLOUDINARY_BACKUP_FOLDER = "backups"
 
 
 _cache: dict = {}  # {file: {"mtime": float, "data": ...}}
@@ -51,6 +66,59 @@ def save_json(file, data):
 
 def total_posts(albums):
     return sum(len(a.get("posts", [])) for a in albums.values() if isinstance(a, dict))
+
+
+# ===== CLOUDINARY HELPERS =====
+
+def upload_to_cloudinary(file_stream, original_filename: str) -> str:
+    """Upload a file stream to Cloudinary and return the secure URL."""
+    public_id = f"uploads/{uuid.uuid4().hex}"
+    result = cloudinary.uploader.upload(
+        file_stream,
+        public_id=public_id,
+        resource_type="image",
+        use_filename=False,
+        unique_filename=False,
+    )
+    return result["secure_url"]
+
+
+def run_daily_backup():
+    """Package JSON data files into a zip and upload to Cloudinary backups/ folder.
+    Deletes the previous day's backup to keep only the latest."""
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    yesterday_str = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    backup_public_id = f"{CLOUDINARY_BACKUP_FOLDER}/backup_{today_str}"
+    old_public_id = f"{CLOUDINARY_BACKUP_FOLDER}/backup_{yesterday_str}"
+
+    # Delete yesterday's backup (raw resource type)
+    try:
+        cloudinary.uploader.destroy(old_public_id, resource_type="raw", invalidate=True)
+        log.info(f"Deleted old backup: {old_public_id}")
+    except Exception as e:
+        log.warning(f"Could not delete old backup {old_public_id}: {e}")
+
+    # Build zip in memory
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fname in (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE):
+            try:
+                with open(fname, "rb") as f:
+                    zf.writestr(fname, f.read())
+            except FileNotFoundError:
+                zf.writestr(fname, b"{}")
+    buf.seek(0)
+
+    # Upload to Cloudinary as raw file
+    result = cloudinary.uploader.upload(
+        buf,
+        public_id=backup_public_id,
+        resource_type="raw",
+        use_filename=False,
+        unique_filename=False,
+    )
+    log.info(f"Backup uploaded to Cloudinary: {result.get('secure_url')}")
+    return result.get("secure_url")
 
 
 # ===== FLASK ROUTES =====
@@ -100,14 +168,14 @@ def add_post(album_id):
     albums = load_json(ALBUMS_FILE, {})
     if album_id not in albums:
         return "Album not found", 404
-    os.makedirs("static/uploads", exist_ok=True)
     photos = []
     for img in request.files.getlist("images"):
         if img and img.filename:
-            filename = f"{uuid.uuid4().hex}_{img.filename}"
-            save_path = os.path.join("static/uploads", filename)
-            img.save(save_path)
-            photos.append({"url": f"/static/uploads/{filename}"})
+            try:
+                url = upload_to_cloudinary(img.stream, img.filename)
+                photos.append({"url": url})
+            except Exception as e:
+                log.error(f"Cloudinary upload failed: {e}")
     post = {
         "id": uuid.uuid4().hex,
         "caption": caption,
@@ -140,7 +208,6 @@ def upload():
     caption_text = request.form.get("caption", "").strip()
     if not album_id:
         return "Missing album_id", 400
-    os.makedirs("static/uploads", exist_ok=True)
     albums = load_json(ALBUMS_FILE, {})
     if album_id not in albums:
         albums[album_id] = {
@@ -152,10 +219,11 @@ def upload():
     photos = []
     for img in request.files.getlist("images"):
         if img and img.filename:
-            filename = f"{uuid.uuid4().hex}_{img.filename}"
-            save_path = os.path.join("static/uploads", filename)
-            img.save(save_path)
-            photos.append({"url": f"/static/uploads/{filename}"})
+            try:
+                url = upload_to_cloudinary(img.stream, img.filename)
+                photos.append({"url": url})
+            except Exception as e:
+                log.error(f"Cloudinary upload failed: {e}")
     if photos:
         post = {
             "id": uuid.uuid4().hex,
@@ -179,6 +247,31 @@ def delete(album_id):
 @app.route("/healthz")
 def healthz():
     return "OK", 200
+
+
+@app.route("/backup/download")
+def backup_download():
+    """Admin-only endpoint to download a manual backup of all JSON data files."""
+    admin_key = os.environ.get("ADMIN_SECRET_KEY", "")
+    provided_key = request.args.get("key", "")
+    if admin_key and provided_key != admin_key:
+        return "Unauthorized", 401
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fname in (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE):
+            try:
+                with open(fname, "rb") as f:
+                    zf.writestr(fname, f.read())
+            except FileNotFoundError:
+                zf.writestr(fname, b"{}")
+    buf.seek(0)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return Response(
+        buf.read(),
+        mimetype="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=backup_{timestamp}.zip"},
+    )
 
 
 # ===== BOT HANDLERS =====
@@ -243,10 +336,12 @@ if BOT_TOKEN:
                 for i, p in enumerate(photos_list):
                     url = p["url"]
                     if url.startswith("/static/uploads/"):
+                        # Legacy local file fallback
                         f = open(url.lstrip("/"), "rb")
                         open_files.append(f)
                         media_src = f
                     else:
+                        # Cloudinary or any external URL – use directly
                         media_src = url
                     caption = group_caption if i == 0 else ""
                     media.append(InputMediaPhoto(media_src, caption=caption))
@@ -315,6 +410,17 @@ if BOT_TOKEN:
                         f"📊 Report\nUsers: {len(subs)}\nOK: {success}\nFail: {fail}",
                     )
 
+    async def daily_backup_job(context: ContextTypes.DEFAULT_TYPE):
+        """APScheduler job that runs once a day to back up JSON data to Cloudinary."""
+        try:
+            url = run_daily_backup()
+            if ADMIN_ID:
+                await context.bot.send_message(ADMIN_ID, f"✅ Backup completed!\n🔗 {url}")
+        except Exception as e:
+            log.error(f"Daily backup failed: {e}")
+            if ADMIN_ID:
+                await context.bot.send_message(ADMIN_ID, f"❌ Backup failed: {e}")
+
     def run_bot_thread():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -325,6 +431,9 @@ if BOT_TOKEN:
         ptb_app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
         ptb_app.add_handler(CallbackQueryHandler(album_click))
         ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
+        # Daily backup at 01:00 UTC
+        from datetime import time as dt_time
+        ptb_app.job_queue.run_daily(daily_backup_job, time=dt_time(1, 0, 0, tzinfo=timezone.utc))
 
         log.info("Bot starting with run_polling in thread...")
         try:
