@@ -47,6 +47,7 @@ BANNED_FILE = "banned.json"
 BOTS_FILE = "bots.json"
 MESSAGES_FILE = "messages.json"
 STATS_FILE = "stats.json"
+SLOGANS_FILE = "slogans.json"
 
 # ===== CLOUDINARY CONFIG =====
 # Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET
@@ -137,7 +138,7 @@ def get_messages_flow() -> dict:
 
 def _backup_files_to_zip(zf: zipfile.ZipFile):
     """Write all data files into a ZipFile object."""
-    for fname in (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE, BOTS_FILE, MESSAGES_FILE, BANNED_FILE):
+    for fname in (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE, BOTS_FILE, MESSAGES_FILE, BANNED_FILE, SLOGANS_FILE):
         try:
             with open(fname, "rb") as f:
                 zf.writestr(fname, f.read())
@@ -265,11 +266,12 @@ def index():
         "buttons": [{"text": "🔥 CHẠM LÀ NGHIỆN 🔥", "callback_data": "menu", "url": ""}],
     })
     cfg = load_json(CONFIG_FILE, {"hour": 0, "minute": 0})
+    slogans = load_json(SLOGANS_FILE, {"enabled": True, "items": []})
     active_album = request.args.get("album", "")
     return render_template("index.html", albums=albums, subs=subs,
                            active_album=active_album, total_posts=total_posts(albums),
                            role=session.get("role", ""), username=session.get("username", ""),
-                           bots=bots, messages_cfg=messages_cfg, cfg=cfg)
+                           bots=bots, messages_cfg=messages_cfg, cfg=cfg, slogans=slogans)
 
 
 # --- Album management ---
@@ -661,6 +663,40 @@ def delete_message_node(node_id):
     return jsonify({"ok": True})
 
 
+@app.route("/slogans", methods=["GET"])
+@login_required
+def get_slogans():
+    """Return current slogans configuration."""
+    data = load_json(SLOGANS_FILE, {"enabled": True, "items": []})
+    return jsonify(data)
+
+
+@app.route("/slogans", methods=["POST"])
+@login_required
+def save_slogans():
+    """Save slogans configuration."""
+    data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "Dữ liệu không hợp lệ"}), 400
+    enabled = bool(data.get("enabled", True))
+    raw_items = data.get("items", [])
+    clean_items = []
+    if isinstance(raw_items, list):
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text", "")).strip()
+            try:
+                delay = float(item.get("delay_after", 1))
+                delay = max(0, min(30, delay))
+            except (TypeError, ValueError):
+                delay = 1.0
+            if text:
+                clean_items.append({"text": text, "delay_after": delay})
+    save_json(SLOGANS_FILE, {"enabled": enabled, "items": clean_items})
+    return jsonify({"ok": True})
+
+
 # ===== BOT HANDLERS =====
 
 if BOT_TOKEN or load_json(BOTS_FILE, []):
@@ -790,6 +826,28 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
             if user_id not in bot_subs:
                 bot_subs.append(user_id)
                 save_json(_subs_file, bot_subs)
+
+            # Send slogans sequentially if enabled
+            slogans_cfg = load_json(SLOGANS_FILE, {"enabled": False, "items": []})
+            if slogans_cfg.get("enabled") and slogans_cfg.get("items"):
+                slogan_msgs = []
+                for item in slogans_cfg["items"]:
+                    text = str(item.get("text", "")).strip()
+                    try:
+                        delay = float(item.get("delay_after", 1))
+                        delay = max(0, min(30, delay))
+                    except (TypeError, ValueError):
+                        delay = 1.0
+                    if text:
+                        msg = await update.message.reply_text(text)
+                        slogan_msgs.append(msg)
+                        await asyncio.sleep(delay)
+                # Delete all slogan messages
+                for m in slogan_msgs:
+                    try:
+                        await m.delete()
+                    except Exception:
+                        pass
 
             # Load message flow in real-time
             flow = get_messages_flow()

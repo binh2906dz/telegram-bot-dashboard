@@ -571,17 +571,55 @@
       {% else %}
       <div class="empty-state py-4">
         <i class="bi bi-robot" style="font-size:2rem; color:var(--accent);"></i>
-        <p class="mt-2 mb-0" style="font-size:.9rem;">Chưa có bot nào được thêm.<br>
-          <span class="text-muted" style="font-size:.8rem;">Bot mặc định (từ biến <code>TELEGRAM_BOT_TOKEN</code>) đang được sử dụng.</span>
+        <p class="mt-2 mb-0 text-light" style="font-size:.9rem;">Chưa có bot nào được thêm.<br>
+          <span style="font-size:.8rem; color:#aaa;">Bot mặc định (từ biến <code>TELEGRAM_BOT_TOKEN</code>) đang được sử dụng.</span>
         </p>
       </div>
       {% endif %}
     </div>
     <div class="p-3 pt-0">
-      <div class="text-muted" style="font-size:.78rem;">
+      <div style="font-size:.78rem; color:#aaa;">
         <i class="bi bi-info-circle me-1"></i>
         Sau khi thêm hoặc xóa bot, vui lòng <strong>khởi động lại server</strong> để áp dụng thay đổi.
       </div>
+    </div>
+  </div>
+
+  <!-- ========== QUẢN LÝ SLOGAN SECTION ========== -->
+  <div class="section-header mt-5">
+    <span class="section-title"><i class="bi bi-chat-quote me-2"></i>Quản lý Slogan (Khi Start)</span>
+    <div class="d-flex gap-2 align-items-center">
+      <div class="form-check form-switch mb-0 me-1">
+        <input class="form-check-input" type="checkbox" role="switch" id="sloganEnabled"
+               onchange="toggleSloganEnabled(this)">
+        <label class="form-check-label text-light" for="sloganEnabled" id="sloganEnabledLabel">Bật</label>
+      </div>
+      <button class="btn btn-sm btn-accent" onclick="showAddSloganModal()">
+        <i class="bi bi-plus-lg me-1"></i>Thêm Slogan
+      </button>
+    </div>
+  </div>
+
+  <div class="album-card mb-4 p-0">
+    <div class="p-3 pb-2" style="border-bottom:1px solid var(--border-color);">
+      <div style="font-size:.82rem; color:#bbb;">
+        <i class="bi bi-info-circle me-1"></i>
+        Các câu slogan sẽ lần lượt được gửi sau khi người dùng nhấn <code>/start</code>,
+        sau đó <strong>tự động xóa</strong> và hiển thị tin nhắn chính.
+        Mỗi slogan có thể cài <strong>thời gian chờ</strong> (giây) trước khi gửi câu tiếp theo.
+      </div>
+    </div>
+    <div class="p-3">
+      <div id="sloganList">
+        <div class="text-center py-4" style="color:#888;">
+          <span class="spinner-border spinner-border-sm me-2" role="status"></span>Đang tải...
+        </div>
+      </div>
+    </div>
+    <div class="p-3 pt-0 d-flex gap-2 justify-content-end">
+      <button class="btn btn-sm btn-accent" onclick="doSaveSlogans(this)">
+        <i class="bi bi-floppy me-1"></i>Lưu Slogan
+      </button>
     </div>
   </div>
 
@@ -595,7 +633,7 @@
 
   <div class="album-card mb-4 p-0">
     <div class="p-3 pb-2" style="border-bottom:1px solid var(--border-color);">
-      <div class="text-muted" style="font-size:.82rem;">
+      <div style="font-size:.82rem; color:#bbb;">
         <i class="bi bi-info-circle me-1"></i>
         Mỗi <strong>Kịch bản</strong> là một tin nhắn bot có thể gửi.
         Nút <span class="badge bg-primary" style="font-size:.7rem;">💬 Tin nhắn Khác</span> sẽ chuyển người dùng đến kịch bản tương ứng.
@@ -819,6 +857,39 @@
 <!-- ========== TOAST CONTAINER ========== -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index:9500;" id="toastContainer"></div>
 
+<!-- ========== ADD/EDIT SLOGAN MODAL ========== -->
+<div class="modal fade" id="sloganModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="sloganModalTitle">
+          <i class="bi bi-chat-quote me-2" style="color:var(--accent);"></i>Thêm Slogan
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="sloganEditIndex" value="-1">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Nội dung Slogan <span class="text-danger">*</span></label>
+          <textarea id="sloganText" class="form-control" rows="3"
+                    placeholder="VD: 🚀 NƠI BÓNG TỐI BẮT ĐẦU... NƠI BẢN NĂNG THỨC TỈNH 🚀"></textarea>
+        </div>
+        <div class="mb-1">
+          <label class="form-label fw-semibold">Thời gian chờ sau khi hiển thị (giây)</label>
+          <input type="number" id="sloganDelay" class="form-control" min="0" max="30" step="0.5" value="1">
+          <div class="form-text" style="color:#aaa;">Thời gian (giây) trước khi gửi slogan tiếp theo (hoặc xóa tất cả).</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-accent" onclick="doSaveSloganItem(this)">
+          <i class="bi bi-check-lg me-1"></i>Lưu
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
   /* ---- toggle add-post panel ---- */
@@ -899,6 +970,10 @@
     // Load flow data (only on owner pages where the section exists)
     if (document.getElementById('flowNodesList')) {
       loadFlowData();
+    }
+    // Load slogan data (only on owner pages where the section exists)
+    if (document.getElementById('sloganList')) {
+      loadSlogans();
     }
   });
 
@@ -1335,6 +1410,140 @@
     renderNodeList();
     bootstrap.Modal.getInstance(document.getElementById('addNodeModal')).hide();
     setTimeout(function() { openEditNode(nodeId); }, 350);
+  }
+
+  /* ========== SLOGAN MANAGER ========== */
+  let _slogans = { enabled: true, items: [] };
+
+  async function loadSlogans() {
+    try {
+      const res = await fetch('/slogans');
+      if (!res.ok) return;
+      _slogans = await res.json();
+      document.getElementById('sloganEnabled').checked = !!_slogans.enabled;
+      document.getElementById('sloganEnabledLabel').textContent = _slogans.enabled ? 'Bật' : 'Tắt';
+      renderSloganList();
+    } catch(e) {
+      console.error('Failed to load slogans:', e);
+    }
+  }
+
+  function toggleSloganEnabled(checkbox) {
+    _slogans.enabled = checkbox.checked;
+    document.getElementById('sloganEnabledLabel').textContent = checkbox.checked ? 'Bật' : 'Tắt';
+  }
+
+  function renderSloganList() {
+    const container = document.getElementById('sloganList');
+    if (!container) return;
+    if (!_slogans.items || _slogans.items.length === 0) {
+      container.innerHTML =
+        '<div class="empty-state py-3"><i class="bi bi-chat-quote"></i>' +
+        '<p class="mt-2 mb-0 text-light">Chưa có slogan nào. Nhấn «Thêm Slogan» để bắt đầu.</p></div>';
+      return;
+    }
+    let html = '<div class="list-group list-group-flush">';
+    _slogans.items.forEach(function(item, idx) {
+      const text = (item.text || '').replace(/\n/g, ' ').substring(0, 80);
+      html +=
+        '<div class="list-group-item py-2" style="background:transparent;border-color:var(--border-color);">' +
+          '<div class="d-flex align-items-start gap-3">' +
+            '<span class="badge bg-secondary rounded-pill mt-1" style="min-width:26px;text-align:center;">' + (idx + 1) + '</span>' +
+            '<div class="flex-grow-1" style="min-width:0;">' +
+              '<div class="text-truncate text-light" style="font-size:.88rem;">' + escapeHtml(text) + (item.text.length > 80 ? '…' : '') + '</div>' +
+              '<span class="text-muted" style="font-size:.75rem;"><i class="bi bi-clock me-1"></i>' + item.delay_after + 's chờ</span>' +
+            '</div>' +
+            '<div class="d-flex gap-1 flex-shrink-0">' +
+              '<button class="btn btn-sm btn-outline-secondary" onclick="moveSloganUp(' + idx + ')" title="Lên" ' + (idx === 0 ? 'disabled' : '') + '><i class="bi bi-arrow-up"></i></button>' +
+              '<button class="btn btn-sm btn-outline-secondary" onclick="moveSloganDown(' + idx + ')" title="Xuống" ' + (idx === _slogans.items.length - 1 ? 'disabled' : '') + '><i class="bi bi-arrow-down"></i></button>' +
+              '<button class="btn btn-sm btn-outline-primary" onclick="openEditSlogan(' + idx + ')" title="Sửa"><i class="bi bi-pencil"></i></button>' +
+              '<button class="btn btn-sm btn-outline-danger" onclick="deleteSloganItem(' + idx + ')" title="Xóa"><i class="bi bi-trash3"></i></button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    });
+    html += '</div>';
+    container.innerHTML = html;
+  }
+
+  function showAddSloganModal() {
+    document.getElementById('sloganModalTitle').innerHTML = '<i class="bi bi-chat-quote me-2" style="color:var(--accent);"></i>Thêm Slogan';
+    document.getElementById('sloganEditIndex').value = '-1';
+    document.getElementById('sloganText').value = '';
+    document.getElementById('sloganDelay').value = '1';
+    new bootstrap.Modal(document.getElementById('sloganModal')).show();
+  }
+
+  function openEditSlogan(idx) {
+    const item = _slogans.items[idx];
+    if (!item) return;
+    document.getElementById('sloganModalTitle').innerHTML = '<i class="bi bi-pencil-square me-2" style="color:var(--accent);"></i>Sửa Slogan #' + (idx + 1);
+    document.getElementById('sloganEditIndex').value = idx;
+    document.getElementById('sloganText').value = item.text || '';
+    document.getElementById('sloganDelay').value = item.delay_after != null ? item.delay_after : 1;
+    new bootstrap.Modal(document.getElementById('sloganModal')).show();
+  }
+
+  function doSaveSloganItem(btn) {
+    const text = document.getElementById('sloganText').value.trim();
+    if (!text) { showToast('⚠️ Vui lòng nhập nội dung slogan', 'error'); return; }
+    const delay = parseFloat(document.getElementById('sloganDelay').value) || 1;
+    const idx = parseInt(document.getElementById('sloganEditIndex').value, 10);
+    const item = { text: text, delay_after: Math.max(0, Math.min(30, delay)) };
+    if (idx >= 0 && idx < _slogans.items.length) {
+      _slogans.items[idx] = item;
+    } else {
+      _slogans.items.push(item);
+    }
+    renderSloganList();
+    bootstrap.Modal.getInstance(document.getElementById('sloganModal')).hide();
+    showToast('✅ Slogan đã được cập nhật. Nhớ nhấn «Lưu Slogan» để áp dụng!', 'success');
+  }
+
+  function deleteSloganItem(idx) {
+    if (!confirm('Xóa slogan #' + (idx + 1) + '?')) return;
+    _slogans.items.splice(idx, 1);
+    renderSloganList();
+  }
+
+  function moveSloganUp(idx) {
+    if (idx <= 0) return;
+    const tmp = _slogans.items[idx - 1];
+    _slogans.items[idx - 1] = _slogans.items[idx];
+    _slogans.items[idx] = tmp;
+    renderSloganList();
+  }
+
+  function moveSloganDown(idx) {
+    if (idx >= _slogans.items.length - 1) return;
+    const tmp = _slogans.items[idx + 1];
+    _slogans.items[idx + 1] = _slogans.items[idx];
+    _slogans.items[idx] = tmp;
+    renderSloganList();
+  }
+
+  async function doSaveSlogans(btn) {
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
+    try {
+      const res = await fetch('/slogans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(_slogans)
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast('✅ Đã lưu cài đặt Slogan! Bot cập nhật ngay lập tức.', 'success');
+      } else {
+        showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
+      }
+    } catch(e) {
+      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
   }
 </script>
 </body>
