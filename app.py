@@ -5,6 +5,7 @@ import uuid
 import asyncio
 import logging
 import zipfile
+import urllib.request
 from datetime import datetime, timezone, timedelta, time as dt_time
 from flask import Flask, request, redirect, render_template, jsonify, Response
 
@@ -274,6 +275,53 @@ def backup_download():
         mimetype="application/zip",
         headers={"Content-Disposition": f"attachment; filename=backup_{timestamp}.zip"},
     )
+
+
+@app.route("/backup/manual", methods=["POST"])
+def backup_manual():
+    """Trigger a manual backup to Cloudinary and return JSON result."""
+    try:
+        url = run_daily_backup()
+        return jsonify({"ok": True, "url": url})
+    except Exception as e:
+        log.error(f"Manual backup failed: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/backup/restore", methods=["POST"])
+def backup_restore():
+    """Fetch the latest backup from Cloudinary and restore JSON data files."""
+    backup_url = None
+    for days_ago in range(0, 7):
+        date_str = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        public_id = f"{CLOUDINARY_BACKUP_FOLDER}/backup_{date_str}"
+        try:
+            resource = cloudinary.api.resource(public_id, resource_type="raw")
+            backup_url = resource.get("secure_url")
+            if backup_url:
+                break
+        except Exception:
+            continue
+
+    if not backup_url:
+        return jsonify({"ok": False, "error": "Không tìm thấy bản sao lưu trên Cloudinary"}), 404
+
+    try:
+        with urllib.request.urlopen(backup_url, timeout=30) as resp:
+            zip_data = resp.read()
+
+        buf = io.BytesIO(zip_data)
+        with zipfile.ZipFile(buf, "r") as zf:
+            names = zf.namelist()
+            for fname in (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE):
+                if fname in names:
+                    content = json.loads(zf.read(fname).decode("utf-8"))
+                    save_json(fname, content)
+
+        return jsonify({"ok": True})
+    except Exception as e:
+        log.error(f"Restore failed: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ===== BOT HANDLERS =====
