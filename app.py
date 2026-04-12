@@ -285,7 +285,7 @@ def backup_manual():
         return jsonify({"ok": True, "url": url})
     except Exception as e:
         log.error(f"Manual backup failed: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": "Sao lưu thất bại. Vui lòng thử lại."}), 500
 
 
 @app.route("/backup/restore", methods=["POST"])
@@ -306,9 +306,15 @@ def backup_restore():
     if not backup_url:
         return jsonify({"ok": False, "error": "Không tìm thấy bản sao lưu trên Cloudinary"}), 404
 
+    # Validate that the URL is a secure Cloudinary URL to prevent SSRF
+    if not (backup_url.startswith("https://") and "cloudinary.com" in backup_url):
+        log.error(f"Restore aborted: unexpected backup URL: {backup_url}")
+        return jsonify({"ok": False, "error": "URL sao lưu không hợp lệ"}), 400
+
     try:
-        with urllib.request.urlopen(backup_url, timeout=30) as resp:
-            zip_data = resp.read()
+        max_bytes = 10 * 1024 * 1024  # 10 MB limit
+        with urllib.request.urlopen(backup_url, timeout=30) as resp:  # noqa: S310
+            zip_data = resp.read(max_bytes)
 
         buf = io.BytesIO(zip_data)
         with zipfile.ZipFile(buf, "r") as zf:
@@ -321,7 +327,7 @@ def backup_restore():
         return jsonify({"ok": True})
     except Exception as e:
         log.error(f"Restore failed: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": "Khôi phục thất bại. Vui lòng thử lại."}), 500
 
 
 # ===== BOT HANDLERS =====

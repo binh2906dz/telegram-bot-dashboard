@@ -570,6 +570,15 @@
   });
 
   /* ---- Toast notifications ---- */
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function showToast(message, type) {
     const container = document.getElementById('toastContainer');
     const id = 'toast_' + Date.now();
@@ -578,7 +587,7 @@
     container.insertAdjacentHTML('beforeend',
       '<div id="' + id + '" class="toast align-items-center text-white ' + bgClass + ' border-0" role="alert">' +
         '<div class="d-flex">' +
-          '<div class="toast-body"><i class="bi ' + icon + ' me-2"></i>' + message + '</div>' +
+          '<div class="toast-body"><i class="bi ' + icon + ' me-2"></i>' + escapeHtml(message) + '</div>' +
           '<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>' +
         '</div>' +
       '</div>'
