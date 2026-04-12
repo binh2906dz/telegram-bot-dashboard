@@ -243,6 +243,33 @@
     .bot-table td { font-size: .88rem; vertical-align: middle; }
     .bot-token-mask { font-family: monospace; letter-spacing: .5px; color: #aaa; font-size: .78rem; }
 
+    /* ---- Status badges ---- */
+    .status-live  { color: #00c853; font-weight: 700; font-size: .82rem; }
+    .status-ban   { color: #f44336; font-weight: 700; font-size: .82rem; }
+    .status-error { color: #ff9800; font-weight: 700; font-size: .82rem; }
+    .status-checking { color: #888; font-size: .82rem; }
+
+    /* ---- Button list in message management ---- */
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: rgba(255,255,255,.03);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin-bottom: 8px;
+    }
+    .btn-row .btn-row-inputs { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; }
+    .btn-row .btn-row-inputs input { min-width: 120px; flex: 1; }
+
+    /* ---- Responsive topbar ---- */
+    @media (max-width: 767px) {
+      .topbar-actions { display: none; flex-direction: column; width: 100%; gap: 6px; padding-top: 10px; }
+      .topbar-actions.show { display: flex; }
+      .topbar-actions .btn { width: 100%; text-align: left; justify-content: flex-start; }
+    }
+
     /* ---- Lightbox ---- */
     #lightbox {
       display: none;
@@ -264,19 +291,29 @@
 <body>
 
 <!-- ========== TOPBAR ========== -->
-<div class="topbar d-flex align-items-center justify-content-between flex-wrap gap-2">
-  <span class="brand"><i class="bi bi-fire me-2"></i>DASHBOARD VIP</span>
-  <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
-    <span class="badge bg-success rounded-pill"><i class="bi bi-circle-fill me-1" style="font-size:.5rem;"></i>Online</span>
-    <!-- User info -->
-    <span class="badge bg-secondary rounded-pill">
-      <i class="bi bi-person-fill me-1"></i>
-      {{ username }}
-      {% if role == 'owner' %}<span class="ms-1 text-warning">👑</span>{% endif %}
-    </span>
+<div class="topbar">
+  <div class="d-flex align-items-center justify-content-between">
+    <span class="brand"><i class="bi bi-fire me-2"></i>DASHBOARD VIP</span>
+    <div class="d-flex align-items-center gap-2">
+      <!-- Online badge always visible -->
+      <span class="badge bg-success rounded-pill d-none d-sm-inline-flex"><i class="bi bi-circle-fill me-1" style="font-size:.5rem;"></i>Online</span>
+      <!-- User badge always visible -->
+      <span class="badge bg-secondary rounded-pill">
+        <i class="bi bi-person-fill me-1"></i>
+        {{ username }}
+        {% if role == 'owner' %}<span class="ms-1 text-warning">👑</span>{% endif %}
+      </span>
+      <!-- Hamburger toggle for mobile -->
+      <button class="btn btn-sm btn-outline-secondary d-md-none" id="topbarToggle" onclick="toggleTopbar()">
+        <i class="bi bi-list fs-5"></i>
+      </button>
+    </div>
+  </div>
+  <!-- Collapsible actions area -->
+  <div class="topbar-actions d-md-flex flex-md-row align-items-md-center gap-2 flex-wrap justify-content-md-end mt-md-0" id="topbarActions">
     <!-- Broadcast button (all roles) -->
     <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#broadcastModal">
-      <i class="bi bi-megaphone-fill me-1"></i>Gửi Thông Báo All📢
+      <i class="bi bi-megaphone-fill me-1"></i>Gửi Thông Báo 📢
     </button>
     <!-- Schedule settings (all roles) -->
     <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#scheduleModal">
@@ -482,32 +519,43 @@
   <!-- ========== QUẢN LÝ BOT SECTION ========== -->
   <div class="section-header mt-5">
     <span class="section-title"><i class="bi bi-robot me-2"></i>Quản lý Bot</span>
-    <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#addBotModal">
-      <i class="bi bi-plus-lg me-1"></i>Thêm Bot
-    </button>
+    <div class="d-flex gap-2">
+      <button class="btn btn-sm btn-outline-info" onclick="loadBotHealth(this)">
+        <i class="bi bi-activity me-1"></i>Kiểm tra trạng thái
+      </button>
+      <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#addBotModal">
+        <i class="bi bi-plus-lg me-1"></i>Thêm Bot
+      </button>
+    </div>
   </div>
 
   <div class="album-card mb-4 p-0">
     <div class="p-3">
       {% if bots %}
       <div class="table-responsive">
-        <table class="table table-dark table-borderless bot-table mb-0">
+        <table class="table table-dark table-borderless bot-table mb-0" id="botsTable">
           <thead>
             <tr>
               <th>Tên Bot</th>
               <th>Token (ẩn)</th>
               <th>Admin ID</th>
-              <th style="width:80px;"></th>
+              <th>Trạng thái</th>
+              <th>Người đăng ký</th>
+              <th>Tin đã gửi</th>
+              <th style="width:60px;"></th>
             </tr>
           </thead>
           <tbody>
             {% for bot in bots %}
-            <tr>
+            <tr id="bot-row-{{ bot.id }}">
               <td><i class="bi bi-robot me-2" style="color:var(--accent);"></i>{{ bot.name }}</td>
               <td>
                 <span class="bot-token-mask">{{ bot.token[:4] }}••••••••••••</span>
               </td>
               <td>{{ bot.admin_id if bot.admin_id else '—' }}</td>
+              <td id="bot-status-{{ bot.id }}"><span class="status-checking">—</span></td>
+              <td id="bot-subs-{{ bot.id }}">—</td>
+              <td id="bot-msgs-{{ bot.id }}">—</td>
               <td>
                 <button class="btn btn-sm btn-outline-danger"
                         onclick="doDeleteBot('{{ bot.id }}', '{{ bot.name }}', this)"
@@ -534,6 +582,48 @@
         <i class="bi bi-info-circle me-1"></i>
         Sau khi thêm hoặc xóa bot, vui lòng <strong>khởi động lại server</strong> để áp dụng thay đổi.
       </div>
+    </div>
+  </div>
+
+  <!-- ========== QUẢN LÝ TIN NHẮN SECTION ========== -->
+  <div class="section-header mt-5">
+    <span class="section-title"><i class="bi bi-chat-dots me-2"></i>Quản lý Tin nhắn</span>
+  </div>
+
+  <div class="album-card mb-4 p-0">
+    <div class="p-3">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Nội dung tin nhắn /start</label>
+        <textarea id="msgStartText" class="form-control" rows="3"
+                  placeholder="Nội dung tin nhắn khi người dùng gõ /start...">{{ messages_cfg.start_text | default('NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏') }}</textarea>
+        <div class="form-text text-muted">Bot sẽ hiển thị nội dung này sau khi chào mừng người dùng.</div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Nút bấm Inline (Inline Buttons)</label>
+        <div id="btnList">
+          {% for btn in messages_cfg.buttons %}
+          <div class="btn-row">
+            <div class="btn-row-inputs">
+              <input class="form-control form-control-sm btn-text" placeholder="Tên nút (VD: 🔥 Xem Menu)" value="{{ btn.text | e }}">
+              <input class="form-control form-control-sm btn-url" placeholder="URL (https://...) hoặc để trống" value="{{ btn.url | default('') | e }}">
+              <input class="form-control form-control-sm btn-cb" placeholder="Callback data (VD: menu)" value="{{ btn.callback_data | default('') | e }}">
+            </div>
+            <button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="removeBtnRow(this)" title="Xóa nút">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+          {% endfor %}
+        </div>
+        <button class="btn btn-sm btn-outline-secondary mt-2" onclick="addBtnRow()">
+          <i class="bi bi-plus-lg me-1"></i>Thêm nút
+        </button>
+        <div class="form-text text-muted mt-1">Mỗi nút cần có Tên nút và một trong hai: URL hoặc Callback data.</div>
+      </div>
+
+      <button class="btn btn-accent btn-sm" id="btnSaveMessages" onclick="doSaveMessages(this)">
+        <i class="bi bi-floppy me-1"></i>Lưu cài đặt tin nhắn
+      </button>
     </div>
   </div>
   {% endif %}
@@ -616,11 +706,11 @@
         <div class="row g-3">
           <div class="col-6">
             <label class="form-label fw-semibold">Giờ (0–23)</label>
-            <input type="number" id="scheduleHour" class="form-control" min="0" max="23" value="8" placeholder="VD: 8">
+            <input type="number" id="scheduleHour" class="form-control" min="0" max="23" value="{{ cfg.hour | default(8) }}" placeholder="VD: 8">
           </div>
           <div class="col-6">
             <label class="form-label fw-semibold">Phút (0–59)</label>
-            <input type="number" id="scheduleMinute" class="form-control" min="0" max="59" value="0" placeholder="VD: 0">
+            <input type="number" id="scheduleMinute" class="form-control" min="0" max="59" value="{{ cfg.minute | default(0) }}" placeholder="VD: 0">
           </div>
         </div>
       </div>
@@ -929,6 +1019,103 @@
       }
     } catch (e) {
       showToast('❌ Lỗi kết nối: ' + e.message, 'error');
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+
+  /* ---- Load Bot Health Status ---- */
+  async function loadBotHealth(btn) {
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang kiểm tra...';
+    }
+    try {
+      const res = await fetch('/bots/health');
+      if (!res.ok) { throw new Error('HTTP ' + res.status); }
+      const bots = await res.json();
+      bots.forEach(function(bot) {
+        const statusEl = document.getElementById('bot-status-' + bot.id);
+        const subsEl = document.getElementById('bot-subs-' + bot.id);
+        const msgsEl = document.getElementById('bot-msgs-' + bot.id);
+        if (statusEl) {
+          const icons = { LIVE: '🟢', BAN: '🔴', ERROR: '🟠' };
+          const cls = { LIVE: 'status-live', BAN: 'status-ban', ERROR: 'status-error' };
+          statusEl.innerHTML = `<span class="${cls[bot.status] || 'status-error'}">${icons[bot.status] || '🟠'} ${bot.status}</span>`;
+        }
+        if (subsEl) subsEl.textContent = bot.subs_count ?? '—';
+        if (msgsEl) msgsEl.textContent = bot.messages_sent ?? '—';
+      });
+      if (btn) showToast('✅ Đã cập nhật trạng thái bot!', 'success');
+    } catch(e) {
+      showToast('❌ Lỗi khi kiểm tra trạng thái: ' + e.message, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    }
+  }
+
+  /* ---- Topbar mobile toggle ---- */
+  function toggleTopbar() {
+    const actions = document.getElementById('topbarActions');
+    actions.classList.toggle('show');
+  }
+
+  /* ---- Message Management: add/remove button rows ---- */
+  function addBtnRow(text, url, cb) {
+    const list = document.getElementById('btnList');
+    const div = document.createElement('div');
+    div.className = 'btn-row';
+    div.innerHTML =
+      '<div class="btn-row-inputs">' +
+        '<input class="form-control form-control-sm btn-text" placeholder="Tên nút (VD: 🔥 Xem Menu)" value="' + escapeHtml(text || '') + '">' +
+        '<input class="form-control form-control-sm btn-url" placeholder="URL (https://...) hoặc để trống" value="' + escapeHtml(url || '') + '">' +
+        '<input class="form-control form-control-sm btn-cb" placeholder="Callback data (VD: menu)" value="' + escapeHtml(cb || '') + '">' +
+      '</div>' +
+      '<button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="removeBtnRow(this)" title="Xóa nút">' +
+        '<i class="bi bi-x-lg"></i>' +
+      '</button>';
+    list.appendChild(div);
+  }
+
+  function removeBtnRow(btn) {
+    btn.closest('.btn-row').remove();
+  }
+
+  /* ---- Save Messages Config ---- */
+  async function doSaveMessages(btn) {
+    const startText = document.getElementById('msgStartText').value;
+    const rows = document.querySelectorAll('#btnList .btn-row');
+    const buttons = [];
+    rows.forEach(function(row) {
+      const text = row.querySelector('.btn-text').value.trim();
+      const url = row.querySelector('.btn-url').value.trim();
+      const cb = row.querySelector('.btn-cb').value.trim();
+      if (text && (url || cb)) {
+        buttons.push({ text: text, url: url, callback_data: cb });
+      }
+    });
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
+    try {
+      const res = await fetch('/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_text: startText, buttons: buttons })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast('✅ Đã lưu cài đặt tin nhắn! Bot sẽ dùng nội dung mới ngay lập tức.', 'success');
+      } else {
+        showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
+      }
+    } catch(e) {
+      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
+    } finally {
       btn.disabled = false;
       btn.innerHTML = originalHtml;
     }
