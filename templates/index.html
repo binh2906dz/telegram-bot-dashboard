@@ -262,7 +262,22 @@
   <span class="brand"><i class="bi bi-fire me-2"></i>DASHBOARD VIP</span>
   <div class="d-flex align-items-center gap-2">
     <span class="badge bg-success rounded-pill"><i class="bi bi-circle-fill me-1" style="font-size:.5rem;"></i>Online</span>
-    <!-- Utilities dropdown -->
+    <!-- User info -->
+    <span class="badge bg-secondary rounded-pill">
+      <i class="bi bi-person-fill me-1"></i>
+      {{ username }}
+      {% if role == 'owner' %}<span class="ms-1 text-warning">👑</span>{% endif %}
+    </span>
+    <!-- Broadcast button (all roles) -->
+    <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#broadcastModal">
+      <i class="bi bi-megaphone-fill me-1"></i>Gửi Thông Báo All📢
+    </button>
+    <!-- Schedule settings (all roles) -->
+    <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#scheduleModal">
+      <i class="bi bi-clock-fill me-1"></i>Cài đặt giờ
+    </button>
+    <!-- Utilities dropdown (owner only) -->
+    {% if role == 'owner' %}
     <div class="dropdown">
       <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
         <i class="bi bi-tools me-1"></i>Tiện ích
@@ -281,9 +296,14 @@
         </li>
       </ul>
     </div>
+    {% endif %}
     <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#createAlbumModal">
       <i class="bi bi-plus-lg me-1"></i>Tạo Album
     </button>
+    <!-- Logout -->
+    <a href="/logout" class="btn btn-sm btn-outline-danger">
+      <i class="bi bi-box-arrow-right me-1"></i>Đăng xuất
+    </a>
   </div>
 </div>
 
@@ -350,12 +370,14 @@
                 title="Thêm bài viết">
           <i class="bi bi-plus-lg"></i> Thêm bài
         </button>
+        {% if role == 'owner' %}
         <form action="/albums/{{ album_id }}/delete" method="post" class="d-inline ms-1"
               onsubmit="return confirm('Xóa album «{{ album.title }}»?')">
           <button type="submit" class="btn btn-sm btn-outline-danger" title="Xóa album">
             <i class="bi bi-trash3"></i>
           </button>
         </form>
+        {% endif %}
       </div>
 
       <!-- Add-post panel (hidden by default) -->
@@ -403,6 +425,7 @@
                   <span class="text-muted fst-italic" style="font-size:.8rem;">(Không có caption)</span>
                 {% endif %}
               </div>
+              {% if role == 'owner' %}
               <form action="/albums/{{ album_id }}/posts/{{ post.id }}/delete" method="post"
                     onsubmit="return confirm('Xóa bài viết này?')">
                 <button type="submit" class="btn btn-sm btn-outline-danger"
@@ -410,6 +433,7 @@
                   <i class="bi bi-x-lg"></i>
                 </button>
               </form>
+              {% endif %}
             </div>
             <div class="d-flex flex-wrap gap-2">
               {% for photo in post.photos %}
@@ -485,6 +509,63 @@
 <div id="lightbox" onclick="closeLightbox()">
   <span class="close-lb" onclick="closeLightbox()">&times;</span>
   <img id="lightbox-img" src="" alt="preview">
+</div>
+
+<!-- ========== BROADCAST MODAL ========== -->
+<div class="modal fade" id="broadcastModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-megaphone-fill me-2" style="color:#00c853;"></i>Gửi Thông Báo All📢</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label fw-semibold">Nội dung thông báo <span class="text-danger">*</span></label>
+          <textarea id="broadcastMessage" class="form-control" rows="5"
+                    placeholder="Nhập nội dung muốn gửi tới tất cả người đăng ký..."></textarea>
+        </div>
+        <div class="text-muted" style="font-size:.8rem;"><i class="bi bi-info-circle me-1"></i>Tin nhắn sẽ được gửi tới tất cả người đã bấm /start bot.</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-success" id="btnBroadcast" onclick="doBroadcast(this)">
+          <i class="bi bi-send-fill me-1"></i>Gửi ngay
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== SCHEDULE SETTINGS MODAL ========== -->
+<div class="modal fade" id="scheduleModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-clock-fill me-2" style="color:#4d9fff;"></i>Cài đặt giờ gửi tự động</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted" style="font-size:.875rem;">Bot sẽ tự động gửi album mới nhất tới tất cả người đăng ký vào giờ bạn cài đặt (giờ Việt Nam UTC+7).</p>
+        <div class="row g-3">
+          <div class="col-6">
+            <label class="form-label fw-semibold">Giờ (0–23)</label>
+            <input type="number" id="scheduleHour" class="form-control" min="0" max="23" value="8" placeholder="VD: 8">
+          </div>
+          <div class="col-6">
+            <label class="form-label fw-semibold">Phút (0–59)</label>
+            <input type="number" id="scheduleMinute" class="form-control" min="0" max="59" value="0" placeholder="VD: 0">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-primary" id="btnSaveSchedule" onclick="doSaveSchedule(this)">
+          <i class="bi bi-check-lg me-1"></i>Lưu cài đặt
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ========== TOAST CONTAINER ========== -->
@@ -633,6 +714,63 @@
         setTimeout(function() { location.reload(); }, 2000);
       } else {
         showToast('❌ Khôi phục thất bại: ' + (data.error || 'Lỗi không xác định'), 'error');
+      }
+    } catch (e) {
+      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+
+  /* ---- Broadcast ---- */
+  async function doBroadcast(btn) {
+    const message = document.getElementById('broadcastMessage').value.trim();
+    if (!message) { showToast('⚠️ Vui lòng nhập nội dung thông báo', 'error'); return; }
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang gửi...';
+    try {
+      const form = new FormData();
+      form.append('message', message);
+      const res = await fetch('/broadcast', { method: 'POST', body: form });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(`✅ Đã gửi! Thành công: ${data.success}, Thất bại: ${data.fail}`, 'success');
+        bootstrap.Modal.getInstance(document.getElementById('broadcastModal')).hide();
+        document.getElementById('broadcastMessage').value = '';
+      } else {
+        showToast('❌ Gửi thất bại: ' + (data.error || 'Lỗi không xác định'), 'error');
+      }
+    } catch (e) {
+      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+
+  /* ---- Save schedule time ---- */
+  async function doSaveSchedule(btn) {
+    const hour = parseInt(document.getElementById('scheduleHour').value, 10);
+    const minute = parseInt(document.getElementById('scheduleMinute').value, 10);
+    if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      showToast('⚠️ Giờ hoặc phút không hợp lệ', 'error'); return;
+    }
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
+    try {
+      const form = new FormData();
+      form.append('hour', hour);
+      form.append('minute', minute);
+      const res = await fetch('/settings/time', { method: 'POST', body: form });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(`✅ Đã cài giờ gửi tự động: ${String(data.hour).padStart(2,'0')}:${String(data.minute).padStart(2,'0')} (Giờ VN)`, 'success');
+        bootstrap.Modal.getInstance(document.getElementById('scheduleModal')).hide();
+      } else {
+        showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
       }
     } catch (e) {
       showToast('❌ Lỗi kết nối: ' + e.message, 'error');
