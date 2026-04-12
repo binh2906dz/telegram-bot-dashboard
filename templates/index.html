@@ -103,6 +103,7 @@
       border-bottom: 1px solid var(--border-color);
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: 10px;
     }
 
@@ -237,6 +238,11 @@
     /* ---- Spinner ---- */
     .upload-spinner { display: none; }
 
+    /* ---- Bot management table ---- */
+    .bot-table th { font-size: .78rem; text-transform: uppercase; color: #888; font-weight: 600; }
+    .bot-table td { font-size: .88rem; vertical-align: middle; }
+    .bot-token-mask { font-family: monospace; letter-spacing: .5px; color: #aaa; font-size: .78rem; }
+
     /* ---- Lightbox ---- */
     #lightbox {
       display: none;
@@ -258,9 +264,9 @@
 <body>
 
 <!-- ========== TOPBAR ========== -->
-<div class="topbar d-flex align-items-center justify-content-between">
+<div class="topbar d-flex align-items-center justify-content-between flex-wrap gap-2">
   <span class="brand"><i class="bi bi-fire me-2"></i>DASHBOARD VIP</span>
-  <div class="d-flex align-items-center gap-2">
+  <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
     <span class="badge bg-success rounded-pill"><i class="bi bi-circle-fill me-1" style="font-size:.5rem;"></i>Online</span>
     <!-- User info -->
     <span class="badge bg-secondary rounded-pill">
@@ -312,7 +318,7 @@
 
   <!-- Stats row -->
   <div class="row g-3 mb-4">
-    <div class="col-4">
+    <div class="col-12 col-md-4">
       <div class="stat-card">
         <div class="stat-icon orange"><i class="bi bi-people-fill"></i></div>
         <div>
@@ -321,7 +327,7 @@
         </div>
       </div>
     </div>
-    <div class="col-4">
+    <div class="col-12 col-md-4">
       <div class="stat-card">
         <div class="stat-icon blue"><i class="bi bi-images"></i></div>
         <div>
@@ -330,7 +336,7 @@
         </div>
       </div>
     </div>
-    <div class="col-4">
+    <div class="col-12 col-md-4">
       <div class="stat-card">
         <div class="stat-icon green"><i class="bi bi-file-earmark-image"></i></div>
         <div>
@@ -472,6 +478,66 @@
     </div>
   {% endif %}
 
+  {% if role == 'owner' %}
+  <!-- ========== QUẢN LÝ BOT SECTION ========== -->
+  <div class="section-header mt-5">
+    <span class="section-title"><i class="bi bi-robot me-2"></i>Quản lý Bot</span>
+    <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#addBotModal">
+      <i class="bi bi-plus-lg me-1"></i>Thêm Bot
+    </button>
+  </div>
+
+  <div class="album-card mb-4 p-0">
+    <div class="p-3">
+      {% if bots %}
+      <div class="table-responsive">
+        <table class="table table-dark table-borderless bot-table mb-0">
+          <thead>
+            <tr>
+              <th>Tên Bot</th>
+              <th>Token (ẩn)</th>
+              <th>Admin ID</th>
+              <th style="width:80px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for bot in bots %}
+            <tr>
+              <td><i class="bi bi-robot me-2" style="color:var(--accent);"></i>{{ bot.name }}</td>
+              <td>
+                <span class="bot-token-mask">{{ bot.token[:4] }}••••••••••••</span>
+              </td>
+              <td>{{ bot.admin_id if bot.admin_id else '—' }}</td>
+              <td>
+                <button class="btn btn-sm btn-outline-danger"
+                        onclick="doDeleteBot('{{ bot.id }}', '{{ bot.name }}', this)"
+                        title="Xóa bot">
+                  <i class="bi bi-trash3"></i>
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state py-4">
+        <i class="bi bi-robot" style="font-size:2rem; color:var(--accent);"></i>
+        <p class="mt-2 mb-0" style="font-size:.9rem;">Chưa có bot nào được thêm.<br>
+          <span class="text-muted" style="font-size:.8rem;">Bot mặc định (từ biến <code>TELEGRAM_BOT_TOKEN</code>) đang được sử dụng.</span>
+        </p>
+      </div>
+      {% endif %}
+    </div>
+    <div class="p-3 pt-0">
+      <div class="text-muted" style="font-size:.78rem;">
+        <i class="bi bi-info-circle me-1"></i>
+        Sau khi thêm hoặc xóa bot, vui lòng <strong>khởi động lại server</strong> để áp dụng thay đổi.
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
 </div><!-- /container -->
 
 <!-- ========== CREATE ALBUM MODAL ========== -->
@@ -562,6 +628,39 @@
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
         <button type="button" class="btn btn-primary" id="btnSaveSchedule" onclick="doSaveSchedule(this)">
           <i class="bi bi-check-lg me-1"></i>Lưu cài đặt
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== ADD BOT MODAL ========== -->
+<div class="modal fade" id="addBotModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-robot me-2" style="color:var(--accent);"></i>Thêm Bot mới</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Tên Bot <span class="text-danger">*</span></label>
+          <input id="botName" class="form-control" placeholder="VD: Bot VIP 2" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Token <span class="text-danger">*</span></label>
+          <input id="botToken" class="form-control" placeholder="123456:ABCdef..." required>
+        </div>
+        <div class="mb-1">
+          <label class="form-label fw-semibold">Admin ID <span class="text-muted">(tuỳ chọn)</span></label>
+          <input id="botAdminId" type="number" class="form-control" placeholder="Telegram User ID của Admin">
+          <div class="form-text text-muted">Để trống nếu dùng chung Admin ID từ biến môi trường.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-accent" id="btnAddBot" onclick="doAddBot(this)">
+          <i class="bi bi-plus-lg me-1"></i>Thêm Bot
         </button>
       </div>
     </div>
@@ -775,6 +874,61 @@
     } catch (e) {
       showToast('❌ Lỗi kết nối: ' + e.message, 'error');
     } finally {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+
+  /* ---- Add Bot ---- */
+  async function doAddBot(btn) {
+    const name = document.getElementById('botName').value.trim();
+    const token = document.getElementById('botToken').value.trim();
+    const adminId = document.getElementById('botAdminId').value.trim();
+    if (!name || !token) { showToast('⚠️ Tên và Token không được để trống', 'error'); return; }
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang thêm...';
+    try {
+      const form = new FormData();
+      form.append('name', name);
+      form.append('token', token);
+      if (adminId) form.append('admin_id', adminId);
+      const res = await fetch('/bots/add', { method: 'POST', body: form });
+      const data = await res.json();
+      if (data.ok) {
+        showToast('✅ Đã thêm bot! Vui lòng khởi động lại server để áp dụng.', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('addBotModal')).hide();
+        setTimeout(function() { location.reload(); }, 1500);
+      } else {
+        showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
+      }
+    } catch (e) {
+      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+
+  /* ---- Delete Bot ---- */
+  async function doDeleteBot(botId, botName, btn) {
+    if (!confirm(`Xóa bot «${botName}»?\nBot sẽ ngừng hoạt động sau khi khởi động lại server.`)) return;
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+    try {
+      const res = await fetch(`/bots/${botId}/delete`, { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        showToast('✅ Đã xóa bot! Vui lòng khởi động lại server để áp dụng.', 'success');
+        setTimeout(function() { location.reload(); }, 1500);
+      } else {
+        showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    } catch (e) {
+      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
       btn.disabled = false;
       btn.innerHTML = originalHtml;
     }

@@ -42,6 +42,7 @@ ALBUMS_FILE = "albums.json"
 SUBS_FILE = "subscribers.json"
 CONFIG_FILE = "config.json"
 BANNED_FILE = "banned.json"
+BOTS_FILE = "bots.json"
 
 # ===== CLOUDINARY CONFIG =====
 # Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET
@@ -199,10 +200,12 @@ def logout():
 def index():
     albums = load_json(ALBUMS_FILE, {})
     subs = load_json(SUBS_FILE, [])
+    bots = load_json(BOTS_FILE, [])
     active_album = request.args.get("album", "")
     return render_template("index.html", albums=albums, subs=subs,
                            active_album=active_album, total_posts=total_posts(albums),
-                           role=session.get("role", ""), username=session.get("username", ""))
+                           role=session.get("role", ""), username=session.get("username", ""),
+                           bots=bots)
 
 
 # --- Album management ---
@@ -408,7 +411,10 @@ def backup_restore():
 @login_required
 def broadcast():
     """Send a broadcast message to all subscribers via Telegram Bot API."""
-    if not BOT_TOKEN:
+    # Use first bot in bots.json, fallback to env BOT_TOKEN
+    bots_list = load_json(BOTS_FILE, [])
+    token = bots_list[0]["token"] if bots_list else BOT_TOKEN
+    if not token:
         return jsonify({"ok": False, "error": "Bot chưa được cấu hình"}), 500
     message = request.form.get("message", "").strip()
     if not message:
@@ -417,7 +423,7 @@ def broadcast():
     if not subs:
         return jsonify({"ok": False, "error": "Chưa có người đăng ký nào"}), 400
     success, fail = 0, 0
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
     for user_id in subs:
         try:
             resp = httpx.post(url, json={"chat_id": user_id, "text": message}, timeout=10)
@@ -434,16 +440,14 @@ def broadcast():
 @app.route("/settings/time", methods=["POST"])
 @login_required
 def settings_time():
-    """Update auto-schedule hour and minute in config.json."""
+    """Update auto-schedule hour and minute in config.json (Vietnam time, UTC+7)."""
     try:
         hour = int(request.form.get("hour", 0))
         minute = int(request.form.get("minute", 0))
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             return jsonify({"ok": False, "error": "Giờ hoặc phút không hợp lệ"}), 400
-        # Convert Vietnam time (UTC+7) to UTC
-        hour_utc = (hour - 7) % 24
         cfg = load_json(CONFIG_FILE, {})
-        cfg["hour"] = hour_utc
+        cfg["hour"] = hour
         cfg["minute"] = minute
         save_json(CONFIG_FILE, cfg)
         return jsonify({"ok": True, "hour": hour, "minute": minute})
@@ -451,13 +455,46 @@ def settings_time():
         return jsonify({"ok": False, "error": "Dữ liệu không hợp lệ"}), 400
 
 
+@app.route("/bots/add", methods=["POST"])
+@owner_required
+def add_bot():
+    """Add a new bot to bots.json."""
+    name = request.form.get("name", "").strip()
+    token = request.form.get("token", "").strip()
+    admin_id_str = request.form.get("admin_id", "").strip()
+    if not name or not token:
+        return jsonify({"ok": False, "error": "Tên và Token không được để trống"}), 400
+    if admin_id_str and not admin_id_str.isdigit():
+        return jsonify({"ok": False, "error": "Admin ID phải là số nguyên dương"}), 400
+    admin_id_val = int(admin_id_str) if admin_id_str else None
+    bots = load_json(BOTS_FILE, [])
+    bots.append({
+        "id": uuid.uuid4().hex,
+        "name": name,
+        "token": token,
+        "admin_id": admin_id_val,
+    })
+    save_json(BOTS_FILE, bots)
+    return jsonify({"ok": True})
+
+
+@app.route("/bots/<bot_id>/delete", methods=["POST"])
+@owner_required
+def delete_bot(bot_id):
+    """Remove a bot from bots.json."""
+    bots = load_json(BOTS_FILE, [])
+    bots = [b for b in bots if b.get("id") != bot_id]
+    save_json(BOTS_FILE, bots)
+    return jsonify({"ok": True})
+
+
 # ===== BOT HANDLERS =====
 
-if BOT_TOKEN:
+if BOT_TOKEN or load_json(BOTS_FILE, []):
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
     from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-    _last_sent = None
+    # ---- Shared handlers (no per-bot admin check needed) ----
 
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_chat.id
@@ -504,11 +541,9 @@ if BOT_TOKEN:
 
     async def send_album(chat_id, bot, album):
         """Send all posts in an album (supports both new posts[] format and legacy photos[] format)."""
-        # Normalise to a list of (photos_list, caption) tuples
         if "posts" in album:
             groups = [(post.get("photos", []), post.get("caption", "")) for post in album["posts"]]
         else:
-            # Legacy format: album["photos"] – treat as a single group
             groups = [(album.get("photos", []), "")]
 
         for photos_list, group_caption in groups:
@@ -518,12 +553,10 @@ if BOT_TOKEN:
                 for i, p in enumerate(photos_list):
                     url = p["url"]
                     if url.startswith("/static/uploads/"):
-                        # Legacy local file fallback
                         f = open(url.lstrip("/"), "rb")
                         open_files.append(f)
                         media_src = f
                     else:
-                        # Cloudinary or any external URL – use directly
                         media_src = url
                     caption = group_caption if i == 0 else ""
                     media.append(InputMediaPhoto(media_src, caption=caption))
@@ -553,142 +586,187 @@ if BOT_TOKEN:
         if album:
             await send_album(chat_id, context.bot, album)
 
-    async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not ADMIN_ID or update.effective_chat.id != ADMIN_ID:
-            return
-        try:
-            time_str = update.message.text.split("_")[1]
-            h, m = map(int, time_str.split(":"))
-            h_utc = (h - 7) % 24
-            save_json(CONFIG_FILE, {"hour": h_utc, "minute": m})
-            await update.message.reply_text(f"Đã set giờ: {h}:{m} (VN)")
-        except Exception:
-            await update.message.reply_text("Sai format")
+    # ---- Per-bot application factory ----
 
-    async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
-        global _last_sent
-        now = datetime.now(timezone.utc)
-        cfg = load_json(CONFIG_FILE, {"hour": 0, "minute": 0})
+    def _build_ptb_app(token: str, bot_admin_id):
+        """Build and return a PTB Application for one bot token, with admin handlers
+        bound to bot_admin_id via closures."""
 
-        if now.hour == cfg["hour"] and now.minute == cfg["minute"]:
-            key = f"{now.hour}:{now.minute}"
-            if _last_sent != key:
-                _last_sent = key
-                albums = load_json(ALBUMS_FILE, {})
-                if not albums:
-                    return
-                latest = sorted(albums.keys())[-1]
-                subs = load_json(SUBS_FILE, [])
-                success, fail = 0, 0
-                for u in subs:
-                    try:
-                        await send_album(u, context.bot, albums[latest])
-                        success += 1
-                    except Exception:
-                        fail += 1
-                if ADMIN_ID:
-                    await context.bot.send_message(
-                        ADMIN_ID,
-                        f"📊 Report\nUsers: {len(subs)}\nOK: {success}\nFail: {fail}",
-                    )
+        _last_sent = [None]  # mutable list so the nested coroutine can update it
 
-    async def daily_backup_job(context: ContextTypes.DEFAULT_TYPE):
-        """APScheduler job that runs once a day to back up JSON data to Cloudinary."""
-        try:
-            url = run_daily_backup()
-            if ADMIN_ID:
-                await context.bot.send_message(ADMIN_ID, f"✅ Backup completed!\n🔗 {url}")
-        except Exception as e:
-            log.error(f"Daily backup failed: {e}")
-            if ADMIN_ID:
-                await context.bot.send_message(ADMIN_ID, f"❌ Backup failed: {e}")
-
-    async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Admin-only: reply with total users, albums, and posts."""
-        if not ADMIN_ID or update.effective_chat.id != ADMIN_ID:
-            return
-        subs = load_json(SUBS_FILE, [])
-        albums = load_json(ALBUMS_FILE, {})
-        total = total_posts(albums)
-        await update.message.reply_text(
-            f"📊 Thống kê Bot:\n"
-            f"👥 Người đăng ký: {len(subs)}\n"
-            f"📁 Albums: {len(albums)}\n"
-            f"📝 Bài viết: {total}"
-        )
-
-    async def sendall(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Admin-only: broadcast a message to all subscribers."""
-        if not ADMIN_ID or update.effective_chat.id != ADMIN_ID:
-            return
-        message_text = " ".join(context.args) if context.args else ""
-        if not message_text:
-            await update.message.reply_text("Cú pháp: /sendall <nội dung tin nhắn>")
-            return
-        subs = load_json(SUBS_FILE, [])
-        if not subs:
-            await update.message.reply_text("Chưa có người đăng ký nào.")
-            return
-        success, fail = 0, 0
-        for user_id in subs:
+        async def set_time_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not bot_admin_id or update.effective_chat.id != bot_admin_id:
+                return
             try:
-                await context.bot.send_message(user_id, message_text)
-                success += 1
+                time_str = update.message.text.split("_")[1]
+                h, m = map(int, time_str.split(":"))
+                if not (0 <= h <= 23 and 0 <= m <= 59):
+                    await update.message.reply_text("Giờ/phút không hợp lệ (0-23 / 0-59)")
+                    return
+                save_json(CONFIG_FILE, {"hour": h, "minute": m})
+                await update.message.reply_text(f"✅ Đã set giờ: {h:02d}:{m:02d} (Giờ VN)")
             except Exception:
-                fail += 1
-        await update.message.reply_text(
-            f"📢 Đã gửi thông báo!\n✅ Thành công: {success}\n❌ Thất bại: {fail}"
-        )
+                await update.message.reply_text("Sai format. Dùng: /settudongguilink_HH:MM")
 
-    async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Admin-only: ban a user by user_id."""
-        if not ADMIN_ID or update.effective_chat.id != ADMIN_ID:
-            return
-        if not context.args or not context.args[0].lstrip("-").isdigit():
-            await update.message.reply_text("Cú pháp: /ban <user_id>")
-            return
-        target_id = int(context.args[0])
-        # Remove from subscribers
-        subs = load_json(SUBS_FILE, [])
-        if target_id in subs:
-            subs.remove(target_id)
-            save_json(SUBS_FILE, subs)
-        # Add to banned list
-        banned = load_json(BANNED_FILE, [])
-        if target_id not in banned:
-            banned.append(target_id)
-            save_json(BANNED_FILE, banned)
-        await update.message.reply_text(f"✅ Đã cấm người dùng {target_id}.")
+        async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not bot_admin_id or update.effective_chat.id != bot_admin_id:
+                return
+            subs = load_json(SUBS_FILE, [])
+            albums = load_json(ALBUMS_FILE, {})
+            total = total_posts(albums)
+            await update.message.reply_text(
+                f"📊 Thống kê Bot:\n"
+                f"👥 Người đăng ký: {len(subs)}\n"
+                f"📁 Albums: {len(albums)}\n"
+                f"📝 Bài viết: {total}"
+            )
 
-    def run_bot_thread():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        async def sendall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not bot_admin_id or update.effective_chat.id != bot_admin_id:
+                return
+            message_text = " ".join(context.args) if context.args else ""
+            if not message_text:
+                await update.message.reply_text("Cú pháp: /sendall <nội dung tin nhắn>")
+                return
+            subs = load_json(SUBS_FILE, [])
+            if not subs:
+                await update.message.reply_text("Chưa có người đăng ký nào.")
+                return
+            success, fail = 0, 0
+            for user_id in subs:
+                try:
+                    await context.bot.send_message(user_id, message_text)
+                    success += 1
+                except Exception:
+                    fail += 1
+            await update.message.reply_text(
+                f"📢 Đã gửi thông báo!\n✅ Thành công: {success}\n❌ Thất bại: {fail}"
+            )
 
-        ptb_app = Application.builder().token(BOT_TOKEN).build()
+        async def ban_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not bot_admin_id or update.effective_chat.id != bot_admin_id:
+                return
+            if not context.args or not context.args[0].lstrip("-").isdigit():
+                await update.message.reply_text("Cú pháp: /ban <user_id>")
+                return
+            target_id = int(context.args[0])
+            subs = load_json(SUBS_FILE, [])
+            if target_id in subs:
+                subs.remove(target_id)
+                save_json(SUBS_FILE, subs)
+            banned = load_json(BANNED_FILE, [])
+            if target_id not in banned:
+                banned.append(target_id)
+                save_json(BANNED_FILE, banned)
+            await update.message.reply_text(f"✅ Đã cấm người dùng {target_id}.")
+
+        async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
+            now_vn = datetime.now(timezone.utc) + timedelta(hours=7)
+            cfg = load_json(CONFIG_FILE, {"hour": 0, "minute": 0})
+            if now_vn.hour == cfg["hour"] and now_vn.minute == cfg["minute"]:
+                key = f"{now_vn.hour}:{now_vn.minute}"
+                if _last_sent[0] != key:
+                    _last_sent[0] = key
+                    albums = load_json(ALBUMS_FILE, {})
+                    if not albums:
+                        return
+                    latest = sorted(albums.keys())[-1]
+                    subs = load_json(SUBS_FILE, [])
+                    success, fail = 0, 0
+                    for u in subs:
+                        try:
+                            await send_album(u, context.bot, albums[latest])
+                            success += 1
+                        except Exception:
+                            fail += 1
+                    if bot_admin_id:
+                        await context.bot.send_message(
+                            bot_admin_id,
+                            f"📊 Report\nUsers: {len(subs)}\nOK: {success}\nFail: {fail}",
+                        )
+
+        async def daily_backup_job(context: ContextTypes.DEFAULT_TYPE):
+            try:
+                url = run_daily_backup()
+                if bot_admin_id:
+                    await context.bot.send_message(bot_admin_id, f"✅ Backup completed!\n🔗 {url}")
+            except Exception as e:
+                log.error(f"Daily backup failed: {e}")
+                if bot_admin_id:
+                    await context.bot.send_message(bot_admin_id, f"❌ Backup failed: {e}")
+
+        ptb_app = Application.builder().token(token).build()
         ptb_app.add_handler(CommandHandler("start", start))
-        ptb_app.add_handler(CommandHandler("settudongguilink", set_time))
-        ptb_app.add_handler(CommandHandler("stats", stats))
-        ptb_app.add_handler(CommandHandler("sendall", sendall))
-        ptb_app.add_handler(CommandHandler("ban", ban))
+        ptb_app.add_handler(CommandHandler("settudongguilink", set_time_cmd))
+        ptb_app.add_handler(CommandHandler("stats", stats_cmd))
+        ptb_app.add_handler(CommandHandler("sendall", sendall_cmd))
+        ptb_app.add_handler(CommandHandler("ban", ban_cmd))
         ptb_app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
         ptb_app.add_handler(CallbackQueryHandler(album_click))
         ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
-        # Daily backup at 01:00 UTC
         ptb_app.job_queue.run_daily(daily_backup_job, time=dt_time(1, 0, 0, tzinfo=timezone.utc))
+        return ptb_app
 
-        log.info("Bot starting with run_polling in thread...")
+    def run_bot_thread():
+        """Start all configured bots concurrently in one asyncio event loop."""
+        bots_cfg = load_json(BOTS_FILE, [])
+        # Fallback: if bots.json is empty, use the env-var token to bootstrap
+        if not bots_cfg:
+            if BOT_TOKEN:
+                bots_cfg = [{"id": "env_default", "name": "Default Bot",
+                              "token": BOT_TOKEN, "admin_id": ADMIN_ID}]
+            else:
+                log.warning("No bots configured – bot disabled")
+                return
+
+        async def _run_all():
+            ptb_apps = []
+            for cfg_entry in bots_cfg:
+                token = (cfg_entry.get("token") or "").strip()
+                if not token:
+                    log.warning(f"Bot '{cfg_entry.get('name', '?')}' has no token – skipping")
+                    continue
+                _aid_raw = cfg_entry.get("admin_id")
+                _aid = int(_aid_raw) if _aid_raw and str(_aid_raw).isdigit() else ADMIN_ID
+                ptb_apps.append(_build_ptb_app(token, _aid))
+
+            if not ptb_apps:
+                log.warning("No valid bot tokens found – bot disabled")
+                return
+
+            for a in ptb_apps:
+                await a.initialize()
+                await a.start()
+                await a.updater.start_polling(
+                    allowed_updates=["message", "callback_query"],
+                    drop_pending_updates=True,
+                )
+            log.info(f"✅ {len(ptb_apps)} bot(s) started successfully")
+
+            try:
+                while True:
+                    await asyncio.sleep(3600)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                pass
+            finally:
+                for a in reversed(ptb_apps):
+                    try:
+                        await a.updater.stop()
+                        await a.stop()
+                        await a.shutdown()
+                    except Exception as exc:
+                        log.warning(f"Error stopping bot: {exc}")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            ptb_app.run_polling(
-                allowed_updates=["message", "callback_query"],
-                stop_signals=None,
-                drop_pending_updates=True,
-            )
+            loop.run_until_complete(_run_all())
         except Exception as e:
             log.error(f"Bot thread error: {e}")
             raise
 
 else:
-    log.warning("TELEGRAM_BOT_TOKEN not set – bot disabled, Flask only")
+    log.warning("No bot token configured – bot disabled, Flask only")
 
 # ===== MAIN =====
 if __name__ == "__main__":
