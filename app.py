@@ -7,8 +7,10 @@ import logging
 import zipfile
 import urllib.request
 from datetime import datetime, timezone, timedelta, time as dt_time
-from flask import Flask, request, redirect, render_template, jsonify, Response
+from functools import wraps
+from flask import Flask, request, redirect, render_template, jsonify, Response, session, url_for
 
+import httpx
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
@@ -23,6 +25,13 @@ ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
+app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production-secret-key")
+
+# ===== AUTH CONFIG =====
+OWNER_USER = os.environ.get("OWNER_USER", "admin")
+OWNER_PASS = os.environ.get("OWNER_PASS", "admin123")
+MANAGER_USER = os.environ.get("MANAGER_USER", "quanly")
+MANAGER_PASS = os.environ.get("MANAGER_PASS", "quanly123")
 
 ALBUMS_FILE = "albums.json"
 SUBS_FILE = "subscribers.json"
@@ -69,6 +78,28 @@ def save_json(file, data):
 
 def total_posts(albums):
     return sum(len(a.get("posts", [])) for a in albums.values() if isinstance(a, dict))
+
+
+# ===== AUTH HELPERS =====
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login", next=request.path))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def owner_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login", next=request.path))
+        if session.get("role") != "owner":
+            return jsonify({"ok": False, "error": "Không có quyền thực hiện thao tác này"}), 403
+        return f(*args, **kwargs)
+    return decorated
 
 
 # ===== CLOUDINARY HELPERS =====
@@ -126,18 +157,50 @@ def run_daily_backup():
 
 # ===== FLASK ROUTES =====
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+        if username == OWNER_USER and password == OWNER_PASS:
+            session["logged_in"] = True
+            session["role"] = "owner"
+            session["username"] = username
+            next_url = request.args.get("next") or "/"
+            return redirect(next_url)
+        elif username == MANAGER_USER and password == MANAGER_PASS:
+            session["logged_in"] = True
+            session["role"] = "manager"
+            session["username"] = username
+            next_url = request.args.get("next") or "/"
+            return redirect(next_url)
+        else:
+            error = "Sai tên đăng nhập hoặc mật khẩu!"
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
 @app.route("/")
+@login_required
 def index():
     albums = load_json(ALBUMS_FILE, {})
     subs = load_json(SUBS_FILE, [])
     active_album = request.args.get("album", "")
     return render_template("index.html", albums=albums, subs=subs,
-                           active_album=active_album, total_posts=total_posts(albums))
+                           active_album=active_album, total_posts=total_posts(albums),
+                           role=session.get("role", ""), username=session.get("username", ""))
 
 
 # --- Album management ---
 
 @app.route("/albums/create", methods=["POST"])
+@login_required
 def create_album():
     title = request.form.get("title", "").strip()
     description = request.form.get("description", "").strip()
@@ -156,6 +219,7 @@ def create_album():
 
 
 @app.route("/albums/<album_id>/delete", methods=["POST"])
+@owner_required
 def delete_album(album_id):
     albums = load_json(ALBUMS_FILE, {})
     albums.pop(album_id, None)
@@ -166,6 +230,7 @@ def delete_album(album_id):
 # --- Post management ---
 
 @app.route("/albums/<album_id>/posts", methods=["POST"])
+@login_required
 def add_post(album_id):
     caption = request.form.get("caption", "").strip()
     albums = load_json(ALBUMS_FILE, {})
@@ -193,6 +258,7 @@ def add_post(album_id):
 
 
 @app.route("/albums/<album_id>/posts/<post_id>/delete", methods=["POST"])
+@owner_required
 def delete_post(album_id, post_id):
     albums = load_json(ALBUMS_FILE, {})
     if album_id in albums:
@@ -206,6 +272,7 @@ def delete_post(album_id, post_id):
 # --- Legacy routes (kept for backward compatibility) ---
 
 @app.route("/upload", methods=["POST"])
+@login_required
 def upload():
     album_id = request.form.get("album_id", "").strip()
     caption_text = request.form.get("caption", "").strip()
@@ -240,6 +307,7 @@ def upload():
 
 
 @app.route("/delete/<album_id>")
+@owner_required
 def delete(album_id):
     albums = load_json(ALBUMS_FILE, {})
     albums.pop(album_id, None)
@@ -253,13 +321,9 @@ def healthz():
 
 
 @app.route("/backup/download")
+@owner_required
 def backup_download():
-    """Admin-only endpoint to download a manual backup of all JSON data files."""
-    admin_key = os.environ.get("ADMIN_SECRET_KEY", "")
-    provided_key = request.args.get("key", "")
-    if not admin_key or provided_key != admin_key:
-        return "Unauthorized", 401
-
+    """Owner-only endpoint to download a manual backup of all JSON data files."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for fname in (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE):
@@ -278,6 +342,7 @@ def backup_download():
 
 
 @app.route("/backup/manual", methods=["POST"])
+@owner_required
 def backup_manual():
     """Trigger a manual backup to Cloudinary and return JSON result."""
     try:
@@ -289,6 +354,7 @@ def backup_manual():
 
 
 @app.route("/backup/restore", methods=["POST"])
+@owner_required
 def backup_restore():
     """Fetch the latest backup from Cloudinary and restore JSON data files."""
     backup_url = None
@@ -330,6 +396,53 @@ def backup_restore():
         return jsonify({"ok": False, "error": "Khôi phục thất bại. Vui lòng thử lại."}), 500
 
 
+@app.route("/broadcast", methods=["POST"])
+@login_required
+def broadcast():
+    """Send a broadcast message to all subscribers via Telegram Bot API."""
+    if not BOT_TOKEN:
+        return jsonify({"ok": False, "error": "Bot chưa được cấu hình"}), 500
+    message = request.form.get("message", "").strip()
+    if not message:
+        return jsonify({"ok": False, "error": "Tin nhắn không được để trống"}), 400
+    subs = load_json(SUBS_FILE, [])
+    if not subs:
+        return jsonify({"ok": False, "error": "Chưa có người đăng ký nào"}), 400
+    success, fail = 0, 0
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    for user_id in subs:
+        try:
+            resp = httpx.post(url, json={"chat_id": user_id, "text": message}, timeout=10)
+            if resp.status_code == 200:
+                success += 1
+            else:
+                fail += 1
+        except Exception as e:
+            log.warning(f"Broadcast to {user_id} failed: {e}")
+            fail += 1
+    return jsonify({"ok": True, "success": success, "fail": fail})
+
+
+@app.route("/settings/time", methods=["POST"])
+@login_required
+def settings_time():
+    """Update auto-schedule hour and minute in config.json."""
+    try:
+        hour = int(request.form.get("hour", 0))
+        minute = int(request.form.get("minute", 0))
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return jsonify({"ok": False, "error": "Giờ hoặc phút không hợp lệ"}), 400
+        # Convert Vietnam time (UTC+7) to UTC
+        hour_utc = (hour - 7) % 24
+        cfg = load_json(CONFIG_FILE, {})
+        cfg["hour"] = hour_utc
+        cfg["minute"] = minute
+        save_json(CONFIG_FILE, cfg)
+        return jsonify({"ok": True, "hour": hour, "minute": minute})
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "error": "Dữ liệu không hợp lệ"}), 400
+
+
 # ===== BOT HANDLERS =====
 
 if BOT_TOKEN:
@@ -340,6 +453,11 @@ if BOT_TOKEN:
 
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_chat.id
+        # Reject banned users
+        banned = load_json(BANNED_FILE, [])
+        if user_id in banned:
+            await update.message.reply_text("⛔ Bạn đã bị cấm sử dụng bot này.")
+            return
         subs = load_json(SUBS_FILE, [])
         if user_id not in subs:
             subs.append(user_id)
@@ -477,6 +595,63 @@ if BOT_TOKEN:
             if ADMIN_ID:
                 await context.bot.send_message(ADMIN_ID, f"❌ Backup failed: {e}")
 
+    async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Admin-only: reply with total users, albums, and posts."""
+        if not ADMIN_ID or update.effective_chat.id != ADMIN_ID:
+            return
+        subs = load_json(SUBS_FILE, [])
+        albums = load_json(ALBUMS_FILE, {})
+        total = total_posts(albums)
+        await update.message.reply_text(
+            f"📊 Thống kê Bot:\n"
+            f"👥 Người đăng ký: {len(subs)}\n"
+            f"📁 Albums: {len(albums)}\n"
+            f"📝 Bài viết: {total}"
+        )
+
+    async def sendall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Admin-only: broadcast a message to all subscribers."""
+        if not ADMIN_ID or update.effective_chat.id != ADMIN_ID:
+            return
+        message_text = " ".join(context.args) if context.args else ""
+        if not message_text:
+            await update.message.reply_text("Cú pháp: /sendall <nội dung tin nhắn>")
+            return
+        subs = load_json(SUBS_FILE, [])
+        if not subs:
+            await update.message.reply_text("Chưa có người đăng ký nào.")
+            return
+        success, fail = 0, 0
+        for user_id in subs:
+            try:
+                await context.bot.send_message(user_id, message_text)
+                success += 1
+            except Exception:
+                fail += 1
+        await update.message.reply_text(
+            f"📢 Đã gửi thông báo!\n✅ Thành công: {success}\n❌ Thất bại: {fail}"
+        )
+
+    async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Admin-only: ban a user by user_id."""
+        if not ADMIN_ID or update.effective_chat.id != ADMIN_ID:
+            return
+        if not context.args or not context.args[0].lstrip("-").isdigit():
+            await update.message.reply_text("Cú pháp: /ban <user_id>")
+            return
+        target_id = int(context.args[0])
+        # Remove from subscribers
+        subs = load_json(SUBS_FILE, [])
+        if target_id in subs:
+            subs.remove(target_id)
+            save_json(SUBS_FILE, subs)
+        # Add to banned list
+        banned = load_json(BANNED_FILE, [])
+        if target_id not in banned:
+            banned.append(target_id)
+            save_json(BANNED_FILE, banned)
+        await update.message.reply_text(f"✅ Đã cấm người dùng {target_id}.")
+
     def run_bot_thread():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -484,6 +659,9 @@ if BOT_TOKEN:
         ptb_app = Application.builder().token(BOT_TOKEN).build()
         ptb_app.add_handler(CommandHandler("start", start))
         ptb_app.add_handler(CommandHandler("settudongguilink", set_time))
+        ptb_app.add_handler(CommandHandler("stats", stats))
+        ptb_app.add_handler(CommandHandler("sendall", sendall))
+        ptb_app.add_handler(CommandHandler("ban", ban))
         ptb_app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
         ptb_app.add_handler(CallbackQueryHandler(album_click))
         ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
