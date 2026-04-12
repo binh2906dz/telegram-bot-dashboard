@@ -4,6 +4,7 @@ import json
 import uuid
 import asyncio
 import logging
+import secrets
 import zipfile
 import urllib.request
 from datetime import datetime, timezone, timedelta, time as dt_time
@@ -25,7 +26,11 @@ ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
-app.secret_key = os.environ.get("SECRET_KEY", "change-me-in-production-secret-key")
+_secret_key = os.environ.get("SECRET_KEY", "")
+if not _secret_key:
+    _secret_key = "change-me-in-production-secret-key"
+    log.warning("SECRET_KEY not set – using insecure default. Set SECRET_KEY env var in production!")
+app.secret_key = _secret_key
 
 # ===== AUTH CONFIG =====
 OWNER_USER = os.environ.get("OWNER_USER", "admin")
@@ -163,18 +168,20 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "").strip()
-        if username == OWNER_USER and password == OWNER_PASS:
+        # Use constant-time comparison to prevent timing attacks
+        is_owner = (secrets.compare_digest(username, OWNER_USER) and
+                    secrets.compare_digest(password, OWNER_PASS))
+        is_manager = (secrets.compare_digest(username, MANAGER_USER) and
+                      secrets.compare_digest(password, MANAGER_PASS))
+        if is_owner or is_manager:
             session["logged_in"] = True
-            session["role"] = "owner"
+            session["role"] = "owner" if is_owner else "manager"
             session["username"] = username
-            next_url = request.args.get("next") or "/"
-            return redirect(next_url)
-        elif username == MANAGER_USER and password == MANAGER_PASS:
-            session["logged_in"] = True
-            session["role"] = "manager"
-            session["username"] = username
-            next_url = request.args.get("next") or "/"
-            return redirect(next_url)
+            # Validate next_url to prevent open redirect: only allow relative paths
+            next_url = request.args.get("next", "")
+            if next_url and next_url.startswith("/") and not next_url.startswith("//"):
+                return redirect(next_url)
+            return redirect("/")
         else:
             error = "Sai tên đăng nhập hoặc mật khẩu!"
     return render_template("login.html", error=error)
