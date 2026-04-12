@@ -20,8 +20,8 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-_admin_str = os.environ.get("ADMIN_CHAT_ID", "")
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", os.environ.get("TOKEN", ""))
+_admin_str = os.environ.get("ADMIN_CHAT_ID", os.environ.get("ADMIN_ID", ""))
 ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
 app = Flask(__name__)
@@ -41,6 +41,7 @@ MANAGER_PASS = os.environ.get("MANAGER_PASS", "quanly123")
 ALBUMS_FILE = "albums.json"
 SUBS_FILE = "subscribers.json"
 CONFIG_FILE = "config.json"
+BANNED_FILE = "banned.json"
 
 # ===== CLOUDINARY CONFIG =====
 # Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET
