@@ -1,5 +1,7 @@
 import io
 import os
+import re
+import glob
 import json
 import uuid
 import asyncio
@@ -107,6 +109,48 @@ def increment_messages_sent(bot_id: str, count: int):
     save_json(STATS_FILE, stats)
 
 
+def get_messages_flow() -> dict:
+    """Load messages.json in node-based flow format.
+    Automatically migrates from the old flat {start_text, buttons[]} format."""
+    data = load_json(MESSAGES_FILE, {})
+    # Detect old flat format (has "start_text" key)
+    if isinstance(data, dict) and "start_text" in data:
+        old_buttons = data.get("buttons", [])
+        new_buttons = []
+        for btn in old_buttons:
+            label = str(btn.get("text", "")).strip()
+            url = str(btn.get("url") or "").strip()
+            cb = str(btn.get("callback_data") or "").strip()
+            if label and url:
+                new_buttons.append({"label": label, "type": "url", "value": url})
+            elif label and cb:
+                new_buttons.append({"label": label, "type": "node", "value": cb})
+        flow = {"start": {"text": data.get("start_text", "Chào mừng bạn! 👋"), "buttons": new_buttons}}
+        save_json(MESSAGES_FILE, flow)
+        return flow
+    if not isinstance(data, dict) or not data:
+        return {"start": {"text": "Chào mừng bạn! 👋", "buttons": []}}
+    if "start" not in data:
+        data["start"] = {"text": "Chào mừng bạn! 👋", "buttons": []}
+    return data
+
+
+def _backup_files_to_zip(zf: zipfile.ZipFile):
+    """Write all data files into a ZipFile object."""
+    for fname in (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE, BOTS_FILE, MESSAGES_FILE, BANNED_FILE):
+        try:
+            with open(fname, "rb") as f:
+                zf.writestr(fname, f.read())
+        except FileNotFoundError:
+            pass
+    for path in glob.glob("subs_*.json"):
+        try:
+            with open(path, "rb") as f:
+                zf.writestr(path, f.read())
+        except FileNotFoundError:
+            pass
+
+
 # ===== AUTH HELPERS =====
 
 def login_required(f):
@@ -162,12 +206,7 @@ def run_daily_backup():
     # Build zip in memory
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for fname in (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE):
-            try:
-                with open(fname, "rb") as f:
-                    zf.writestr(fname, f.read())
-            except FileNotFoundError:
-                zf.writestr(fname, b"{}")
+        _backup_files_to_zip(zf)
     buf.seek(0)
 
     # Upload to Cloudinary as raw file
@@ -362,12 +401,7 @@ def backup_download():
     """Owner-only endpoint to download a manual backup of all JSON data files."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for fname in (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE):
-            try:
-                with open(fname, "rb") as f:
-                    zf.writestr(fname, f.read())
-            except FileNotFoundError:
-                zf.writestr(fname, b"{}")
+        _backup_files_to_zip(zf)
     buf.seek(0)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return Response(
@@ -419,12 +453,15 @@ def backup_restore():
             zip_data = resp.read(max_bytes)
 
         buf = io.BytesIO(zip_data)
+        allowed_static = {ALBUMS_FILE, SUBS_FILE, CONFIG_FILE, BOTS_FILE, MESSAGES_FILE, BANNED_FILE}
         with zipfile.ZipFile(buf, "r") as zf:
-            names = zf.namelist()
-            for fname in (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE):
-                if fname in names:
-                    content = json.loads(zf.read(fname).decode("utf-8"))
-                    save_json(fname, content)
+            for fname in zf.namelist():
+                if fname not in allowed_static and not (
+                    fname.startswith("subs_") and fname.endswith(".json")
+                ):
+                    continue
+                content = json.loads(zf.read(fname).decode("utf-8"))
+                save_json(fname, content)
 
         return jsonify({"ok": True})
     except Exception as e:
@@ -554,34 +591,73 @@ def bots_health():
 @app.route("/messages", methods=["GET"])
 @login_required
 def get_messages():
-    """Return current custom message configuration."""
-    cfg = load_json(MESSAGES_FILE, {
-        "start_text": "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏",
-        "buttons": [{"text": "🔥 CHẠM LÀ NGHIỆN 🔥", "callback_data": "menu", "url": ""}],
-    })
-    return jsonify(cfg)
+    """Return current message flow in node-based format."""
+    return jsonify(get_messages_flow())
 
 
 @app.route("/messages", methods=["POST"])
 @login_required
 def save_messages():
-    """Save custom start message text and inline button configuration."""
+    """Save the complete message flow (dict of nodes)."""
     data = request.get_json()
-    if not data:
+    if not isinstance(data, dict):
         return jsonify({"ok": False, "error": "Dữ liệu không hợp lệ"}), 400
-    start_text = str(data.get("start_text", "")).strip()
-    raw_buttons = data.get("buttons", [])
-    clean_buttons = []
-    for btn in raw_buttons:
+    clean_flow = {}
+    for node_id, node in data.items():
+        node_id = str(node_id).strip()
+        if not node_id or not isinstance(node, dict):
+            continue
+        text = str(node.get("text", "")).strip()
+        clean_buttons = _parse_node_buttons(node.get("buttons", []))
+        clean_flow[node_id] = {"text": text, "buttons": clean_buttons}
+    if "start" not in clean_flow:
+        clean_flow["start"] = {"text": "Chào mừng bạn! 👋", "buttons": []}
+    save_json(MESSAGES_FILE, clean_flow)
+    return jsonify({"ok": True})
+
+
+def _parse_node_buttons(raw: list) -> list:
+    """Validate and clean a list of node button dicts."""
+    clean = []
+    for btn in raw:
         if not isinstance(btn, dict):
             continue
-        text = str(btn.get("text", "")).strip()
-        if not text:
-            continue
-        url = str(btn.get("url", "")).strip()
-        cb = str(btn.get("callback_data", "")).strip()
-        clean_buttons.append({"text": text, "url": url, "callback_data": cb})
-    save_json(MESSAGES_FILE, {"start_text": start_text, "buttons": clean_buttons})
+        label = str(btn.get("label", "")).strip()
+        btn_type = str(btn.get("type", "url")).strip()
+        value = str(btn.get("value", "")).strip()
+        if label and value and btn_type in ("url", "node"):
+            clean.append({"label": label, "type": btn_type, "value": value})
+    return clean
+
+
+@app.route("/messages/<node_id>", methods=["POST"])
+@login_required
+def save_message_node(node_id):
+    """Save or update a single message node."""
+    node_id = node_id.strip()
+    if not node_id or not re.match(r'^[a-zA-Z0-9_-]+$', node_id):
+        return jsonify({"ok": False, "error": "Node ID không hợp lệ (chỉ dùng chữ, số, _ -)"}), 400
+    data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "Dữ liệu không hợp lệ"}), 400
+    text = str(data.get("text", "")).strip()
+    clean_buttons = _parse_node_buttons(data.get("buttons", []))
+    flow = get_messages_flow()
+    flow[node_id] = {"text": text, "buttons": clean_buttons}
+    save_json(MESSAGES_FILE, flow)
+    return jsonify({"ok": True})
+
+
+@app.route("/messages/<node_id>/delete", methods=["POST"])
+@login_required
+def delete_message_node(node_id):
+    """Delete a message node (cannot delete 'start')."""
+    node_id = node_id.strip()
+    if node_id == "start":
+        return jsonify({"ok": False, "error": "Không thể xóa kịch bản 'start'"}), 400
+    flow = get_messages_flow()
+    flow.pop(node_id, None)
+    save_json(MESSAGES_FILE, flow)
     return jsonify({"ok": True})
 
 
@@ -590,6 +666,23 @@ def save_messages():
 if BOT_TOKEN or load_json(BOTS_FILE, []):
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
     from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+
+    # ---- Flow keyboard builder ----
+
+    def _build_flow_keyboard(buttons: list) -> list:
+        """Build InlineKeyboardMarkup rows from a node's button list."""
+        keyboard = []
+        for btn in buttons:
+            label = btn.get("label", "")
+            btn_type = btn.get("type", "url")
+            value = btn.get("value", "")
+            if not label or not value:
+                continue
+            if btn_type == "url":
+                keyboard.append([InlineKeyboardButton(label, url=value)])
+            else:  # node
+                keyboard.append([InlineKeyboardButton(label, callback_data=f"flow_{value}")])
+        return keyboard
 
     # ---- Shared handlers (no per-bot subscriber state needed) ----
 
@@ -638,20 +731,11 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         await query.answer()
 
         if query.data == "back":
-            msg_cfg = load_json(MESSAGES_FILE, {})
-            back_text = msg_cfg.get("start_text", "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏")
-            back_btns = msg_cfg.get("buttons", [])
-            if back_btns:
-                keyboard = []
-                for btn in back_btns:
-                    t = btn.get("text", "")
-                    u = btn.get("url", "")
-                    cb = btn.get("callback_data", "")
-                    if t and u:
-                        keyboard.append([InlineKeyboardButton(t, url=u)])
-                    elif t and cb:
-                        keyboard.append([InlineKeyboardButton(t, callback_data=cb)])
-            else:
+            flow = get_messages_flow()
+            start_node = flow.get("start", {"text": "Chào mừng bạn! 👋", "buttons": []})
+            back_text = start_node.get("text", "Chào mừng bạn! 👋") or "Chào mừng bạn! 👋"
+            keyboard = _build_flow_keyboard(start_node.get("buttons", []))
+            if not keyboard:
                 keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
             await query.edit_message_text(
                 back_text,
@@ -666,6 +750,26 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
 
         if album:
             await send_album(chat_id, context.bot, album)
+
+    async def flow_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle flow navigation callbacks (callback_data starting with 'flow_')."""
+        query = update.callback_query
+        await query.answer()
+        node_id = query.data[5:]  # strip "flow_" prefix
+        flow = get_messages_flow()
+        node = flow.get(node_id)
+        if not node:
+            await query.answer("⚠️ Không tìm thấy tin nhắn này.", show_alert=True)
+            return
+        text = node.get("text", "") or "..."
+        keyboard = _build_flow_keyboard(node.get("buttons", []))
+        try:
+            await query.edit_message_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None,
+            )
+        except Exception:
+            pass
 
     # ---- Per-bot application factory ----
 
@@ -687,35 +791,12 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                 bot_subs.append(user_id)
                 save_json(_subs_file, bot_subs)
 
-            m1 = await update.message.reply_text("🚀 NƠI BÓNG TỐI BẮT ĐẦU... NƠI BẢN NĂNG THỨC TỈNH 🚀")
-            await asyncio.sleep(1)
-            m2 = await update.message.reply_text("👿 KHÔNG DÀNH CHO NGƯỜI YẾU TIM - CHỈ DÀNH CHO KẺ DÁM KHÁM PHÁ 👿")
-            await asyncio.sleep(1)
-            m3 = await update.message.reply_text("👀 BƯỚC VÀO ĐÂY BẠN SẼ KHÔNG MUỐN QUAY LẠI 👀")
-            await asyncio.sleep(2)
-            for m in [m1, m2, m3]:
-                try:
-                    await m.delete()
-                except Exception:
-                    pass
-
-            # Load custom message config in real-time
-            msg_cfg = load_json(MESSAGES_FILE, {})
-            start_text = msg_cfg.get("start_text", "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏")
-            custom_buttons = msg_cfg.get("buttons", [])
-            if custom_buttons:
-                keyboard = []
-                for btn in custom_buttons:
-                    t = btn.get("text", "")
-                    u = btn.get("url", "")
-                    cb = btn.get("callback_data", "")
-                    if t and u:
-                        keyboard.append([InlineKeyboardButton(t, url=u)])
-                    elif t and cb:
-                        keyboard.append([InlineKeyboardButton(t, callback_data=cb)])
-                if not keyboard:
-                    keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
-            else:
+            # Load message flow in real-time
+            flow = get_messages_flow()
+            start_node = flow.get("start", {"text": "Chào mừng bạn! 👋", "buttons": []})
+            start_text = start_node.get("text", "Chào mừng bạn! 👋") or "Chào mừng bạn! 👋"
+            keyboard = _build_flow_keyboard(start_node.get("buttons", []))
+            if not keyboard:
                 keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
 
             await update.message.reply_text(
@@ -836,6 +917,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         ptb_app.add_handler(CommandHandler("sendall", sendall_cmd))
         ptb_app.add_handler(CommandHandler("ban", ban_cmd))
         ptb_app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
+        ptb_app.add_handler(CallbackQueryHandler(flow_handler, pattern="^flow_"))
         ptb_app.add_handler(CallbackQueryHandler(album_click))
         ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
         ptb_app.job_queue.run_daily(daily_backup_job, time=dt_time(1, 0, 0, tzinfo=timezone.utc))

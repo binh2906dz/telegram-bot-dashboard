@@ -585,45 +585,29 @@
     </div>
   </div>
 
-  <!-- ========== QUẢN LÝ TIN NHẮN SECTION ========== -->
+  <!-- ========== QUẢN LÝ KỊCH BẢN BOT SECTION ========== -->
   <div class="section-header mt-5">
-    <span class="section-title"><i class="bi bi-chat-dots me-2"></i>Quản lý Tin nhắn</span>
+    <span class="section-title"><i class="bi bi-diagram-3 me-2"></i>Quản lý Kịch bản Bot</span>
+    <button class="btn btn-sm btn-accent" onclick="showAddNodeModal()">
+      <i class="bi bi-plus-lg me-1"></i>Thêm Kịch bản
+    </button>
   </div>
 
   <div class="album-card mb-4 p-0">
+    <div class="p-3 pb-2" style="border-bottom:1px solid var(--border-color);">
+      <div class="text-muted" style="font-size:.82rem;">
+        <i class="bi bi-info-circle me-1"></i>
+        Mỗi <strong>Kịch bản</strong> là một tin nhắn bot có thể gửi.
+        Nút <span class="badge bg-primary" style="font-size:.7rem;">💬 Tin nhắn Khác</span> sẽ chuyển người dùng đến kịch bản tương ứng.
+        Kịch bản <code>start</code> là tin nhắn đầu tiên khi người dùng gõ <code>/start</code>.
+      </div>
+    </div>
     <div class="p-3">
-      <div class="mb-3">
-        <label class="form-label fw-semibold">Nội dung tin nhắn /start</label>
-        <textarea id="msgStartText" class="form-control" rows="3"
-                  placeholder="Nội dung tin nhắn khi người dùng gõ /start...">{{ messages_cfg.start_text | default('NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏') }}</textarea>
-        <div class="form-text text-muted">Bot sẽ hiển thị nội dung này sau khi chào mừng người dùng.</div>
-      </div>
-
-      <div class="mb-3">
-        <label class="form-label fw-semibold">Nút bấm Inline (Inline Buttons)</label>
-        <div id="btnList">
-          {% for btn in messages_cfg.buttons %}
-          <div class="btn-row">
-            <div class="btn-row-inputs">
-              <input class="form-control form-control-sm btn-text" placeholder="Tên nút (VD: 🔥 Xem Menu)" value="{{ btn.text | e }}">
-              <input class="form-control form-control-sm btn-url" placeholder="URL (https://...) hoặc để trống" value="{{ btn.url | default('') | e }}">
-              <input class="form-control form-control-sm btn-cb" placeholder="Callback data (VD: menu)" value="{{ btn.callback_data | default('') | e }}">
-            </div>
-            <button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="removeBtnRow(this)" title="Xóa nút">
-              <i class="bi bi-x-lg"></i>
-            </button>
-          </div>
-          {% endfor %}
+      <div id="flowNodesList">
+        <div class="text-center py-4 text-muted">
+          <span class="spinner-border spinner-border-sm me-2" role="status"></span>Đang tải kịch bản...
         </div>
-        <button class="btn btn-sm btn-outline-secondary mt-2" onclick="addBtnRow()">
-          <i class="bi bi-plus-lg me-1"></i>Thêm nút
-        </button>
-        <div class="form-text text-muted mt-1">Mỗi nút cần có Tên nút và một trong hai: URL hoặc Callback data.</div>
       </div>
-
-      <button class="btn btn-accent btn-sm" id="btnSaveMessages" onclick="doSaveMessages(this)">
-        <i class="bi bi-floppy me-1"></i>Lưu cài đặt tin nhắn
-      </button>
     </div>
   </div>
   {% endif %}
@@ -757,6 +741,81 @@
   </div>
 </div>
 
+<!-- ========== FLOW NODE EDIT MODAL ========== -->
+<div class="modal fade" id="flowNodeModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-pencil-square me-2" style="color:var(--accent);"></i>
+          Chỉnh sửa: <code id="fnModalNodeId" class="text-warning ms-1"></code>
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="fnNodeId">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">
+            <i class="bi bi-chat-left-text me-1" style="color:var(--accent);"></i>Nội dung tin nhắn
+          </label>
+          <textarea id="fnNodeText" class="form-control" rows="5"
+                    placeholder="Nhập nội dung tin nhắn bot sẽ hiển thị cho người dùng..."></textarea>
+          <div class="form-text text-muted">Hỗ trợ emoji và xuống dòng. Bot sẽ hiển thị đúng như bạn nhập.</div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label fw-semibold">
+            <i class="bi bi-grid-1x2 me-1" style="color:var(--accent);"></i>Nút bấm dưới tin nhắn
+          </label>
+          <div id="fnBtnList" class="mb-2"></div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fnAddBtn()">
+            <i class="bi bi-plus-lg me-1"></i>Thêm nút bấm
+          </button>
+          <div class="mt-2 p-2 rounded" style="background:rgba(255,255,255,.03);font-size:.8rem;color:#999;">
+            <strong style="color:#ccc;">💡 Hướng dẫn:</strong><br>
+            &nbsp;🔗 <strong>Mở Link Web</strong> — khi nhấn sẽ mở URL trong trình duyệt<br>
+            &nbsp;💬 <strong>Mở Tin nhắn Khác</strong> — khi nhấn sẽ chuyển sang kịch bản khác ngay trong Telegram
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-accent" id="btnSaveNode" onclick="doSaveNode(this)">
+          <i class="bi bi-floppy me-1"></i>Lưu Kịch bản
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== ADD NODE MODAL ========== -->
+<div class="modal fade" id="addNodeModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-plus-square me-2" style="color:var(--accent);"></i>Thêm Kịch bản mới</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label fw-semibold">ID Kịch bản <span class="text-danger">*</span></label>
+          <input id="newNodeId" class="form-control font-monospace" placeholder="VD: bang_gia, khuyen_mai, menu_vip" required>
+          <div class="form-text text-muted">Chỉ dùng chữ thường, số và dấu gạch dưới <code>_</code>. Không dấu cách, không dấu tiếng Việt.</div>
+        </div>
+        <div class="mt-2 p-2 rounded" style="background:rgba(255,94,0,.07);font-size:.8rem;color:#ccc;">
+          <i class="bi bi-lightbulb me-1" style="color:var(--accent);"></i>
+          ID này sẽ được dùng để liên kết các nút bấm. Ví dụ: nút «Xem Bảng Giá» ở kịch bản <code>start</code> sẽ trỏ tới ID <code>bang_gia</code>.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-accent" onclick="doAddNode(this)">
+          <i class="bi bi-plus-lg me-1"></i>Tạo & Chỉnh sửa
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ========== TOAST CONTAINER ========== -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index:9500;" id="toastContainer"></div>
 
@@ -836,6 +895,10 @@
         const posts = el.querySelectorAll('.post-item');
         if (posts.length === 0) toggleAddPost(albumId);
       }
+    }
+    // Load flow data (only on owner pages where the section exists)
+    if (document.getElementById('flowNodesList')) {
+      loadFlowData();
     }
   });
 
@@ -1064,52 +1127,165 @@
     actions.classList.toggle('show');
   }
 
-  /* ---- Message Management: add/remove button rows ---- */
-  function addBtnRow(text, url, cb) {
-    const list = document.getElementById('btnList');
-    const div = document.createElement('div');
-    div.className = 'btn-row';
-    div.innerHTML =
-      '<div class="btn-row-inputs">' +
-        '<input class="form-control form-control-sm btn-text" placeholder="Tên nút (VD: 🔥 Xem Menu)" value="' + escapeHtml(text || '') + '">' +
-        '<input class="form-control form-control-sm btn-url" placeholder="URL (https://...) hoặc để trống" value="' + escapeHtml(url || '') + '">' +
-        '<input class="form-control form-control-sm btn-cb" placeholder="Callback data (VD: menu)" value="' + escapeHtml(cb || '') + '">' +
-      '</div>' +
-      '<button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="removeBtnRow(this)" title="Xóa nút">' +
-        '<i class="bi bi-x-lg"></i>' +
-      '</button>';
-    list.appendChild(div);
+  /* ========== CHATBOT FLOW BUILDER ========== */
+  let _flowData = {};
+
+  async function loadFlowData() {
+    try {
+      const res = await fetch('/messages');
+      if (!res.ok) return;
+      _flowData = await res.json();
+      renderNodeList();
+    } catch(e) {
+      console.error('Failed to load flow:', e);
+    }
   }
 
-  function removeBtnRow(btn) {
-    btn.closest('.btn-row').remove();
-  }
-
-  /* ---- Save Messages Config ---- */
-  async function doSaveMessages(btn) {
-    const startText = document.getElementById('msgStartText').value;
-    const rows = document.querySelectorAll('#btnList .btn-row');
-    const buttons = [];
-    rows.forEach(function(row) {
-      const text = row.querySelector('.btn-text').value.trim();
-      const url = row.querySelector('.btn-url').value.trim();
-      const cb = row.querySelector('.btn-cb').value.trim();
-      if (text && (url || cb)) {
-        buttons.push({ text: text, url: url, callback_data: cb });
-      }
+  function renderNodeList() {
+    const container = document.getElementById('flowNodesList');
+    if (!container) return;
+    const nodeIds = Object.keys(_flowData);
+    if (nodeIds.length === 0) {
+      container.innerHTML =
+        '<div class="empty-state py-3"><i class="bi bi-chat-dots"></i>' +
+        '<p class="mt-2 mb-0">Chưa có kịch bản nào. Hãy tạo kịch bản <code>start</code> đầu tiên!</p></div>';
+      return;
+    }
+    nodeIds.sort(function(a, b) {
+      if (a === 'start') return -1;
+      if (b === 'start') return 1;
+      return a.localeCompare(b);
     });
+
+    let html = '<div class="list-group list-group-flush">';
+    for (const nodeId of nodeIds) {
+      const node = _flowData[nodeId] || {};
+      const text = (node.text || '').replace(/\n/g, ' ').substring(0, 70);
+      const btns = node.buttons || [];
+      const isStart = nodeId === 'start';
+
+      let arrows = '';
+      for (const btn of btns) {
+        if (btn.type === 'node') {
+          arrows += '<span class="badge bg-primary me-1" style="font-size:.68rem;">→ ' + escapeHtml(btn.value) + '</span>';
+        } else {
+          arrows += '<span class="badge bg-secondary me-1" style="font-size:.68rem;">🔗 URL</span>';
+        }
+      }
+
+      html +=
+        '<div class="list-group-item py-3" style="background:transparent;border-color:var(--border-color);">' +
+          '<div class="d-flex align-items-start gap-3 flex-wrap">' +
+            '<div class="flex-grow-1" style="min-width:0;">' +
+              '<div class="d-flex align-items-center gap-2 mb-1 flex-wrap">' +
+                '<code style="color:var(--accent);font-size:.88rem;">' + escapeHtml(nodeId) + '</code>' +
+                (isStart ? '<span class="badge bg-warning text-dark" style="font-size:.65rem;">START</span>' : '') +
+                '<span class="text-muted" style="font-size:.75rem;"><i class="bi bi-grid me-1"></i>' + btns.length + ' nút</span>' +
+              '</div>' +
+              '<div class="text-muted text-truncate" style="font-size:.82rem;max-width:100%;">' +
+                (text ? escapeHtml(text) + ((node.text||'').length > 70 ? '…' : '') : '<em>Chưa có nội dung</em>') +
+              '</div>' +
+              (arrows ? '<div class="mt-1">' + arrows + '</div>' : '') +
+            '</div>' +
+            '<div class="d-flex gap-1 flex-shrink-0 mt-1">' +
+              '<button class="btn btn-sm btn-outline-primary" onclick="openEditNode(\'' + escapeHtml(nodeId) + '\')" title="Chỉnh sửa">' +
+                '<i class="bi bi-pencil"></i>' +
+              '</button>' +
+              (!isStart
+                ? '<button class="btn btn-sm btn-outline-danger" onclick="doDeleteNode(\'' + escapeHtml(nodeId) + '\', this)" title="Xóa"><i class="bi bi-trash3"></i></button>'
+                : '') +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+  }
+
+  function openEditNode(nodeId) {
+    const node = _flowData[nodeId] || { text: '', buttons: [] };
+    document.getElementById('fnModalNodeId').textContent = nodeId;
+    document.getElementById('fnNodeId').value = nodeId;
+    document.getElementById('fnNodeText').value = node.text || '';
+    const container = document.getElementById('fnBtnList');
+    container.innerHTML = '';
+    (node.buttons || []).forEach(function(btn) {
+      fnAddBtn(btn.label, btn.type, btn.value);
+    });
+    new bootstrap.Modal(document.getElementById('flowNodeModal')).show();
+  }
+
+  function fnAddBtn(label, type, value) {
+    const container = document.getElementById('fnBtnList');
+    const nodeIds = Object.keys(_flowData).sort(function(a,b){ return a==='start'?-1:b==='start'?1:a.localeCompare(b); });
+    const isNode = (type === 'node');
+
+    const nodeOptions = nodeIds.map(function(id) {
+      return '<option value="' + escapeHtml(id) + '"' + (isNode && value === id ? ' selected' : '') + '>' + escapeHtml(id) + '</option>';
+    }).join('');
+
+    const div = document.createElement('div');
+    div.className = 'fn-btn-row mb-2 p-2 rounded';
+    div.style.cssText = 'background:rgba(255,255,255,.03);border:1px solid var(--border-color);';
+    div.innerHTML =
+      '<div class="mb-1">' +
+        '<input class="form-control form-control-sm fn-btn-label" placeholder="Tên nút (VD: 🔥 Xem Menu, 💰 Bảng Giá)" value="' + escapeHtml(label || '') + '">' +
+      '</div>' +
+      '<div class="d-flex gap-2 align-items-center flex-wrap">' +
+        '<select class="form-select form-select-sm fn-btn-type" onchange="fnToggleBtnType(this)" style="max-width:180px;flex-shrink:0;">' +
+          '<option value="url"' + (!isNode ? ' selected' : '') + '>🔗 Mở Link Web</option>' +
+          '<option value="node"' + (isNode ? ' selected' : '') + '>💬 Mở Tin nhắn Khác</option>' +
+        '</select>' +
+        '<input class="form-control form-control-sm fn-btn-url' + (isNode ? ' d-none' : '') + '" style="flex:1;min-width:100px;" placeholder="https://t.me/..." value="' + escapeHtml(!isNode ? (value || '') : '') + '">' +
+        '<select class="form-select form-select-sm fn-btn-node' + (!isNode ? ' d-none' : '') + '" style="flex:1;min-width:100px;">' +
+          nodeOptions +
+        '</select>' +
+        '<button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="this.closest(\'.fn-btn-row\').remove()" title="Xóa nút"><i class="bi bi-x-lg"></i></button>' +
+      '</div>';
+    container.appendChild(div);
+  }
+
+  function fnToggleBtnType(select) {
+    const row = select.closest('.fn-btn-row');
+    const urlInput = row.querySelector('.fn-btn-url');
+    const nodeSelect = row.querySelector('.fn-btn-node');
+    if (select.value === 'node') {
+      urlInput.classList.add('d-none');
+      nodeSelect.classList.remove('d-none');
+    } else {
+      urlInput.classList.remove('d-none');
+      nodeSelect.classList.add('d-none');
+    }
+  }
+
+  async function doSaveNode(btn) {
+    const nodeId = document.getElementById('fnNodeId').value;
+    const text = document.getElementById('fnNodeText').value;
+    const buttons = [];
+    document.querySelectorAll('#fnBtnList .fn-btn-row').forEach(function(row) {
+      const label = row.querySelector('.fn-btn-label').value.trim();
+      const type = row.querySelector('.fn-btn-type').value;
+      const value = type === 'node'
+        ? row.querySelector('.fn-btn-node').value
+        : row.querySelector('.fn-btn-url').value.trim();
+      if (label && value) buttons.push({ label: label, type: type, value: value });
+    });
+
     const originalHtml = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
     try {
-      const res = await fetch('/messages', {
+      const res = await fetch('/messages/' + encodeURIComponent(nodeId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start_text: startText, buttons: buttons })
+        body: JSON.stringify({ text: text, buttons: buttons })
       });
       const data = await res.json();
       if (data.ok) {
-        showToast('✅ Đã lưu cài đặt tin nhắn! Bot sẽ dùng nội dung mới ngay lập tức.', 'success');
+        _flowData[nodeId] = { text: text, buttons: buttons };
+        renderNodeList();
+        bootstrap.Modal.getInstance(document.getElementById('flowNodeModal')).hide();
+        showToast('✅ Đã lưu kịch bản «' + nodeId + '»! Bot cập nhật ngay lập tức.', 'success');
       } else {
         showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
       }
@@ -1119,6 +1295,46 @@
       btn.disabled = false;
       btn.innerHTML = originalHtml;
     }
+  }
+
+  async function doDeleteNode(nodeId, btn) {
+    if (!confirm('Xóa kịch bản «' + nodeId + '»?\nCác nút bấm trỏ đến kịch bản này sẽ không còn hoạt động.')) return;
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+    try {
+      const res = await fetch('/messages/' + encodeURIComponent(nodeId) + '/delete', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        delete _flowData[nodeId];
+        renderNodeList();
+        showToast('✅ Đã xóa kịch bản «' + nodeId + '»!', 'success');
+      } else {
+        showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    } catch(e) {
+      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+
+  function showAddNodeModal() {
+    document.getElementById('newNodeId').value = '';
+    new bootstrap.Modal(document.getElementById('addNodeModal')).show();
+  }
+
+  async function doAddNode(btn) {
+    const nodeId = document.getElementById('newNodeId').value.trim().toLowerCase();
+    if (!nodeId) { showToast('⚠️ Vui lòng nhập ID kịch bản', 'error'); return; }
+    if (!/^[a-z0-9_]+$/.test(nodeId)) { showToast('⚠️ ID chỉ được dùng chữ thường, số và dấu _', 'error'); return; }
+    if (_flowData[nodeId]) { showToast('⚠️ Kịch bản «' + nodeId + '» đã tồn tại!', 'error'); return; }
+    _flowData[nodeId] = { text: '', buttons: [] };
+    renderNodeList();
+    bootstrap.Modal.getInstance(document.getElementById('addNodeModal')).hide();
+    setTimeout(function() { openEditNode(nodeId); }, 350);
   }
 </script>
 </body>
