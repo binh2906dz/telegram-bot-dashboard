@@ -5,7 +5,7 @@ import uuid
 import asyncio
 import logging
 import zipfile
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time as dt_time
 from flask import Flask, request, redirect, render_template, jsonify, Response
 
 import cloudinary
@@ -28,10 +28,12 @@ SUBS_FILE = "subscribers.json"
 CONFIG_FILE = "config.json"
 
 # ===== CLOUDINARY CONFIG =====
+# Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET
+# as environment variables in your deployment (e.g. Railway Variables).
 cloudinary.config(
-    cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME", "dklzj37zf"),
-    api_key=os.environ.get("CLOUDINARY_API_KEY", "769787428559636"),
-    api_secret=os.environ.get("CLOUDINARY_API_SECRET", "1AA05R--Hd9qClIRiN1_wB8LaI4"),
+    cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME", ""),
+    api_key=os.environ.get("CLOUDINARY_API_KEY", ""),
+    api_secret=os.environ.get("CLOUDINARY_API_SECRET", ""),
     secure=True,
 )
 CLOUDINARY_BACKUP_FOLDER = "backups"
@@ -70,8 +72,8 @@ def total_posts(albums):
 
 # ===== CLOUDINARY HELPERS =====
 
-def upload_to_cloudinary(file_stream, original_filename: str) -> str:
-    """Upload a file stream to Cloudinary and return the secure URL."""
+def upload_to_cloudinary(file_stream) -> str:
+    """Upload an image file stream to Cloudinary and return the secure URL."""
     public_id = f"uploads/{uuid.uuid4().hex}"
     result = cloudinary.uploader.upload(
         file_stream,
@@ -172,7 +174,7 @@ def add_post(album_id):
     for img in request.files.getlist("images"):
         if img and img.filename:
             try:
-                url = upload_to_cloudinary(img.stream, img.filename)
+                url = upload_to_cloudinary(img.stream)
                 photos.append({"url": url})
             except Exception as e:
                 log.error(f"Cloudinary upload failed: {e}")
@@ -220,7 +222,7 @@ def upload():
     for img in request.files.getlist("images"):
         if img and img.filename:
             try:
-                url = upload_to_cloudinary(img.stream, img.filename)
+                url = upload_to_cloudinary(img.stream)
                 photos.append({"url": url})
             except Exception as e:
                 log.error(f"Cloudinary upload failed: {e}")
@@ -254,7 +256,7 @@ def backup_download():
     """Admin-only endpoint to download a manual backup of all JSON data files."""
     admin_key = os.environ.get("ADMIN_SECRET_KEY", "")
     provided_key = request.args.get("key", "")
-    if admin_key and provided_key != admin_key:
+    if not admin_key or provided_key != admin_key:
         return "Unauthorized", 401
 
     buf = io.BytesIO()
@@ -432,7 +434,6 @@ if BOT_TOKEN:
         ptb_app.add_handler(CallbackQueryHandler(album_click))
         ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
         # Daily backup at 01:00 UTC
-        from datetime import time as dt_time
         ptb_app.job_queue.run_daily(daily_backup_job, time=dt_time(1, 0, 0, tzinfo=timezone.utc))
 
         log.info("Bot starting with run_polling in thread...")
