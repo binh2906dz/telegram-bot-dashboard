@@ -123,6 +123,7 @@
     <div class="nav-item active" id="nav-dashboard" onclick="showSection('dashboard')"><i class="bi bi-speedometer2"></i> Dashboard</div>
     <div class="nav-section-label">Quản lý</div>
     <div class="nav-item" id="nav-bots" onclick="showSection('bots')"><i class="bi bi-robot"></i> Quản lý Bot</div>
+    <div class="nav-item" id="nav-analytics" onclick="showSection('analytics')"><i class="bi bi-bar-chart-line-fill"></i> Master Analytics</div>
     <div class="nav-item" id="nav-ids" onclick="showSection('ids')"><i class="bi bi-people-fill"></i> Quản lý ID</div>
     <div class="nav-item" id="nav-albums" onclick="showSection('albums')"><i class="bi bi-collection"></i> Albums</div>
     <div class="nav-section-label">Cài đặt</div>
@@ -213,7 +214,7 @@
           {% if bots %}
           <div class="table-responsive">
             <table class="table table-dark table-borderless data-table mb-0" id="botsTable">
-              <thead><tr><th class="ps-3">Tên Bot</th><th>Token</th><th>Admin ID</th><th>Trạng thái</th><th>Subscribers</th><th>Đã gửi</th><th style="width:100px;"></th></tr></thead>
+              <thead><tr><th class="ps-3">Tên Bot</th><th>Token</th><th>Admin ID</th><th>Trạng thái</th><th>Auto-Responder</th><th>Subscribers</th><th>▶ Start</th><th>📤 Gửi</th><th>🖱 Click</th><th>💬 Phản hồi</th><th style="width:60px;"></th></tr></thead>
               <tbody>
                 {% for bot in bots %}
                 <tr id="bot-row-{{ bot.id }}">
@@ -225,8 +226,28 @@
                   </td>
                   <td>{{ bot.admin_id if bot.admin_id else '&#8212;' }}</td>
                   <td id="bot-status-{{ bot.id }}"><span class="text-muted" style="font-size:.8rem;">&#8212;</span></td>
+                  <td>
+                    {% if role == 'owner' %}
+                    <div class="form-check form-switch mb-0" style="min-width:52px;">
+                      <input class="form-check-input" type="checkbox" role="switch"
+                             id="ar-toggle-{{ bot.id }}"
+                             {% if bot.get('auto_responder', True) %}checked{% endif %}
+                             onchange="toggleAutoResponder('{{ bot.id }}', this)">
+                      <label class="form-check-label" for="ar-toggle-{{ bot.id }}" style="font-size:.78rem;color:#aaa;">
+                        <span id="ar-label-{{ bot.id }}">{{ 'Bật' if bot.get('auto_responder', True) else 'Tắt' }}</span>
+                      </label>
+                    </div>
+                    {% else %}
+                    <span style="font-size:.8rem;color:{{ '#00c853' if bot.get('auto_responder', True) else '#888' }};">
+                      {{ 'Bật' if bot.get('auto_responder', True) else 'Tắt' }}
+                    </span>
+                    {% endif %}
+                  </td>
                   <td id="bot-subs-{{ bot.id }}">&#8212;</td>
+                  <td id="bot-starts-{{ bot.id }}">&#8212;</td>
                   <td id="bot-msgs-{{ bot.id }}">&#8212;</td>
+                  <td id="bot-interactions-{{ bot.id }}">&#8212;</td>
+                  <td id="bot-replies-{{ bot.id }}">&#8212;</td>
                   <td>{% if role == 'owner' %}<button class="btn btn-sm btn-outline-danger" onclick="doDeleteBot('{{ bot.id }}', '{{ bot.name }}', this)"><i class="bi bi-trash3"></i></button>{% endif %}</td>
                 </tr>
                 {% endfor %}
@@ -238,8 +259,57 @@
           {% endif %}
         </div>
         <div class="dash-card-body pt-2" style="border-top:1px solid var(--border-color);">
-          <div style="font-size:.76rem;color:#666;"><i class="bi bi-info-circle me-1"></i>Sau khi thêm/xóa bot, vui lòng <strong>khởi động lại server</strong>.</div>
+          <div style="font-size:.76rem;color:#666;"><i class="bi bi-info-circle me-1"></i>Bot mới thêm vào sẽ <strong>tự động bắt đầu polling</strong> trong vòng 30 giây, không cần khởi động lại server.</div>
         </div>
+      </div>
+    </div>
+
+    <!-- MASTER ANALYTICS SECTION -->
+    <div class="section-page" id="section-analytics">
+      <div class="page-header">
+        <span class="page-title"><i class="bi bi-bar-chart-line-fill"></i>Master Analytics</span>
+        <button class="btn btn-sm btn-outline-info" onclick="loadAnalytics(this)"><i class="bi bi-arrow-clockwise me-1"></i>Làm mới</button>
+      </div>
+      <!-- Aggregated Stats -->
+      <div class="row g-3 mb-4" id="analyticsAggregated">
+        <div class="col-6 col-md-3">
+          <div class="stat-card"><div class="stat-icon orange"><i class="bi bi-play-circle-fill"></i></div><div><div class="stat-value" id="agg-starts">&#8212;</div><div class="stat-label">Tổng /start</div></div></div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="stat-card"><div class="stat-icon blue"><i class="bi bi-send-fill"></i></div><div><div class="stat-value" id="agg-sent">&#8212;</div><div class="stat-label">Tổng tin đã gửi</div></div></div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="stat-card"><div class="stat-icon green"><i class="bi bi-hand-index-thumb-fill"></i></div><div><div class="stat-value" id="agg-interactions">&#8212;</div><div class="stat-label">Tổng tương tác</div></div></div>
+        </div>
+        <div class="col-6 col-md-3">
+          <div class="stat-card"><div class="stat-icon purple"><i class="bi bi-chat-dots-fill"></i></div><div><div class="stat-value" id="agg-replies">&#8212;</div><div class="stat-label">Tổng phản hồi</div></div></div>
+        </div>
+      </div>
+      <!-- Per-Bot Performance Table -->
+      <div class="dash-card">
+        <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-table me-2" style="color:var(--accent);"></i>Hiệu suất từng Bot</span></div>
+        <div class="dash-card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-dark table-borderless data-table mb-0" id="analyticsTable">
+              <thead>
+                <tr>
+                  <th class="ps-3">Tên Bot</th>
+                  <th class="text-center">▶ /start</th>
+                  <th class="text-center">📤 Đã gửi</th>
+                  <th class="text-center">🖱 Tương tác</th>
+                  <th class="text-center">💬 Phản hồi</th>
+                </tr>
+              </thead>
+              <tbody id="analyticsTableBody">
+                <tr><td colspan="5" class="text-center text-muted py-4"><i class="bi bi-arrow-clockwise me-1"></i>Nhấn "Làm mới" để tải dữ liệu...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="mt-2" style="font-size:.76rem;color:#666;">
+        <i class="bi bi-info-circle me-1"></i>
+        <em>Lưu ý: Telegram không thông báo cho bot khi người dùng click vào nút URL. "Tương tác" đếm các lần người dùng nhấn nút inline (callback buttons) do bot gửi.</em>
       </div>
     </div>
 
@@ -705,6 +775,7 @@ function showSection(name) {
   if (name === 'config') { loadFlowData(); loadSlogans(); }
   else if (name === 'ids') { loadIdList(1); refreshIdStats(); }
   else if (name === 'bots') { loadBotHealth(null); }
+  else if (name === 'analytics') { loadAnalytics(null); }
   closeSidebar();
   window.location.hash = name;
 }
@@ -767,11 +838,70 @@ async function loadBotHealth(btn) {
       const statusEl = document.getElementById('bot-status-' + bot.id);
       const subsEl = document.getElementById('bot-subs-' + bot.id);
       const msgsEl = document.getElementById('bot-msgs-' + bot.id);
+      const startsEl = document.getElementById('bot-starts-' + bot.id);
+      const interEl = document.getElementById('bot-interactions-' + bot.id);
+      const repEl = document.getElementById('bot-replies-' + bot.id);
       if (statusEl) { const icons={LIVE:'&#128994;',BAN:'&#128308;',ERROR:'&#128992;'},cls={LIVE:'status-live',BAN:'status-ban',ERROR:'status-error'}; statusEl.innerHTML='<span class="'+( cls[bot.status]||'status-error')+'">'+( icons[bot.status]||'&#128992;')+' '+bot.status+'</span>'; }
-      if (subsEl) subsEl.textContent = bot.subs_count ?? '&#8212;';
-      if (msgsEl) msgsEl.textContent = bot.messages_sent ?? '&#8212;';
+      if (subsEl) subsEl.textContent = bot.subs_count ?? '—';
+      if (msgsEl) msgsEl.textContent = bot.messages_sent ?? '—';
+      if (startsEl) startsEl.textContent = bot.starts_count ?? '—';
+      if (interEl) interEl.textContent = bot.interactions_count ?? '—';
+      if (repEl) repEl.textContent = bot.replies_count ?? '—';
     });
     if (btn) showToast('&#9989; Đã cập nhật trạng thái bot!', 'success');
+  } catch(e) { if (btn) showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = origHtml; } }
+}
+async function toggleAutoResponder(botId, checkbox) {
+  const label = document.getElementById('ar-label-' + botId);
+  checkbox.disabled = true;
+  try {
+    const res = await fetch('/bots/' + botId + '/toggle_responder', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      checkbox.checked = data.auto_responder;
+      if (label) label.textContent = data.auto_responder ? 'Bật' : 'Tắt';
+      showToast('&#9989; Auto-Responder ' + (data.auto_responder ? 'đã bật' : 'đã tắt'), 'success');
+    } else {
+      checkbox.checked = !checkbox.checked; // revert
+      showToast('&#10060; ' + (data.error || '?'), 'error');
+    }
+  } catch(e) { checkbox.checked = !checkbox.checked; showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { checkbox.disabled = false; }
+}
+async function loadAnalytics(btn) {
+  const origHtml = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang tải...'; }
+  try {
+    const res = await fetch('/analytics/data'); if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || '?');
+    const t = data.totals;
+    const startEl = document.getElementById('agg-starts');
+    const sentEl = document.getElementById('agg-sent');
+    const intEl = document.getElementById('agg-interactions');
+    const repEl = document.getElementById('agg-replies');
+    if (startEl) startEl.textContent = t.starts_count ?? 0;
+    if (sentEl) sentEl.textContent = t.messages_sent ?? 0;
+    if (intEl) intEl.textContent = t.interactions_count ?? 0;
+    if (repEl) repEl.textContent = t.replies_count ?? 0;
+    const tbody = document.getElementById('analyticsTableBody');
+    if (tbody) {
+      if (!data.bots || data.bots.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Chưa có dữ liệu analytics</td></tr>';
+      } else {
+        tbody.innerHTML = data.bots.map(function(b) {
+          return '<tr>' +
+            '<td class="ps-3"><i class="bi bi-robot me-2" style="color:var(--accent);"></i>' + escapeHtml(b.name) + '</td>' +
+            '<td class="text-center">' + (b.starts_count || 0) + '</td>' +
+            '<td class="text-center">' + (b.messages_sent || 0) + '</td>' +
+            '<td class="text-center">' + (b.interactions_count || 0) + '</td>' +
+            '<td class="text-center">' + (b.replies_count || 0) + '</td>' +
+            '</tr>';
+        }).join('');
+      }
+    }
+    if (btn) showToast('&#9989; Đã cập nhật analytics!', 'success');
   } catch(e) { if (btn) showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { if (btn) { btn.disabled = false; btn.innerHTML = origHtml; } }
 }
@@ -804,7 +934,7 @@ async function doAddBot(btn) {
   try {
     const form = new FormData(); form.append('name', name); form.append('token', token); if (adminId) form.append('admin_id', adminId);
     const res = await fetch('/bots/add', { method: 'POST', body: form }); const data = await res.json();
-    if (data.ok) { showToast('&#9989; Đã thêm bot! Khởi động lại server.', 'success'); bootstrap.Modal.getInstance(document.getElementById('addBotModal')).hide(); setTimeout(function() { location.reload(); }, 1500); }
+    if (data.ok) { showToast('&#9989; Đã thêm bot! Bot sẽ tự động bắt đầu polling trong vòng 30 giây.', 'success'); bootstrap.Modal.getInstance(document.getElementById('addBotModal')).hide(); setTimeout(function() { location.reload(); }, 1500); }
     else { showToast('&#10060; ' + (data.error || '?'), 'error'); }
   } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = origHtml; }
@@ -1213,7 +1343,7 @@ async function doSaveSlogans(btn) {
 /* ====== INIT ====== */
 window.addEventListener('DOMContentLoaded', function() {
   const hash = window.location.hash.replace('#','')||'dashboard';
-  const validSections = ['dashboard','bots','ids','albums','config','system'];
+  const validSections = ['dashboard','bots','analytics','ids','albums','config','system'];
   showSection(validSections.includes(hash) ? hash : 'dashboard');
   const activeAlbumId = '{{ active_album }}';
   if (activeAlbumId) {
