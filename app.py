@@ -613,7 +613,7 @@ async def _async_run_ids_broadcast(bots: list, message: str, user_ids: list) -> 
         if not token:
             return
         api_url = f"https://api.telegram.org/bot{token}/sendMessage"
-        retry_until = 0.0  # Epoch seconds when this bot's 429 cooldown ends
+        retry_until = 0.0  # Event-loop clock time after which this bot's 429 cooldown ends
 
         async with httpx.AsyncClient(timeout=10) as client:
             for uid in user_ids:
@@ -688,7 +688,7 @@ async def _async_run_ids_broadcast(bots: list, message: str, user_ids: list) -> 
                         ] += 1
                         _broadcast_status["bot_results"] = bot_res_snap
 
-                # Proactive rate limit: ~25 msg/sec per bot
+                # Proactive rate limit: 25 msg/sec per bot (1 request per 0.04s)
                 await asyncio.sleep(0.04)
 
     await asyncio.gather(*[bot_worker(bot) for bot in active_bots])
@@ -733,7 +733,7 @@ async def _async_run_broadcast_all(
         bot_id = bot.get("id", "")
         if not token:
             return
-        retry_until = 0.0
+        retry_until = 0.0  # Event-loop clock time after which this bot's 429 cooldown ends
 
         async with httpx.AsyncClient(timeout=10) as client:
             for uid in uid_slice:
@@ -793,7 +793,7 @@ async def _async_run_broadcast_all(
                     _broadcast_all_status["fail"] = snap[2]
                     _broadcast_all_status["bot_results"] = snap[3]
 
-                # Proactive rate limit: ~25 msg/sec per bot
+                # Proactive rate limit: 25 msg/sec per bot (1 request per 0.04s)
                 await asyncio.sleep(0.04)
 
     await asyncio.gather(
