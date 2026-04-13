@@ -149,6 +149,14 @@ def init_db():
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS shortener_apis (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                template TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         conn.commit()
 
 
@@ -1379,6 +1387,166 @@ def save_slogans():
                 clean_items.append({"text": text, "delay_after": delay})
     save_json(SLOGANS_FILE, {"enabled": enabled, "items": clean_items})
     return jsonify({"ok": True})
+
+
+# ===== LINK SHORTENER =====
+
+@app.route("/shortener/apis", methods=["GET"])
+@login_required
+def shortener_apis_list():
+    """Return all configured shortener API templates ordered by position."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, template, position FROM shortener_apis ORDER BY position ASC, id ASC"
+            ).fetchall()
+        return jsonify({"ok": True, "apis": [dict(r) for r in rows]})
+    except Exception as e:
+        log.error(f"shortener_apis_list error: {e}")
+        return jsonify({"ok": False, "error": "Lỗi đọc database"}), 500
+
+
+@app.route("/shortener/apis", methods=["POST"])
+@login_required
+def shortener_apis_add():
+    """Add a new shortener API template."""
+    data = request.get_json(silent=True) or {}
+    template = str(data.get("template", "")).strip()
+    if not template:
+        return jsonify({"ok": False, "error": "Template không được để trống"}), 400
+    if "{url}" not in template:
+        return jsonify({"ok": False, "error": "Template phải chứa {url}"}), 400
+    if not (template.startswith("http://") or template.startswith("https://")):
+        return jsonify({"ok": False, "error": "Template phải bắt đầu bằng http:// hoặc https://"}), 400
+    try:
+        with get_db() as conn:
+            max_pos = conn.execute("SELECT COALESCE(MAX(position), -1) FROM shortener_apis").fetchone()[0]
+            conn.execute(
+                "INSERT INTO shortener_apis (template, position) VALUES (?, ?)",
+                (template, max_pos + 1),
+            )
+            conn.commit()
+            new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        return jsonify({"ok": True, "id": new_id})
+    except Exception as e:
+        log.error(f"shortener_apis_add error: {e}")
+        return jsonify({"ok": False, "error": "Lỗi lưu database"}), 500
+
+
+@app.route("/shortener/apis/<int:api_id>", methods=["PUT"])
+@login_required
+def shortener_apis_update(api_id):
+    """Update an existing shortener API template."""
+    data = request.get_json(silent=True) or {}
+    template = str(data.get("template", "")).strip()
+    if not template:
+        return jsonify({"ok": False, "error": "Template không được để trống"}), 400
+    if "{url}" not in template:
+        return jsonify({"ok": False, "error": "Template phải chứa {url}"}), 400
+    if not (template.startswith("http://") or template.startswith("https://")):
+        return jsonify({"ok": False, "error": "Template phải bắt đầu bằng http:// hoặc https://"}), 400
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE shortener_apis SET template = ? WHERE id = ?",
+                (template, api_id),
+            )
+            conn.commit()
+        return jsonify({"ok": True})
+    except Exception as e:
+        log.error(f"shortener_apis_update error: {e}")
+        return jsonify({"ok": False, "error": "Lỗi cập nhật database"}), 500
+
+
+@app.route("/shortener/apis/<int:api_id>", methods=["DELETE"])
+@login_required
+def shortener_apis_delete(api_id):
+    """Delete a shortener API template."""
+    try:
+        with get_db() as conn:
+            conn.execute("DELETE FROM shortener_apis WHERE id = ?", (api_id,))
+            conn.commit()
+        return jsonify({"ok": True})
+    except Exception as e:
+        log.error(f"shortener_apis_delete error: {e}")
+        return jsonify({"ok": False, "error": "Lỗi xóa database"}), 500
+
+
+@app.route("/shortener/apis/reorder", methods=["POST"])
+@login_required
+def shortener_apis_reorder():
+    """Reorder APIs by accepting a list of IDs in the new order."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids", [])
+    if not isinstance(ids, list):
+        return jsonify({"ok": False, "error": "ids phải là mảng"}), 400
+    try:
+        with get_db() as conn:
+            for pos, api_id in enumerate(ids):
+                conn.execute(
+                    "UPDATE shortener_apis SET position = ? WHERE id = ?",
+                    (pos, int(api_id)),
+                )
+            conn.commit()
+        return jsonify({"ok": True})
+    except Exception as e:
+        log.error(f"shortener_apis_reorder error: {e}")
+        return jsonify({"ok": False, "error": "Lỗi sắp xếp thứ tự"}), 500
+
+
+_MAX_SHORTENER_RESPONSE_BYTES = 4096
+
+
+@app.route("/shortener/shorten", methods=["POST"])
+@login_required
+def shortener_shorten():
+    """Call all configured shortener APIs with the given URL and return results."""
+    import urllib.parse as _urlparse
+    import urllib.request as _urlrequest
+
+    data = request.get_json(silent=True) or {}
+    long_url = str(data.get("url", "")).strip()
+    if not long_url:
+        return jsonify({"ok": False, "error": "URL không được để trống"}), 400
+
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, template FROM shortener_apis ORDER BY position ASC, id ASC"
+            ).fetchall()
+        apis = [dict(r) for r in rows]
+    except Exception as e:
+        log.error(f"shortener_shorten DB read error: {e}")
+        return jsonify({"ok": False, "error": "Lỗi đọc database"}), 500
+
+    if not apis:
+        return jsonify({"ok": False, "error": "Chưa cấu hình API rút gọn nào"}), 400
+
+    encoded_url = _urlparse.quote(long_url, safe="")
+    results = []
+    for api in apis:
+        request_url = api["template"].replace("{url}", encoded_url)
+        # Only allow http/https schemes to prevent SSRF via other URI schemes
+        if not (request_url.startswith("http://") or request_url.startswith("https://")):
+            results.append({"ok": False, "error": "Lỗi: Template API không hợp lệ (chỉ hỗ trợ http/https)"})
+            continue
+        try:
+            req = _urlrequest.Request(
+                request_url,
+                headers={"User-Agent": "TelegramBotDashboard/1.0"},
+            )
+            with _urlrequest.urlopen(req, timeout=10) as resp:  # noqa: S310
+                raw = resp.read(_MAX_SHORTENER_RESPONSE_BYTES).decode("utf-8", errors="replace").strip()
+            # If the response looks like a URL, use it; otherwise treat as error
+            if raw.startswith("http://") or raw.startswith("https://"):
+                results.append({"ok": True, "url": raw})
+            else:
+                results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
+        except Exception as exc:
+            log.warning(f"shortener_shorten API call error: {exc}")
+            results.append({"ok": False, "error": "Lỗi: Không thể kết nối hoặc API không phản hồi"})
+
+    return jsonify({"ok": True, "results": results})
 
 
 # ===== ID MANAGEMENT =====
