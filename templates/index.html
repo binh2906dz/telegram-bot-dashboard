@@ -941,7 +941,7 @@ async function doBroadcast(btn) {
   try {
     const form = new FormData(); form.append('message', message);
     const res = await fetch('/broadcast', { method: 'POST', body: form }); const data = await res.json();
-    if (data.ok) { showToast('&#9989; Đã gửi! Thành công:' + data.success + ', Thất bại:' + data.fail, 'success'); bootstrap.Modal.getInstance(document.getElementById('broadcastModal')).hide(); document.getElementById('broadcastMessage').value = ''; }
+    if (data.ok) { showToast('&#9989; Broadcast đã bắt đầu! ' + (data.total||0) + ' người đăng ký...', 'success'); bootstrap.Modal.getInstance(document.getElementById('broadcastModal')).hide(); document.getElementById('broadcastMessage').value = ''; }
     else { showToast('&#10060; ' + (data.error||'?'), 'error'); }
   } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = origHtml; }

@@ -95,8 +95,13 @@ def save_json(file, data):
 # ===== SQLITE DATABASE (for ID management, future Turso migration) =====
 
 def get_db() -> sqlite3.Connection:
-    """Return a new SQLite connection with row_factory set."""
-    conn = sqlite3.connect(DB_FILE)
+    """Return a new SQLite connection with row_factory set.
+
+    Uses check_same_thread=False and a 30-second busy timeout so that
+    background broadcast threads and the Flask request threads can safely
+    share the same database file without raising "database is locked" errors.
+    """
+    conn = sqlite3.connect(DB_FILE, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -104,6 +109,10 @@ def get_db() -> sqlite3.Connection:
 def init_db():
     """Create tables if they don't exist."""
     with get_db() as conn:
+        # Enable WAL mode for better concurrency: allows concurrent reads
+        # while a broadcast thread is writing, preventing "database is locked"
+        # errors when multiple threads access the DB simultaneously.
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute('''
             CREATE TABLE IF NOT EXISTS telegram_ids (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -165,6 +174,13 @@ _broadcast_all_status: dict = {
     "running": False, "total": 0, "done": 0,
     "success": 0, "fail": 0,
     "bot_results": {},  # {bot_id: {"name": str, "success": int, "fail": int}}
+}
+
+# Subscriber broadcast task state (broadcast to subscribers list)
+_broadcast_subs_lock = threading.Lock()
+_broadcast_subs_status: dict = {
+    "running": False, "total": 0, "done": 0,
+    "success": 0, "fail": 0,
 }
 
 
@@ -580,10 +596,28 @@ def backup_restore():
         return jsonify({"ok": False, "error": "Khôi phục thất bại. Vui lòng thử lại."}), 500
 
 
+@app.route("/broadcast/status", methods=["GET"])
+@login_required
+def broadcast_status():
+    """Return current subscriber broadcast task status."""
+    return jsonify(_broadcast_subs_status)
+
+
 @app.route("/broadcast", methods=["POST"])
 @login_required
 def broadcast():
-    """Send a broadcast message to all subscribers via all configured bots."""
+    """Send a broadcast message to all subscribers via all configured bots.
+
+    Runs entirely in a background daemon thread so the Flask worker and the
+    bot's asyncio event loop are never blocked while the loop iterates over
+    potentially thousands of subscriber IDs.
+    """
+    import time as _time
+
+    with _broadcast_subs_lock:
+        if _broadcast_subs_status.get("running"):
+            return jsonify({"ok": False, "error": "Đang có broadcast đang chạy, vui lòng đợi"}), 409
+
     bots_list = _get_all_active_bots()
     if not bots_list:
         return jsonify({"ok": False, "error": "Bot chưa được cấu hình"}), 500
@@ -593,23 +627,54 @@ def broadcast():
     subs = load_json(SUBS_FILE, [])
     if not subs:
         return jsonify({"ok": False, "error": "Chưa có người đăng ký nào"}), 400
-    success, fail = 0, 0
-    for bot in bots_list:
-        token = (bot.get("token") or "").strip()
-        if not token:
-            continue
-        api_url = f"https://api.telegram.org/bot{token}/sendMessage"
-        for user_id in subs:
-            try:
-                resp = httpx.post(api_url, json={"chat_id": user_id, "text": message}, timeout=10)
-                if resp.status_code == 200:
-                    success += 1
-                else:
-                    fail += 1
-            except Exception as e:
-                log.warning(f"Broadcast to {user_id} failed: {e}")
-                fail += 1
-    return jsonify({"ok": True, "success": success, "fail": fail})
+
+    with _broadcast_subs_lock:
+        _broadcast_subs_status.update({
+            "running": True, "total": len(subs), "done": 0,
+            "success": 0, "fail": 0,
+        })
+
+    def _run_broadcast_subs(bots: list, msg: str, subscribers: list):
+        local_success = 0
+        local_fail = 0
+        for bot in bots:
+            token = (bot.get("token") or "").strip()
+            if not token:
+                continue
+            api_url = f"https://api.telegram.org/bot{token}/sendMessage"
+            for user_id in subscribers:
+                try:
+                    resp = httpx.post(
+                        api_url,
+                        json={"chat_id": user_id, "text": msg},
+                        timeout=10,
+                    )
+                    if resp.status_code == 200:
+                        local_success += 1
+                    else:
+                        local_fail += 1
+                except Exception as e:
+                    log.warning(f"Broadcast to {user_id} failed: {e}")
+                    local_fail += 1
+                finally:
+                    # Rate-limit: 20 messages/sec per bot to avoid Telegram 429s
+                    _time.sleep(0.05)
+                    with _broadcast_subs_lock:
+                        _broadcast_subs_status["done"] += 1
+                        _broadcast_subs_status["success"] = local_success
+                        _broadcast_subs_status["fail"] = local_fail
+        with _broadcast_subs_lock:
+            _broadcast_subs_status["running"] = False
+            _broadcast_subs_status["success"] = local_success
+            _broadcast_subs_status["fail"] = local_fail
+
+    t = threading.Thread(
+        target=_run_broadcast_subs,
+        args=(bots_list, message, subs),
+        daemon=True,
+    )
+    t.start()
+    return jsonify({"ok": True, "total": len(subs), "message": "Broadcast đã bắt đầu"})
 
 
 @app.route("/broadcast/all/status", methods=["GET"])
