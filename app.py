@@ -4,6 +4,7 @@ import re
 import glob
 import json
 import uuid
+import time
 import asyncio
 import logging
 import secrets
@@ -806,7 +807,8 @@ def upload_ids():
     try:
         content = file.read().decode("utf-8", errors="replace")
     except Exception as e:
-        return jsonify({"ok": False, "error": f"Không đọc được file: {e}"}), 400
+        log.error(f"File read error: {e}")
+        return jsonify({"ok": False, "error": "Không đọc được file, vui lòng thử lại"}), 400
     ids = _parse_ids_from_text(content)
     if not ids:
         return jsonify({"ok": False, "error": "Không tìm thấy ID hợp lệ trong file"}), 400
@@ -814,19 +816,20 @@ def upload_ids():
     skipped = 0
     try:
         with get_db() as conn:
-            for uid in ids:
-                try:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO telegram_ids (user_id, status) VALUES (?, 'unknown')",
-                        (uid,),
-                    )
-                    if conn.execute("SELECT changes()").fetchone()[0]:
-                        inserted += 1
-                    else:
-                        skipped += 1
-                except Exception:
-                    skipped += 1
+            existing = {
+                row[0]
+                for row in conn.execute("SELECT user_id FROM telegram_ids WHERE user_id IN (%s)"
+                                        % ",".join("?" * len(ids)), ids)
+            }
+            new_ids = [(uid,) for uid in ids if uid not in existing]
+            if new_ids:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO telegram_ids (user_id, status) VALUES (?, 'unknown')",
+                    new_ids,
+                )
             conn.commit()
+            inserted = len(new_ids)
+            skipped = len(ids) - inserted
     except Exception as e:
         log.error(f"ID upload DB error: {e}")
         return jsonify({"ok": False, "error": "Lỗi cơ sở dữ liệu"}), 500
@@ -932,7 +935,8 @@ def ids_broadcast():
             ).fetchall()
         user_ids = [r["user_id"] for r in rows]
     except Exception as e:
-        return jsonify({"ok": False, "error": f"Lỗi đọc database: {e}"}), 500
+        log.error(f"ids_broadcast DB error: {e}")
+        return jsonify({"ok": False, "error": "Lỗi đọc database, vui lòng thử lại"}), 500
 
     if not user_ids:
         return jsonify({"ok": False, "error": "Không có ID nào để gửi"}), 400
@@ -978,8 +982,7 @@ def ids_broadcast():
                 _broadcast_status["done"] += 1
                 _broadcast_status[new_status if new_status in ("active", "blocked", "invalid") else "error"] += 1
             # Rate-limit: max ~20 messages/sec to stay well under Telegram's 30/sec limit
-            import time as _time
-            _time.sleep(0.05)
+            time.sleep(0.05)
         with _broadcast_lock:
             _broadcast_status["running"] = False
 
@@ -1350,7 +1353,7 @@ try:
             log.error(f"APScheduler: daily backup failed: {e}")
 
     # Only start the scheduler once (guard against werkzeug reloader double-start)
-    if not os.environ.get("WERKZEUG_RUN_MAIN") == "false":
+    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         _vn_tz = _pytz.timezone("Asia/Ho_Chi_Minh")
         _scheduler = _BGScheduler(timezone=_vn_tz)
         _scheduler.add_job(_scheduled_daily_backup, "cron", hour=0, minute=1,
