@@ -7,6 +7,9 @@ import uuid
 import asyncio
 import logging
 import secrets
+import sqlite3
+import tempfile
+import threading
 import zipfile
 import urllib.request
 from datetime import datetime, timezone, timedelta, time as dt_time
@@ -48,6 +51,7 @@ BOTS_FILE = "bots.json"
 MESSAGES_FILE = "messages.json"
 STATS_FILE = "stats.json"
 SLOGANS_FILE = "slogans.json"
+DB_FILE = "data.db"
 
 # ===== CLOUDINARY CONFIG =====
 # Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET
@@ -86,6 +90,61 @@ def save_json(file, data):
         _cache[file] = {"mtime": os.path.getmtime(file), "data": data}
     except Exception:
         _cache.pop(file, None)
+
+
+# ===== SQLITE DATABASE (for ID management, future Turso migration) =====
+
+def get_db() -> sqlite3.Connection:
+    """Return a new SQLite connection with row_factory set."""
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    """Create tables if they don't exist."""
+    with get_db() as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS telegram_ids (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT UNIQUE NOT NULL,
+                status TEXT NOT NULL DEFAULT 'unknown',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.commit()
+
+
+def backup_db_to_bytes() -> bytes:
+    """Safely copy the SQLite DB to bytes using SQLite backup API."""
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db")
+    os.close(tmp_fd)
+    try:
+        src = sqlite3.connect(DB_FILE)
+        dst = sqlite3.connect(tmp_path)
+        src.backup(dst)
+        src.close()
+        dst.close()
+        with open(tmp_path, "rb") as f:
+            return f.read()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
+# Broadcast task state (module-level so it persists across requests)
+_broadcast_lock = threading.Lock()
+_broadcast_status: dict = {
+    "running": False, "total": 0, "done": 0,
+    "active": 0, "blocked": 0, "invalid": 0, "error": 0,
+}
+
+
+# Initialize DB on startup
+init_db()
 
 
 def total_posts(albums):
@@ -150,6 +209,12 @@ def _backup_files_to_zip(zf: zipfile.ZipFile):
                 zf.writestr(path, f.read())
         except FileNotFoundError:
             pass
+    # Include SQLite database
+    if os.path.exists(DB_FILE):
+        try:
+            zf.writestr(DB_FILE, backup_db_to_bytes())
+        except Exception as e:
+            log.warning(f"Could not backup SQLite DB: {e}")
 
 
 # ===== AUTH HELPERS =====
@@ -268,10 +333,22 @@ def index():
     cfg = load_json(CONFIG_FILE, {"hour": 0, "minute": 0})
     slogans = load_json(SLOGANS_FILE, {"enabled": True, "items": []})
     active_album = request.args.get("album", "")
+    # ID stats from SQLite
+    id_stats = {"total": 0, "active": 0, "blocked": 0, "invalid": 0, "unknown": 0}
+    try:
+        with get_db() as conn:
+            for row in conn.execute(
+                "SELECT status, COUNT(*) as cnt FROM telegram_ids GROUP BY status"
+            ):
+                id_stats[row["status"]] = row["cnt"]
+                id_stats["total"] += row["cnt"]
+    except Exception:
+        pass
     return render_template("index.html", albums=albums, subs=subs,
                            active_album=active_album, total_posts=total_posts(albums),
                            role=session.get("role", ""), username=session.get("username", ""),
-                           bots=bots, messages_cfg=messages_cfg, cfg=cfg, slogans=slogans)
+                           bots=bots, messages_cfg=messages_cfg, cfg=cfg, slogans=slogans,
+                           id_stats=id_stats)
 
 
 # --- Album management ---
@@ -458,6 +535,13 @@ def backup_restore():
         allowed_static = {ALBUMS_FILE, SUBS_FILE, CONFIG_FILE, BOTS_FILE, MESSAGES_FILE, BANNED_FILE}
         with zipfile.ZipFile(buf, "r") as zf:
             for fname in zf.namelist():
+                if fname == DB_FILE:
+                    # Restore SQLite database
+                    db_data = zf.read(fname)
+                    with open(DB_FILE, "wb") as f:
+                        f.write(db_data)
+                    init_db()  # ensure schema is up to date
+                    continue
                 if fname not in allowed_static and not (
                     fname.startswith("subs_") and fname.endswith(".json")
                 ):
@@ -695,6 +779,213 @@ def save_slogans():
                 clean_items.append({"text": text, "delay_after": delay})
     save_json(SLOGANS_FILE, {"enabled": enabled, "items": clean_items})
     return jsonify({"ok": True})
+
+
+# ===== ID MANAGEMENT =====
+
+def _parse_ids_from_text(text: str) -> list:
+    """Extract numeric Telegram IDs from plain text (one per line or comma-separated)."""
+    ids = []
+    for token in re.split(r"[\s,;]+", text):
+        token = token.strip()
+        if token.lstrip("-").isdigit():
+            ids.append(token)
+    return list(dict.fromkeys(ids))  # deduplicate preserving order
+
+
+@app.route("/ids/upload", methods=["POST"])
+@login_required
+def upload_ids():
+    """Upload a .txt or .csv file containing Telegram User IDs."""
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"ok": False, "error": "Không có file được chọn"}), 400
+    fname = file.filename.lower()
+    if not (fname.endswith(".txt") or fname.endswith(".csv")):
+        return jsonify({"ok": False, "error": "Chỉ chấp nhận file .txt hoặc .csv"}), 400
+    try:
+        content = file.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Không đọc được file: {e}"}), 400
+    ids = _parse_ids_from_text(content)
+    if not ids:
+        return jsonify({"ok": False, "error": "Không tìm thấy ID hợp lệ trong file"}), 400
+    inserted = 0
+    skipped = 0
+    try:
+        with get_db() as conn:
+            for uid in ids:
+                try:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO telegram_ids (user_id, status) VALUES (?, 'unknown')",
+                        (uid,),
+                    )
+                    if conn.execute("SELECT changes()").fetchone()[0]:
+                        inserted += 1
+                    else:
+                        skipped += 1
+                except Exception:
+                    skipped += 1
+            conn.commit()
+    except Exception as e:
+        log.error(f"ID upload DB error: {e}")
+        return jsonify({"ok": False, "error": "Lỗi cơ sở dữ liệu"}), 500
+    return jsonify({"ok": True, "inserted": inserted, "skipped": skipped, "total_parsed": len(ids)})
+
+
+@app.route("/ids", methods=["GET"])
+@login_required
+def list_ids():
+    """Return paginated list of uploaded IDs."""
+    page = max(1, int(request.args.get("page", 1)))
+    per_page = min(200, max(10, int(request.args.get("per_page", 50))))
+    status_filter = request.args.get("status", "")
+    offset = (page - 1) * per_page
+    try:
+        with get_db() as conn:
+            if status_filter:
+                total = conn.execute(
+                    "SELECT COUNT(*) FROM telegram_ids WHERE status=?", (status_filter,)
+                ).fetchone()[0]
+                rows = conn.execute(
+                    "SELECT user_id, status, created_at, updated_at FROM telegram_ids "
+                    "WHERE status=? ORDER BY id DESC LIMIT ? OFFSET ?",
+                    (status_filter, per_page, offset),
+                ).fetchall()
+            else:
+                total = conn.execute("SELECT COUNT(*) FROM telegram_ids").fetchone()[0]
+                rows = conn.execute(
+                    "SELECT user_id, status, created_at, updated_at FROM telegram_ids "
+                    "ORDER BY id DESC LIMIT ? OFFSET ?",
+                    (per_page, offset),
+                ).fetchall()
+        items = [dict(r) for r in rows]
+        return jsonify({"ok": True, "total": total, "page": page, "per_page": per_page, "items": items})
+    except Exception as e:
+        log.error(f"list_ids error: {e}")
+        return jsonify({"ok": False, "error": "Lỗi cơ sở dữ liệu"}), 500
+
+
+@app.route("/ids/stats", methods=["GET"])
+@login_required
+def ids_stats():
+    """Return count of IDs grouped by status."""
+    stats = {"total": 0, "unknown": 0, "active": 0, "blocked": 0, "invalid": 0}
+    try:
+        with get_db() as conn:
+            for row in conn.execute(
+                "SELECT status, COUNT(*) as cnt FROM telegram_ids GROUP BY status"
+            ):
+                stats[row["status"]] = row["cnt"]
+                stats["total"] += row["cnt"]
+    except Exception as e:
+        log.error(f"ids_stats error: {e}")
+    return jsonify(stats)
+
+
+@app.route("/ids/clear", methods=["POST"])
+@owner_required
+def clear_ids():
+    """Delete all uploaded IDs (owner only)."""
+    status_filter = request.form.get("status", "").strip()
+    try:
+        with get_db() as conn:
+            if status_filter:
+                conn.execute("DELETE FROM telegram_ids WHERE status=?", (status_filter,))
+            else:
+                conn.execute("DELETE FROM telegram_ids")
+            conn.commit()
+        return jsonify({"ok": True})
+    except Exception as e:
+        log.error(f"clear_ids error: {e}")
+        return jsonify({"ok": False, "error": "Lỗi cơ sở dữ liệu"}), 500
+
+
+@app.route("/ids/broadcast/status", methods=["GET"])
+@login_required
+def ids_broadcast_status():
+    """Return current broadcast task status."""
+    return jsonify(_broadcast_status)
+
+
+@app.route("/ids/broadcast", methods=["POST"])
+@login_required
+def ids_broadcast():
+    """Broadcast a message to all uploaded IDs, classifying status via Telegram API errors."""
+    with _broadcast_lock:
+        if _broadcast_status.get("running"):
+            return jsonify({"ok": False, "error": "Đang có broadcast đang chạy, vui lòng đợi"}), 409
+
+    bots_list = load_json(BOTS_FILE, [])
+    token = bots_list[0]["token"] if bots_list else BOT_TOKEN
+    if not token:
+        return jsonify({"ok": False, "error": "Chưa cấu hình bot nào"}), 400
+
+    message = request.form.get("message", "").strip()
+    if not message:
+        return jsonify({"ok": False, "error": "Tin nhắn không được để trống"}), 400
+
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT user_id FROM telegram_ids WHERE status IN ('unknown', 'active')"
+            ).fetchall()
+        user_ids = [r["user_id"] for r in rows]
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Lỗi đọc database: {e}"}), 500
+
+    if not user_ids:
+        return jsonify({"ok": False, "error": "Không có ID nào để gửi"}), 400
+
+    with _broadcast_lock:
+        _broadcast_status.update({
+            "running": True, "total": len(user_ids), "done": 0,
+            "active": 0, "blocked": 0, "invalid": 0, "error": 0,
+        })
+
+    def _run_broadcast(token: str, message: str, user_ids: list):
+        api_url = f"https://api.telegram.org/bot{token}/sendMessage"
+        for uid in user_ids:
+            new_status = "active"
+            try:
+                resp = httpx.post(
+                    api_url,
+                    json={"chat_id": int(uid), "text": message},
+                    timeout=10,
+                )
+                data = resp.json()
+                if resp.status_code == 200 and data.get("ok"):
+                    new_status = "active"
+                elif resp.status_code == 403:
+                    new_status = "blocked"
+                elif resp.status_code in (400, 404):
+                    new_status = "invalid"
+                else:
+                    new_status = "invalid"
+            except Exception:
+                new_status = "invalid"
+            # Update DB
+            try:
+                with get_db() as conn:
+                    conn.execute(
+                        "UPDATE telegram_ids SET status=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+                        (new_status, uid),
+                    )
+                    conn.commit()
+            except Exception as e:
+                log.warning(f"DB update failed for {uid}: {e}")
+            with _broadcast_lock:
+                _broadcast_status["done"] += 1
+                _broadcast_status[new_status if new_status in ("active", "blocked", "invalid") else "error"] += 1
+            # Rate-limit: max ~20 messages/sec to stay well under Telegram's 30/sec limit
+            import time as _time
+            _time.sleep(0.05)
+        with _broadcast_lock:
+            _broadcast_status["running"] = False
+
+    t = threading.Thread(target=_run_broadcast, args=(token, message, user_ids), daemon=True)
+    t.start()
+    return jsonify({"ok": True, "total": len(user_ids), "message": "Broadcast đã bắt đầu"})
 
 
 # ===== BOT HANDLERS =====
@@ -1042,6 +1333,35 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
 
 else:
     log.warning("No bot token configured – bot disabled, Flask only")
+
+
+# ===== APSCHEDULER — automated daily backup at 0:01 AM Vietnam Time =====
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler as _BGScheduler
+    import pytz as _pytz
+
+    def _scheduled_daily_backup():
+        """Called by APScheduler to run the daily backup."""
+        log.info("APScheduler: starting daily backup...")
+        try:
+            url = run_daily_backup()
+            log.info(f"APScheduler: daily backup complete → {url}")
+        except Exception as e:
+            log.error(f"APScheduler: daily backup failed: {e}")
+
+    # Only start the scheduler once (guard against werkzeug reloader double-start)
+    if not os.environ.get("WERKZEUG_RUN_MAIN") == "false":
+        _vn_tz = _pytz.timezone("Asia/Ho_Chi_Minh")
+        _scheduler = _BGScheduler(timezone=_vn_tz)
+        _scheduler.add_job(_scheduled_daily_backup, "cron", hour=0, minute=1,
+                           id="daily_backup", replace_existing=True)
+        _scheduler.start()
+        log.info("APScheduler started – daily backup scheduled at 0:01 AM Vietnam Time")
+except ImportError:
+    log.warning("apscheduler not installed – automated backup disabled. Run: pip install apscheduler pytz")
+except Exception as _aps_err:
+    log.error(f"Failed to start APScheduler: {_aps_err}")
+
 
 # ===== MAIN =====
 if __name__ == "__main__":
