@@ -618,7 +618,7 @@ async def _async_run_ids_broadcast(bots: list, message: str, user_ids: list) -> 
         async with httpx.AsyncClient(timeout=10) as client:
             for uid in user_ids:
                 # Wait out any active 429 cooldown for this bot
-                now = asyncio.get_event_loop().time()
+                now = asyncio.get_running_loop().time()
                 if retry_until > now:
                     await asyncio.sleep(retry_until - now)
 
@@ -632,10 +632,11 @@ async def _async_run_ids_broadcast(bots: list, message: str, user_ids: list) -> 
                         if resp.status_code == 429:
                             try:
                                 retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
-                            except Exception:
+                            except Exception as e:
+                                log.warning("Failed to parse retry_after from 429 response: %s", e)
                                 retry_after = 5
                             log.warning("Bot %s 429 – sleeping %ss", bot_id, retry_after)
-                            retry_until = asyncio.get_event_loop().time() + retry_after
+                            retry_until = asyncio.get_running_loop().time() + retry_after
                             await asyncio.sleep(retry_after)
                             continue  # Retry the same uid
                         rdata = resp.json()
@@ -646,7 +647,8 @@ async def _async_run_ids_broadcast(bots: list, message: str, user_ids: list) -> 
                         else:
                             new_status = "invalid"
                         break
-                    except Exception:
+                    except Exception as e:
+                        log.warning("Failed to send message to %s via bot %s: %s", uid, bot_id, e)
                         new_status = "invalid"
                         break
 
@@ -706,8 +708,6 @@ async def _async_run_broadcast_all(
     handle ~1/N of the audience, achieving N × ~25 msg/sec total throughput.
     Per-bot 429 handling pauses only the affected bot; others continue.
     """
-    import json as _j
-
     active_bots = [b for b in bots if (b.get("token") or "").strip()]
     num_bots = len(active_bots)
     if num_bots == 0:
@@ -737,7 +737,7 @@ async def _async_run_broadcast_all(
 
         async with httpx.AsyncClient(timeout=10) as client:
             for uid in uid_slice:
-                now = asyncio.get_event_loop().time()
+                now = asyncio.get_running_loop().time()
                 if retry_until > now:
                     await asyncio.sleep(retry_until - now)
 
@@ -764,16 +764,18 @@ async def _async_run_broadcast_all(
                         if resp.status_code == 429:
                             try:
                                 retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
-                            except Exception:
+                            except Exception as e:
+                                log.warning("Failed to parse retry_after from 429 response: %s", e)
                                 retry_after = 5
                             log.warning("Bot %s 429 – sleeping %ss", bot_id, retry_after)
-                            retry_until = asyncio.get_event_loop().time() + retry_after
+                            retry_until = asyncio.get_running_loop().time() + retry_after
                             await asyncio.sleep(retry_after)
                             continue
                         if resp.status_code == 200 and resp.json().get("ok"):
                             uid_success = True
                         break
-                    except Exception:
+                    except Exception as e:
+                        log.warning("Failed to send message to %s via bot %s: %s", uid, bot_id, e)
                         break
 
                 async with stats_lock:
@@ -807,7 +809,7 @@ async def _async_run_broadcast_all(
             with get_db() as conn:
                 conn.execute(
                     "UPDATE broadcast_logs SET success_count=?, fail_count=?, bot_results_json=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (total_success, total_fail, _j.dumps(bot_res), camp_id),
+                    (total_success, total_fail, json.dumps(bot_res), camp_id),
                 )
                 conn.commit()
         except Exception as e:
