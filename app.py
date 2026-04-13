@@ -1559,8 +1559,11 @@ def shortener_shorten():
                 else:
                     results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
             except json.JSONDecodeError:
-                # Not JSON – fall back to plain-text URL check
-                if raw.startswith("http://") or raw.startswith("https://"):
+                # Not JSON – check if the response is an HTML page (e.g. Cloudflare challenge)
+                raw_lower = raw.lower()
+                if raw_lower.strip().startswith("<!doctype") or "<html" in raw_lower:
+                    results.append({"ok": False, "error": "Lỗi: Bị chặn bởi Cloudflare hoặc sai URL/Token API (nhận được HTML thay vì JSON)."})
+                elif raw.startswith("http://") or raw.startswith("https://"):
                     results.append({"ok": True, "url": raw})
                 else:
                     results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
