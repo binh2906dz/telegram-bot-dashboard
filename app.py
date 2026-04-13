@@ -95,9 +95,19 @@ def save_json(file, data):
 # ===== SQLITE DATABASE (for ID management, future Turso migration) =====
 
 def get_db() -> sqlite3.Connection:
-    """Return a new SQLite connection with row_factory set."""
+    """Return a new SQLite connection with row_factory set.
+
+    WAL mode allows concurrent readers and a single writer without exclusive
+    file-level locks, preventing 'database is locked' errors when the bot
+    process and the gunicorn broadcast threads both write at the same time.
+    busy_timeout tells SQLite to retry for up to 5 s before raising an error.
+    Each call creates a fresh connection bound to the calling thread, so no
+    cross-thread sharing occurs.
+    """
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -580,7 +590,10 @@ def backup_restore():
         return jsonify({"ok": False, "error": "Khôi phục thất bại. Vui lòng thử lại."}), 500
 
 
-async def _async_run_ids_broadcast(bots: list, message: str, user_ids: list) -> None:
+async def _async_run_ids_broadcast(
+    bots: list, message: str, user_ids: list,
+    media_type: str = "none", media_url: str = "", buttons: list | None = None,
+) -> None:
     """Async broadcast to IDs with all bots running concurrently.
 
     Every active bot processes the full list of user_ids in parallel.  Per-bot
@@ -588,10 +601,14 @@ async def _async_run_ids_broadcast(bots: list, message: str, user_ids: list) -> 
     received, only the affected bot sleeps for the Telegram-supplied
     ``retry_after`` duration; all other bots continue uninterrupted.
 
+    Supports rich media (image / video) and inline keyboard buttons.
+
     After *all* bots have attempted a given uid, the best reachability status
     (active > blocked > invalid) is written to the DB and the global progress
     counter is incremented.
     """
+    if buttons is None:
+        buttons = []
     active_bots = [b for b in bots if (b.get("token") or "").strip()]
     num_active = len(active_bots)
     if num_active == 0:
@@ -612,7 +629,6 @@ async def _async_run_ids_broadcast(bots: list, message: str, user_ids: list) -> 
         bot_id = bot.get("id", "")
         if not token:
             return
-        api_url = f"https://api.telegram.org/bot{token}/sendMessage"
         retry_until = 0.0  # Event-loop clock time after which this bot's 429 cooldown ends
 
         async with httpx.AsyncClient(timeout=10) as client:
@@ -622,35 +638,38 @@ async def _async_run_ids_broadcast(bots: list, message: str, user_ids: list) -> 
                 if retry_until > now:
                     await asyncio.sleep(retry_until - now)
 
-                new_status: str = "invalid"
-                while True:  # Retry loop – only retries on 429
-                    try:
-                        resp = await client.post(
-                            api_url,
-                            json={"chat_id": int(uid), "text": message},
-                        )
-                        if resp.status_code == 429:
-                            try:
-                                retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
-                            except Exception as e:
-                                log.warning("Failed to parse retry_after from 429 response: %s", e)
-                                retry_after = 5
-                            log.warning("Bot %s 429 – sleeping %ss", bot_id, retry_after)
-                            retry_until = asyncio.get_running_loop().time() + retry_after
-                            await asyncio.sleep(retry_after)
-                            continue  # Retry the same uid
-                        rdata = resp.json()
-                        if resp.status_code == 200 and rdata.get("ok"):
-                            new_status = "active"
-                        elif resp.status_code == 403:
-                            new_status = "blocked"
-                        else:
+                endpoint, payload = _build_telegram_payload(uid, message, media_type, media_url, buttons)
+                if payload is None:
+                    # No valid payload; classify as invalid without calling Telegram
+                    new_status: str = "invalid"
+                else:
+                    api_url = f"https://api.telegram.org/bot{token}/{endpoint}"
+                    new_status = "invalid"
+                    while True:  # Retry loop – only retries on 429
+                        try:
+                            resp = await client.post(api_url, json=payload)
+                            if resp.status_code == 429:
+                                try:
+                                    retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
+                                except Exception as e:
+                                    log.warning("Failed to parse retry_after from 429 response: %s", e)
+                                    retry_after = 5
+                                log.warning("Bot %s 429 – sleeping %ss", bot_id, retry_after)
+                                retry_until = asyncio.get_running_loop().time() + retry_after
+                                await asyncio.sleep(retry_after)
+                                continue  # Retry the same uid
+                            rdata = resp.json()
+                            if resp.status_code == 200 and rdata.get("ok"):
+                                new_status = "active"
+                            elif resp.status_code == 403:
+                                new_status = "blocked"
+                            else:
+                                new_status = "invalid"
+                            break
+                        except Exception as e:
+                            log.warning("Failed to send message to %s via bot %s: %s", uid, bot_id, e)
                             new_status = "invalid"
-                        break
-                    except Exception as e:
-                        log.warning("Failed to send message to %s via bot %s: %s", uid, bot_id, e)
-                        new_status = "invalid"
-                        break
+                            break
 
                 # Merge this bot's result into the per-uid best status
                 async with stats_lock:
@@ -895,19 +914,29 @@ def broadcast_all():
         except Exception:
             return jsonify({"ok": False, "error": "buttons_json không hợp lệ"}), 400
 
-    # Fetch active user IDs
+    # Fetch active user IDs from the database (stored as TEXT, so already strings)
     try:
         with get_db() as conn:
             rows = conn.execute(
                 "SELECT user_id FROM telegram_ids WHERE status = 'active'"
             ).fetchall()
-        user_ids = [r["user_id"] for r in rows]
+        db_ids: set = {str(r["user_id"]) for r in rows}
     except Exception as e:
         log.error(f"broadcast_all DB read error: {e}")
         return jsonify({"ok": False, "error": "Lỗi đọc database. Vui lòng thử lại."}), 500
 
+    # Also include all subscriber IDs (users who pressed /start) from subs_*.json and subscribers.json
+    # Subscriber lists store integer IDs; convert to strings for consistent set operations.
+    sub_ids: set = set()
+    for sub_path in [SUBS_FILE] + glob.glob("subs_*.json"):
+        for uid in load_json(sub_path, []):
+            sub_ids.add(str(uid))
+
+    # Merge: active DB IDs + subscriber IDs (deduplicated, all strings)
+    user_ids = list(db_ids | sub_ids)
+
     if not user_ids:
-        return jsonify({"ok": False, "error": "Không có ID active nào để gửi. Hãy chạy Broadcast to IDs trước."}), 400
+        return jsonify({"ok": False, "error": "Không có ID nào để gửi. Hãy tải IDs lên hoặc chờ người dùng nhấn /start."}), 400
 
     bot_results_init = {b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0} for b in bots_list}
 
@@ -1330,7 +1359,12 @@ def ids_broadcast_status():
 @app.route("/ids/broadcast", methods=["POST"])
 @login_required
 def ids_broadcast():
-    """Broadcast a message to all uploaded IDs using ALL configured bots, classifying status via Telegram API errors."""
+    """Broadcast a message to all uploaded IDs using ALL configured bots, classifying status via Telegram API errors.
+
+    Supports optional rich media (image / video) and inline keyboard buttons alongside the text message.
+    """
+    import json as _json
+
     with _broadcast_lock:
         if _broadcast_status.get("running"):
             return jsonify({"ok": False, "error": "Đang có broadcast đang chạy, vui lòng đợi"}), 409
@@ -1345,8 +1379,23 @@ def ids_broadcast():
         return jsonify({"ok": False, "error": "Chưa cấu hình bot nào"}), 400
 
     message = request.form.get("message", "").strip()
-    if not message:
+    media_type = request.form.get("media_type", "none").strip().lower()
+    media_url = request.form.get("media_url", "").strip()
+    buttons_raw = request.form.get("buttons_json", "").strip()
+
+    if not message and media_type == "none":
         return jsonify({"ok": False, "error": "Tin nhắn không được để trống"}), 400
+    if media_type in ("image", "video") and not media_url:
+        return jsonify({"ok": False, "error": "Vui lòng nhập URL media"}), 400
+
+    buttons = []
+    if buttons_raw:
+        try:
+            buttons = _json.loads(buttons_raw)
+            if not isinstance(buttons, list):
+                buttons = []
+        except Exception:
+            return jsonify({"ok": False, "error": "buttons_json không hợp lệ"}), 400
 
     try:
         with get_db() as conn:
@@ -1371,7 +1420,9 @@ def ids_broadcast():
         })
 
     t = threading.Thread(
-        target=lambda: asyncio.run(_async_run_ids_broadcast(bots_list, message, user_ids)),
+        target=lambda: asyncio.run(
+            _async_run_ids_broadcast(bots_list, message, user_ids, media_type, media_url, buttons)
+        ),
         daemon=True,
     )
     t.start()
@@ -1739,8 +1790,11 @@ try:
         except Exception as e:
             log.error(f"APScheduler: daily backup failed: {e}")
 
-    # Only start the scheduler once (guard against werkzeug reloader double-start)
-    if not os.environ.get("WERKZEUG_RUN_MAIN") == "false":
+    # Guard against Werkzeug debug reloader: in debug mode the parent process
+    # (reloader) also imports app.py; only start the scheduler in the child
+    # worker process (where WERKZEUG_RUN_MAIN == "true") or in production
+    # (where WERKZEUG_RUN_MAIN is unset).
+    if os.environ.get("WERKZEUG_RUN_MAIN") != "false":
         _vn_tz = _pytz.timezone("Asia/Ho_Chi_Minh")
         _scheduler = _BGScheduler(timezone=_vn_tz)
         _scheduler.add_job(_scheduled_daily_backup, "cron", hour=0, minute=1,
