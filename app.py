@@ -580,6 +580,242 @@ def backup_restore():
         return jsonify({"ok": False, "error": "Khôi phục thất bại. Vui lòng thử lại."}), 500
 
 
+async def _async_run_ids_broadcast(bots: list, message: str, user_ids: list) -> None:
+    """Async broadcast to IDs with all bots running concurrently.
+
+    Every active bot processes the full list of user_ids in parallel.  Per-bot
+    proactive rate limit: ~25 msg/sec (asyncio.sleep(0.04)).  When a 429 is
+    received, only the affected bot sleeps for the Telegram-supplied
+    ``retry_after`` duration; all other bots continue uninterrupted.
+
+    After *all* bots have attempted a given uid, the best reachability status
+    (active > blocked > invalid) is written to the DB and the global progress
+    counter is incremented.
+    """
+    active_bots = [b for b in bots if (b.get("token") or "").strip()]
+    num_active = len(active_bots)
+    if num_active == 0:
+        with _broadcast_lock:
+            _broadcast_status["running"] = False
+        return
+
+    bot_res: dict = {
+        b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0}
+        for b in bots
+    }
+    uid_status_map: dict = {uid: None for uid in user_ids}  # None = undetermined
+    uid_done_count: dict = {uid: 0 for uid in user_ids}
+    stats_lock = asyncio.Lock()
+
+    async def bot_worker(bot: dict) -> None:
+        token = (bot.get("token") or "").strip()
+        bot_id = bot.get("id", "")
+        if not token:
+            return
+        api_url = f"https://api.telegram.org/bot{token}/sendMessage"
+        retry_until = 0.0  # Event-loop clock time after which this bot's 429 cooldown ends
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            for uid in user_ids:
+                # Wait out any active 429 cooldown for this bot
+                now = asyncio.get_running_loop().time()
+                if retry_until > now:
+                    await asyncio.sleep(retry_until - now)
+
+                new_status: str = "invalid"
+                while True:  # Retry loop – only retries on 429
+                    try:
+                        resp = await client.post(
+                            api_url,
+                            json={"chat_id": int(uid), "text": message},
+                        )
+                        if resp.status_code == 429:
+                            try:
+                                retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
+                            except Exception as e:
+                                log.warning("Failed to parse retry_after from 429 response: %s", e)
+                                retry_after = 5
+                            log.warning("Bot %s 429 – sleeping %ss", bot_id, retry_after)
+                            retry_until = asyncio.get_running_loop().time() + retry_after
+                            await asyncio.sleep(retry_after)
+                            continue  # Retry the same uid
+                        rdata = resp.json()
+                        if resp.status_code == 200 and rdata.get("ok"):
+                            new_status = "active"
+                        elif resp.status_code == 403:
+                            new_status = "blocked"
+                        else:
+                            new_status = "invalid"
+                        break
+                    except Exception as e:
+                        log.warning("Failed to send message to %s via bot %s: %s", uid, bot_id, e)
+                        new_status = "invalid"
+                        break
+
+                # Merge this bot's result into the per-uid best status
+                async with stats_lock:
+                    prev = uid_status_map[uid]
+                    if (
+                        new_status == "active"
+                        or (new_status == "blocked" and prev not in ("active",))
+                        or (prev is None and new_status == "invalid")
+                    ):
+                        uid_status_map[uid] = new_status
+                    if new_status == "active":
+                        bot_res[bot_id]["success"] += 1
+                    else:
+                        bot_res[bot_id]["fail"] += 1
+                    uid_done_count[uid] += 1
+                    all_done = uid_done_count[uid] >= num_active
+                    final_status = uid_status_map[uid] if all_done else None
+                    bot_res_snap = {k: dict(v) for k, v in bot_res.items()} if all_done else None
+
+                if all_done:
+                    resolved = final_status or "invalid"
+                    try:
+                        with get_db() as conn:
+                            conn.execute(
+                                "UPDATE telegram_ids SET status=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+                                (resolved, uid),
+                            )
+                            conn.commit()
+                    except Exception as e:
+                        log.warning("DB update failed for %s: %s", uid, e)
+                    with _broadcast_lock:
+                        _broadcast_status["done"] += 1
+                        _broadcast_status[
+                            resolved if resolved in ("active", "blocked", "invalid") else "error"
+                        ] += 1
+                        _broadcast_status["bot_results"] = bot_res_snap
+
+                # Proactive rate limit: 25 msg/sec per bot (1 request per 0.04s)
+                await asyncio.sleep(0.04)
+
+    await asyncio.gather(*[bot_worker(bot) for bot in active_bots])
+
+    with _broadcast_lock:
+        _broadcast_status["running"] = False
+        _broadcast_status["bot_results"] = {k: dict(v) for k, v in bot_res.items()}
+
+
+async def _async_run_broadcast_all(
+    bots: list, user_ids: list, message: str,
+    media_type: str, media_url: str, buttons: list, camp_id,
+) -> None:
+    """Async broadcast to active IDs with workload distributed across all bots.
+
+    User IDs are split among bots via interleaved slicing so that N bots each
+    handle ~1/N of the audience, achieving N × ~25 msg/sec total throughput.
+    Per-bot 429 handling pauses only the affected bot; others continue.
+    """
+    active_bots = [b for b in bots if (b.get("token") or "").strip()]
+    num_bots = len(active_bots)
+    if num_bots == 0:
+        with _broadcast_all_lock:
+            _broadcast_all_status["running"] = False
+        return
+
+    bot_res: dict = {
+        b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0}
+        for b in bots
+    }
+    # Interleaved slicing: bot 0 → [0, N, 2N, …], bot 1 → [1, N+1, 2N+1, …], etc.
+    bot_uid_slices = [user_ids[i::num_bots] for i in range(num_bots)]
+
+    total_success = 0
+    total_fail = 0
+    done_count = 0
+    stats_lock = asyncio.Lock()
+
+    async def bot_worker(bot: dict, uid_slice: list) -> None:
+        nonlocal total_success, total_fail, done_count
+        token = (bot.get("token") or "").strip()
+        bot_id = bot.get("id", "")
+        if not token:
+            return
+        retry_until = 0.0  # Event-loop clock time after which this bot's 429 cooldown ends
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            for uid in uid_slice:
+                now = asyncio.get_running_loop().time()
+                if retry_until > now:
+                    await asyncio.sleep(retry_until - now)
+
+                endpoint, payload = _build_telegram_payload(uid, message, media_type, media_url, buttons)
+                if payload is None:
+                    async with stats_lock:
+                        bot_res[bot_id]["fail"] += 1
+                        total_fail += 1
+                        done_count += 1
+                        snap = (done_count, total_success, total_fail, {k: dict(v) for k, v in bot_res.items()})
+                    with _broadcast_all_lock:
+                        _broadcast_all_status["done"] = snap[0]
+                        _broadcast_all_status["success"] = snap[1]
+                        _broadcast_all_status["fail"] = snap[2]
+                        _broadcast_all_status["bot_results"] = snap[3]
+                    await asyncio.sleep(0.04)
+                    continue
+
+                api_url = f"https://api.telegram.org/bot{token}/{endpoint}"
+                uid_success = False
+                while True:
+                    try:
+                        resp = await client.post(api_url, json=payload)
+                        if resp.status_code == 429:
+                            try:
+                                retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
+                            except Exception as e:
+                                log.warning("Failed to parse retry_after from 429 response: %s", e)
+                                retry_after = 5
+                            log.warning("Bot %s 429 – sleeping %ss", bot_id, retry_after)
+                            retry_until = asyncio.get_running_loop().time() + retry_after
+                            await asyncio.sleep(retry_after)
+                            continue
+                        if resp.status_code == 200 and resp.json().get("ok"):
+                            uid_success = True
+                        break
+                    except Exception as e:
+                        log.warning("Failed to send message to %s via bot %s: %s", uid, bot_id, e)
+                        break
+
+                async with stats_lock:
+                    if uid_success:
+                        bot_res[bot_id]["success"] += 1
+                        total_success += 1
+                    else:
+                        bot_res[bot_id]["fail"] += 1
+                        total_fail += 1
+                    done_count += 1
+                    snap = (done_count, total_success, total_fail, {k: dict(v) for k, v in bot_res.items()})
+                with _broadcast_all_lock:
+                    _broadcast_all_status["done"] = snap[0]
+                    _broadcast_all_status["success"] = snap[1]
+                    _broadcast_all_status["fail"] = snap[2]
+                    _broadcast_all_status["bot_results"] = snap[3]
+
+                # Proactive rate limit: 25 msg/sec per bot (1 request per 0.04s)
+                await asyncio.sleep(0.04)
+
+    await asyncio.gather(
+        *[bot_worker(bot, uid_slice) for bot, uid_slice in zip(active_bots, bot_uid_slices)]
+    )
+
+    with _broadcast_all_lock:
+        _broadcast_all_status["running"] = False
+        _broadcast_all_status["bot_results"] = {k: dict(v) for k, v in bot_res.items()}
+
+    if camp_id is not None:
+        try:
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE broadcast_logs SET success_count=?, fail_count=?, bot_results_json=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (total_success, total_fail, json.dumps(bot_res), camp_id),
+                )
+                conn.commit()
+        except Exception as e:
+            log.warning("broadcast_logs update failed: %s", e)
+
+
 @app.route("/broadcast", methods=["POST"])
 @login_required
 def broadcast():
@@ -696,67 +932,10 @@ def broadcast_all():
     except Exception as e:
         log.warning(f"broadcast_logs insert failed: {e}")
 
-    def _run_broadcast_all(bots: list, user_ids: list, message: str,
-                           media_type: str, media_url: str, buttons: list, camp_id):
-        import time as _t
-        bot_res = {b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0} for b in bots}
-        total_success = 0
-        total_fail = 0
-
-        for uid in user_ids:
-            uid_any_success = False
-            for bot in bots:
-                token = (bot.get("token") or "").strip()
-                bot_id = bot.get("id", "")
-                if not token:
-                    continue
-                endpoint, payload = _build_telegram_payload(uid, message, media_type, media_url, buttons)
-                if payload is None:
-                    bot_res[bot_id]["fail"] += 1
-                    continue
-                api_url = f"https://api.telegram.org/bot{token}/{endpoint}"
-                try:
-                    resp = httpx.post(api_url, json=payload, timeout=10)
-                    if resp.status_code == 200 and resp.json().get("ok"):
-                        bot_res[bot_id]["success"] += 1
-                        uid_any_success = True
-                    else:
-                        bot_res[bot_id]["fail"] += 1
-                except Exception:
-                    bot_res[bot_id]["fail"] += 1
-                _t.sleep(0.05)
-
-            if uid_any_success:
-                total_success += 1
-            else:
-                total_fail += 1
-
-            with _broadcast_all_lock:
-                _broadcast_all_status["done"] += 1
-                _broadcast_all_status["success"] = total_success
-                _broadcast_all_status["fail"] = total_fail
-                _broadcast_all_status["bot_results"] = bot_res
-
-        with _broadcast_all_lock:
-            _broadcast_all_status["running"] = False
-            _broadcast_all_status["bot_results"] = bot_res
-
-        # Update campaign log
-        if camp_id is not None:
-            try:
-                import json as _j
-                with get_db() as conn:
-                    conn.execute(
-                        "UPDATE broadcast_logs SET success_count=?, fail_count=?, bot_results_json=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (total_success, total_fail, _j.dumps(bot_res), camp_id),
-                    )
-                    conn.commit()
-            except Exception as e:
-                log.warning(f"broadcast_logs update failed: {e}")
-
     t = threading.Thread(
-        target=_run_broadcast_all,
-        args=(bots_list, user_ids, message, media_type, media_url, buttons, campaign_id),
+        target=lambda: asyncio.run(
+            _async_run_broadcast_all(bots_list, user_ids, message, media_type, media_url, buttons, campaign_id)
+        ),
         daemon=True,
     )
     t.start()
@@ -1191,65 +1370,10 @@ def ids_broadcast():
             "bot_results": bot_results_init,
         })
 
-    def _run_broadcast(bots: list, message: str, user_ids: list):
-        import time as _time
-        bot_res = {b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0} for b in bots}
-
-        for uid in user_ids:
-            # Determine the best reachability status for this user across all bots
-            uid_status = None  # None means not yet determined
-            for bot in bots:
-                token = (bot.get("token") or "").strip()
-                bot_id = bot.get("id", "")
-                if not token:
-                    continue
-                api_url = f"https://api.telegram.org/bot{token}/sendMessage"
-                try:
-                    resp = httpx.post(
-                        api_url,
-                        json={"chat_id": int(uid), "text": message},
-                        timeout=10,
-                    )
-                    data = resp.json()
-                    if resp.status_code == 200 and data.get("ok"):
-                        bot_res[bot_id]["success"] += 1
-                        uid_status = "active"  # At least one success → user is reachable
-                    elif resp.status_code == 403:
-                        bot_res[bot_id]["fail"] += 1
-                        if uid_status != "active":
-                            uid_status = "blocked"
-                    else:
-                        bot_res[bot_id]["fail"] += 1
-                        if uid_status not in ("active", "blocked"):
-                            uid_status = "invalid"
-                except Exception:
-                    bot_res[bot_id]["fail"] += 1
-                    if uid_status not in ("active", "blocked"):
-                        uid_status = "invalid"
-                # Rate-limit: max ~20 messages/sec per bot
-                _time.sleep(0.05)
-
-            new_status = uid_status or "invalid"
-            # Update DB
-            try:
-                with get_db() as conn:
-                    conn.execute(
-                        "UPDATE telegram_ids SET status=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
-                        (new_status, uid),
-                    )
-                    conn.commit()
-            except Exception as e:
-                log.warning(f"DB update failed for {uid}: {e}")
-            with _broadcast_lock:
-                _broadcast_status["done"] += 1
-                _broadcast_status[new_status if new_status in ("active", "blocked", "invalid") else "error"] += 1
-                _broadcast_status["bot_results"] = bot_res
-
-        with _broadcast_lock:
-            _broadcast_status["running"] = False
-            _broadcast_status["bot_results"] = bot_res
-
-    t = threading.Thread(target=_run_broadcast, args=(bots_list, message, user_ids), daemon=True)
+    t = threading.Thread(
+        target=lambda: asyncio.run(_async_run_ids_broadcast(bots_list, message, user_ids)),
+        daemon=True,
+    )
     t.start()
     return jsonify({"ok": True, "total": len(user_ids), "bots_count": len(bots_list), "message": "Broadcast đã bắt đầu"})
 
