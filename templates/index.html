@@ -472,7 +472,7 @@
                 <div class="d-flex flex-wrap gap-2">
                   {% for photo in post.photos %}
                     {% if photo.get('type') == 'video' %}
-                    <a href="{{ photo.url }}" target="_blank" rel="noopener" class="d-flex align-items-center justify-content-center photo-thumb text-decoration-none" style="background:#0f1117;" title="Xem video">
+                    <a href="{{ photo.url }}" target="_blank" rel="noopener" class="d-flex align-items-center justify-content-center photo-thumb text-decoration-none" style="background:#0f1117;" title="Xem video" aria-label="Xem video trong tab mới">
                       <i class="bi bi-camera-video-fill" style="font-size:1.8rem;color:#4d9fff;"></i>
                     </a>
                     {% else %}
@@ -1561,7 +1561,12 @@ function smCollectButtons(section) {
     if (type === 'url') value = (row.querySelector('.sm-btn-url') || {}).value || '';
     else if (type === 'node') value = (row.querySelector('.sm-btn-node') || {}).value || '';
     else if (type === 'open_album_list') value = 'menu';
-    if (label) buttons.push({ label: label, type: type, value: value.trim() || 'menu' });
+    if (label) {
+      const cleanValue = type === 'open_album_list' ? 'menu' : value.trim();
+      if (cleanValue || type === 'open_album_list') {
+        buttons.push({ label: label, type: type, value: cleanValue });
+      }
+    }
   });
   return buttons;
 }

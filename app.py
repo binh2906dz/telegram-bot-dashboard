@@ -1679,7 +1679,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
             # Send end-of-album closing message
             flow = get_messages_flow()
             album_end = flow.get("album_end", {})
-            end_text = (album_end.get("text") or "Bạn đã xem xong album! 😊\nNhấn nút bên dưới để quay lại danh sách.").strip()
+            end_text = (album_end.get("text") or _DEFAULT_ALBUM_END_NODE["text"]).strip()
             keyboard = _build_flow_keyboard(album_end.get("buttons", []))
             if not keyboard:
                 keyboard = [[InlineKeyboardButton("🔙 Quay lại danh sách Album", callback_data="menu")]]
