@@ -1526,6 +1526,8 @@ def shortener_shorten():
     results = []
     for api in apis:
         request_url = api["template"].replace("{url}", encoded_url)
+        # Auto-correct common AdLinkFly mistake: /st?api= → /api?api=
+        request_url = request_url.replace("/st?api=", "/api?api=")
         # Only allow http/https schemes to prevent SSRF via other URI schemes
         if not (request_url.startswith("http://") or request_url.startswith("https://")):
             results.append({"ok": False, "error": "Lỗi: Template API không hợp lệ (chỉ hỗ trợ http/https)"})
@@ -1537,11 +1539,32 @@ def shortener_shorten():
             )
             with _urlrequest.urlopen(req, timeout=10) as resp:  # noqa: S310
                 raw = resp.read(_MAX_SHORTENER_RESPONSE_BYTES).decode("utf-8", errors="replace").strip()
-            # If the response looks like a URL, use it; otherwise treat as error
-            if raw.startswith("http://") or raw.startswith("https://"):
-                results.append({"ok": True, "url": raw})
-            else:
-                results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
+            # Try to parse response as JSON first (AdLinkFly-based shorteners)
+            try:
+                payload = json.loads(raw)
+                status = payload.get("status")
+                if status == "success" or payload.get("error") == 0:
+                    short_url = (
+                        payload.get("shortenedUrl")
+                        or payload.get("short_url")
+                        or payload.get("shortlink")
+                        or payload.get("url")
+                    )
+                    if short_url and (short_url.startswith("http://") or short_url.startswith("https://")):
+                        results.append({"ok": True, "url": short_url})
+                    else:
+                        results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
+                elif status == "error":
+                    msg = payload.get("message") or payload.get("msg") or "Lỗi không xác định từ API"
+                    results.append({"ok": False, "error": f"Lỗi API: {msg}"})
+                else:
+                    results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
+            except json.JSONDecodeError:
+                # Not JSON – fall back to plain-text URL check
+                if raw.startswith("http://") or raw.startswith("https://"):
+                    results.append({"ok": True, "url": raw})
+                else:
+                    results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
         except Exception as exc:
             log.warning(f"shortener_shorten API call error: {exc}")
             results.append({"ok": False, "error": "Lỗi: Không thể kết nối hoặc API không phản hồi"})
