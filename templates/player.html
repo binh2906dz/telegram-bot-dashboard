@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Video Player</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    #video-container {
+      width: 100%;
+      max-width: 854px;
+    }
+    video {
+      width: 100%;
+      height: auto;
+      display: block;
+      background: #000;
+    }
+  </style>
+</head>
+<body>
+  <div id="video-container">
+    <video id="player" controls autoplay playsinline></video>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
+  <script>
+    (function () {
+      var src = {{ m3u8_url | tojson }};
+      var video = document.getElementById('player');
+
+      if (Hls.isSupported()) {
+        var hls = new Hls();
+        hls.loadSource(src);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, function () {
+          video.play();
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari native HLS support
+        video.src = src;
+        video.addEventListener('loadedmetadata', function () {
+          video.play();
+        });
+      } else {
+        video.parentElement.innerHTML =
+          '<p style="color:#fff;text-align:center;padding:2rem;">Trình duyệt của bạn không hỗ trợ phát HLS.</p>';
+      }
+    })();
+  </script>
+</body>
+</html>
