@@ -405,16 +405,16 @@ def process_video_to_hls(input_video_path: str, output_dir: str) -> str:
         m3u8_path,
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, timeout=300)
-        if result.returncode != 0:
-            log.error(f"FFmpeg HLS conversion failed: {result.stderr.decode(errors='replace')}")
-            raise RuntimeError("FFmpeg conversion failed")
+        subprocess.run(cmd, capture_output=True, check=True, timeout=300)
+    except subprocess.CalledProcessError as exc:
+        log.error(f"FFmpeg HLS conversion failed: {exc.stderr.decode(errors='replace')}")
+        raise RuntimeError("FFmpeg conversion failed") from exc
     except FileNotFoundError:
         log.warning("ffmpeg not found – serving original video without HLS conversion")
         raise RuntimeError("ffmpeg not installed")
-    # Return relative URL path to .m3u8 (output_dir is relative to project root)
-    rel = output_dir.replace(os.sep, "/").lstrip("./")
-    return f"/{rel}/index.m3u8"
+    # Construct URL from known components to avoid platform-specific path issues
+    file_id = os.path.basename(output_dir)
+    return f"/static/uploads/videos/{file_id}/index.m3u8"
 
 
 def run_daily_backup():
@@ -673,9 +673,14 @@ def healthz():
 @app.route("/stream/<file_id>")
 def stream_video(file_id):
     """Serve the HLS player page for a given video file_id."""
-    # Sanitize file_id to prevent path traversal
-    safe_id = os.path.basename(file_id)
-    m3u8_url = f"/static/uploads/videos/{safe_id}/index.m3u8"
+    # Validate file_id: only allow hex UUIDs (32 hex chars) to prevent path traversal
+    import re as _re
+    if not _re.fullmatch(r"[0-9a-f]{32}", file_id):
+        return "Invalid file ID", 400
+    hls_dir = os.path.join(UPLOAD_VIDEOS_DIR, file_id)
+    if not os.path.isdir(hls_dir):
+        return "Stream not found", 404
+    m3u8_url = f"/static/uploads/videos/{file_id}/index.m3u8"
     return render_template("player.html", m3u8_url=m3u8_url)
 
 
@@ -1696,10 +1701,15 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                     # HLS video: extract file_id from the m3u8 URL and send as Web App button
                     if item_type == "video" and url.endswith("/index.m3u8"):
                         # URL pattern: /static/uploads/videos/<file_id>/index.m3u8
+                        if not base_url:
+                            log.warning("APP_BASE_URL not set – cannot create HLS stream button; skipping video")
+                            continue
                         parts = url.rstrip("/").split("/")
-                        file_id = parts[-2] if len(parts) >= 2 else uuid.uuid4().hex
-                        stream_path = f"/stream/{file_id}"
-                        stream_url = f"{base_url}{stream_path}" if base_url else stream_path
+                        if len(parts) < 2:
+                            log.warning(f"Unexpected HLS URL format, skipping: {url}")
+                            continue
+                        file_id = parts[-2]
+                        stream_url = f"{base_url}/stream/{file_id}"
                         label = f"▶️ Xem video {len(hls_buttons) + 1}"
                         hls_buttons.append([InlineKeyboardButton(label, url=stream_url)])
                         continue
