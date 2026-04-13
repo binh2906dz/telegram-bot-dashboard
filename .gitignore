@@ -3,3 +3,4 @@ __pycache__/
 *.pyo
 static/uploads/
 .env
+*.db
