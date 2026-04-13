@@ -288,6 +288,12 @@ def increment_messages_sent(bot_id: str, count: int):
     save_json(STATS_FILE, stats)
 
 
+_DEFAULT_ALBUM_END_NODE = {
+    "text": "Bạn đã xem xong album! 😊\nNhấn nút bên dưới để quay lại danh sách.",
+    "buttons": [{"label": "🔙 Quay lại danh sách Album", "type": "open_album_list", "value": "menu"}],
+}
+
+
 def get_messages_flow() -> dict:
     """Load messages.json in node-based flow format.
     Automatically migrates from the old flat {start_text, buttons[]} format."""
@@ -308,9 +314,12 @@ def get_messages_flow() -> dict:
         save_json(MESSAGES_FILE, flow)
         return flow
     if not isinstance(data, dict) or not data:
-        return {"start": {"text": "Chào mừng bạn! 👋", "buttons": []}}
+        return {"start": {"text": "Chào mừng bạn! 👋", "buttons": []},
+                "album_end": dict(_DEFAULT_ALBUM_END_NODE)}
     if "start" not in data:
         data["start"] = {"text": "Chào mừng bạn! 👋", "buttons": []}
+    if "album_end" not in data:
+        data["album_end"] = dict(_DEFAULT_ALBUM_END_NODE)
     return data
 
 
@@ -360,13 +369,17 @@ def owner_required(f):
 
 # ===== CLOUDINARY HELPERS =====
 
-def upload_to_cloudinary(file_stream) -> str:
-    """Upload an image file stream to Cloudinary and return the secure URL."""
+def upload_to_cloudinary(file_stream, resource_type: str = "auto") -> str:
+    """Upload a file stream to Cloudinary and return the secure URL.
+
+    Uses resource_type='auto' by default to support images, videos, and other
+    media types without requiring the caller to specify the type explicitly.
+    """
     public_id = f"uploads/{uuid.uuid4().hex}"
     result = cloudinary.uploader.upload(
         file_stream,
         public_id=public_id,
-        resource_type="image",
+        resource_type=resource_type,
         use_filename=False,
         unique_filename=False,
     )
@@ -509,18 +522,25 @@ def add_post(album_id):
     albums = load_json(ALBUMS_FILE, {})
     if album_id not in albums:
         return "Album not found", 404
-    photos = []
-    for img in request.files.getlist("images"):
-        if img and img.filename:
+    media_items = []
+    # Accept both 'media' (new) and 'images' (legacy) field names
+    if "media" in request.files:
+        files = request.files.getlist("media")
+    else:
+        files = request.files.getlist("images")
+    for f in files:
+        if f and f.filename:
             try:
-                url = upload_to_cloudinary(img.stream)
-                photos.append({"url": url})
+                mime = (f.content_type or "").lower()
+                item_type = "video" if mime.startswith("video/") else "image"
+                url = upload_to_cloudinary(f.stream)
+                media_items.append({"url": url, "type": item_type})
             except Exception as e:
                 log.error(f"Cloudinary upload failed: {e}")
     post = {
         "id": uuid.uuid4().hex,
         "caption": caption,
-        "photos": photos,
+        "photos": media_items,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     if "posts" not in albums[album_id]:
@@ -563,8 +583,10 @@ def upload():
     for img in request.files.getlist("images"):
         if img and img.filename:
             try:
+                mime = (img.content_type or "").lower()
+                item_type = "video" if mime.startswith("video/") else "image"
                 url = upload_to_cloudinary(img.stream)
-                photos.append({"url": url})
+                photos.append({"url": url, "type": item_type})
             except Exception as e:
                 log.error(f"Cloudinary upload failed: {e}")
     if photos:
@@ -1286,7 +1308,10 @@ def _parse_node_buttons(raw: list) -> list:
         label = str(btn.get("label", "")).strip()
         btn_type = str(btn.get("type", "url")).strip()
         value = str(btn.get("value", "")).strip()
-        if label and value and btn_type in ("url", "node"):
+        if btn_type == "open_album_list" and label:
+            # Always normalise value to "menu" for this special type
+            clean.append({"label": label, "type": "open_album_list", "value": "menu"})
+        elif label and value and btn_type in ("url", "node"):
             clean.append({"label": label, "type": btn_type, "value": value})
     return clean
 
@@ -1559,7 +1584,7 @@ def ids_broadcast():
 # ===== BOT HANDLERS =====
 
 if BOT_TOKEN or load_json(BOTS_FILE, []):
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
     from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
     # ---- Flow keyboard builder ----
@@ -1571,11 +1596,13 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
             label = btn.get("label", "")
             btn_type = btn.get("type", "url")
             value = btn.get("value", "")
-            if not label or not value:
+            if not label:
                 continue
-            if btn_type == "url":
+            if btn_type == "url" and value:
                 keyboard.append([InlineKeyboardButton(label, url=value)])
-            else:  # node
+            elif btn_type == "open_album_list":
+                keyboard.append([InlineKeyboardButton(label, callback_data="menu")])
+            elif btn_type == "node" and value:
                 keyboard.append([InlineKeyboardButton(label, callback_data=f"flow_{value}")])
         return keyboard
 
@@ -1595,7 +1622,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         await query.edit_message_text("Chọn album:", reply_markup=InlineKeyboardMarkup(buttons))
 
     async def send_album(chat_id, bot, album):
-        """Send all posts in an album (supports both new posts[] format and legacy photos[] format)."""
+        """Send all posts in an album (supports images, videos, and legacy photos[] format)."""
         if "posts" in album:
             groups = [(post.get("photos", []), post.get("caption", "")) for post in album["posts"]]
         else:
@@ -1607,6 +1634,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
             try:
                 for i, p in enumerate(photos_list):
                     url = p["url"]
+                    item_type = p.get("type", "image")
                     if url.startswith("/static/uploads/"):
                         f = open(url.lstrip("/"), "rb")
                         open_files.append(f)
@@ -1614,7 +1642,10 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                     else:
                         media_src = url
                     caption = group_caption if i == 0 else ""
-                    media.append(InputMediaPhoto(media_src, caption=caption))
+                    if item_type == "video":
+                        media.append(InputMediaVideo(media_src, caption=caption))
+                    else:
+                        media.append(InputMediaPhoto(media_src, caption=caption))
                 if media:
                     await bot.send_media_group(chat_id, media)
             finally:
@@ -1645,6 +1676,18 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
 
         if album:
             await send_album(chat_id, context.bot, album)
+            # Send end-of-album closing message
+            flow = get_messages_flow()
+            album_end = flow.get("album_end", {})
+            end_text = (album_end.get("text") or _DEFAULT_ALBUM_END_NODE["text"]).strip()
+            keyboard = _build_flow_keyboard(album_end.get("buttons", []))
+            if not keyboard:
+                keyboard = [[InlineKeyboardButton("🔙 Quay lại danh sách Album", callback_data="menu")]]
+            await context.bot.send_message(
+                chat_id,
+                end_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
 
     async def flow_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle flow navigation callbacks (callback_data starting with 'flow_')."""

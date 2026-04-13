@@ -126,6 +126,7 @@
     <div class="nav-item" id="nav-analytics" onclick="showSection('analytics')"><i class="bi bi-bar-chart-line-fill"></i> Master Analytics</div>
     <div class="nav-item" id="nav-ids" onclick="showSection('ids')"><i class="bi bi-people-fill"></i> Quản lý ID</div>
     <div class="nav-item" id="nav-albums" onclick="showSection('albums')"><i class="bi bi-collection"></i> Albums</div>
+    <div class="nav-item" id="nav-script" onclick="showSection('script')"><i class="bi bi-diagram-3"></i> Kịch bản &amp; Album</div>
     <div class="nav-section-label">Cài đặt</div>
     <div class="nav-item" id="nav-config" onclick="showSection('config')"><i class="bi bi-gear-fill"></i> Cấu hình Bot</div>
     <div class="nav-section-label">Hệ thống</div>
@@ -442,9 +443,9 @@
                    ondragover="event.preventDefault();this.classList.add('dragover')"
                    ondragleave="this.classList.remove('dragover')"
                    ondrop="handleDrop(event,'{{ album_id }}')">
-                <input type="file" name="images" id="fi-{{ album_id }}" multiple accept="image/*" style="display:none" onchange="previewImages(event,'{{ album_id }}')">
+                <input type="file" name="media" id="fi-{{ album_id }}" multiple accept="image/*,video/*" style="display:none" onchange="previewMedia(event,'{{ album_id }}')">
                 <i class="bi bi-cloud-arrow-up fs-3 d-block mb-1 text-muted"></i>
-                <span class="text-muted" style="font-size:.85rem;">Click hoặc kéo thả ảnh vào đây</span>
+                <span class="text-muted" style="font-size:.85rem;">Click hoặc kéo thả ảnh/video vào đây</span>
               </div>
               <div class="preview-grid" id="preview-{{ album_id }}"></div>
               <div class="d-flex gap-2 mt-3">
@@ -469,9 +470,17 @@
                   {% endif %}
                 </div>
                 <div class="d-flex flex-wrap gap-2">
-                  {% for photo in post.photos %}<img src="{{ photo.url }}" class="photo-thumb" onclick="openLightbox('{{ photo.url }}')" alt="photo">{% endfor %}
+                  {% for photo in post.photos %}
+                    {% if photo.get('type') == 'video' %}
+                    <a href="{{ photo.url }}" target="_blank" rel="noopener" class="d-flex align-items-center justify-content-center photo-thumb text-decoration-none" style="background:#0f1117;" title="Xem video" aria-label="Xem video trong tab mới">
+                      <i class="bi bi-camera-video-fill" style="font-size:1.8rem;color:#4d9fff;"></i>
+                    </a>
+                    {% else %}
+                    <img src="{{ photo.url }}" class="photo-thumb" onclick="openLightbox('{{ photo.url }}')" alt="photo">
+                    {% endif %}
+                  {% endfor %}
                 </div>
-                <div class="mt-1" style="font-size:.72rem;color:#555;"><i class="bi bi-images me-1"></i>{{ post.photos|length }} ảnh{% if post.created_at %} &middot; <i class="bi bi-clock me-1"></i>{{ post.created_at[:10] }}{% endif %}</div>
+                <div class="mt-1" style="font-size:.72rem;color:#555;"><i class="bi bi-collection me-1"></i>{{ post.photos|length }} ảnh/video{% if post.created_at %} &middot; <i class="bi bi-clock me-1"></i>{{ post.created_at[:10] }}{% endif %}</div>
               </div>
               {% endfor %}
             {% else %}<div class="empty-state py-3"><i class="bi bi-inbox"></i>Chưa có bài viết. Nhấn <strong>Thêm bài</strong>.</div>{% endif %}
@@ -487,6 +496,127 @@
         </div>
       </div>
       {% endif %}
+    </div>
+
+    <!-- SCRIPT & ALBUM MANAGER SECTION -->
+    <div class="section-page" id="section-script">
+      <div class="page-header">
+        <span class="page-title"><i class="bi bi-diagram-3"></i>Kịch bản &amp; Album</span>
+        <span style="font-size:.78rem;color:#888;">Luồng tương tác đầy đủ từ /start đến kết thúc album</span>
+      </div>
+      <!-- Flow Visualization -->
+      <div class="dash-card mb-4">
+        <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-signpost-2 me-2" style="color:var(--accent);"></i>Luồng Kịch bản Tổng quan</span></div>
+        <div class="dash-card-body">
+          <div class="d-flex align-items-center gap-2 flex-wrap justify-content-center" style="font-size:.82rem;">
+            <div class="text-center px-3 py-2 rounded" style="background:rgba(77,159,255,.1);border:1px dashed #4d9fff;min-width:96px;">
+              <i class="bi bi-1-circle-fill d-block mb-1" style="color:#4d9fff;font-size:1.2rem;"></i>
+              <div style="color:#4d9fff;font-weight:600;">Chào mừng</div>
+              <div style="color:#888;font-size:.72rem;">/start → slogan → tin nhắn</div>
+            </div>
+            <i class="bi bi-arrow-right fs-4" style="color:#555;"></i>
+            <div class="text-center px-3 py-2 rounded" style="background:rgba(0,200,83,.1);border:1px dashed #00c853;min-width:96px;">
+              <i class="bi bi-2-circle-fill d-block mb-1" style="color:#00c853;font-size:1.2rem;"></i>
+              <div style="color:#00c853;font-weight:600;">Danh sách Album</div>
+              <div style="color:#888;font-size:.72rem;">{{ albums|length }} album đang có</div>
+            </div>
+            <i class="bi bi-arrow-right fs-4" style="color:#555;"></i>
+            <div class="text-center px-3 py-2 rounded" style="background:rgba(255,193,7,.1);border:1px dashed #ffc107;min-width:96px;">
+              <i class="bi bi-3-circle-fill d-block mb-1" style="color:#ffc107;font-size:1.2rem;"></i>
+              <div style="color:#ffc107;font-weight:600;">Xem Album</div>
+              <div style="color:#888;font-size:.72rem;">Bot gửi bài viết tuần tự</div>
+            </div>
+            <i class="bi bi-arrow-right fs-4" style="color:#555;"></i>
+            <div class="text-center px-3 py-2 rounded" style="background:rgba(156,39,176,.1);border:1px dashed #ce93d8;min-width:96px;">
+              <i class="bi bi-4-circle-fill d-block mb-1" style="color:#ce93d8;font-size:1.2rem;"></i>
+              <div style="color:#ce93d8;font-weight:600;">Kết thúc Album</div>
+              <div style="color:#888;font-size:.72rem;">Tin nhắn + nút Quay lại</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row g-4">
+        <!-- Part A: Welcome Script -->
+        <div class="col-12 col-lg-6">
+          <div class="dash-card h-100" style="border-color:#4d9fff33;">
+            <div class="dash-card-header" style="border-color:#4d9fff33;">
+              <span class="dash-card-title" style="color:#4d9fff;"><i class="bi bi-1-circle-fill me-2"></i>Bước 1 — Tin nhắn Chào mừng</span>
+            </div>
+            <div class="dash-card-body">
+              <div class="mb-2" style="font-size:.8rem;color:#888;"><i class="bi bi-info-circle me-1"></i>Tin nhắn được gửi sau slogan khi người dùng gõ <code>/start</code>.</div>
+              <div class="mb-3">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Nội dung tin nhắn <span class="text-danger">*</span></label>
+                <textarea id="sm-welcome-text" class="form-control" rows="4" placeholder="VD: Chào mừng bạn! 👋 Nhấn nút bên dưới để xem album..."></textarea>
+              </div>
+              <div class="mb-3">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Nút bấm</label>
+                <div id="sm-welcome-buttons" class="mb-2"></div>
+                <div class="d-flex gap-2 flex-wrap">
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="smAddBtn('welcome')"><i class="bi bi-plus-lg me-1"></i>Thêm nút</button>
+                  <button type="button" class="btn btn-sm btn-outline-success" onclick="smAddAlbumListBtn('welcome')"><i class="bi bi-collection me-1"></i>Thêm nút "Xem Album"</button>
+                </div>
+              </div>
+              <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-accent btn-sm" onclick="smSaveWelcome(this)"><i class="bi bi-floppy me-1"></i>Lưu</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="showSection('config');showConfigTab('slogans')"><i class="bi bi-chat-quote me-1"></i>Sửa Slogan</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Part B: Album List Preview -->
+        <div class="col-12 col-lg-6">
+          <div class="dash-card h-100" style="border-color:#00c85333;">
+            <div class="dash-card-header" style="border-color:#00c85333;">
+              <span class="dash-card-title" style="color:#00c853;"><i class="bi bi-2-circle-fill me-2"></i>Bước 2 — Danh sách Album (Động)</span>
+              <button class="btn btn-sm btn-outline-success" onclick="showSection('albums')"><i class="bi bi-pencil me-1"></i>Quản lý Album</button>
+            </div>
+            <div class="dash-card-body">
+              <div class="mb-2" style="font-size:.8rem;color:#888;"><i class="bi bi-info-circle me-1"></i>Bot tự động hiển thị các album này dưới dạng nút bấm. Quản lý trong mục <strong>Albums</strong>.</div>
+              <div class="d-flex flex-wrap gap-2 mb-3">
+                {% if albums %}
+                  {% for album_id, album in albums.items() %}
+                  <span style="background:rgba(0,200,83,.15);color:#00c853;border:1px solid #00c85333;border-radius:8px;padding:5px 12px;font-size:.82rem;">
+                    <i class="bi bi-folder2 me-1"></i>{{ album.title if album.title else album_id }}
+                    <span style="color:#666;font-size:.72rem;margin-left:4px;">({{ album.posts|length if album.posts else 0 }} bài)</span>
+                  </span>
+                  {% endfor %}
+                {% else %}
+                  <div style="font-size:.85rem;color:#666;"><i class="bi bi-folder-x me-1"></i>Chưa có album. <a href="#" onclick="showSection('albums')" style="color:#00c853;">Tạo ngay →</a></div>
+                {% endif %}
+              </div>
+              <div class="p-2 rounded" style="background:rgba(255,255,255,.03);border:1px solid var(--border-color);font-size:.78rem;color:#777;">
+                <i class="bi bi-lightbulb me-1" style="color:#ffc107;"></i>Người dùng nhấn nút album → Bot gửi tuần tự tất cả bài viết (ảnh/video + caption) của album đó.
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Part C: End-of-Album Script -->
+        <div class="col-12">
+          <div class="dash-card" style="border-color:#ce93d833;">
+            <div class="dash-card-header" style="border-color:#ce93d833;">
+              <span class="dash-card-title" style="color:#ce93d8;"><i class="bi bi-4-circle-fill me-2"></i>Bước 4 — Tin nhắn Kết thúc Album</span>
+            </div>
+            <div class="dash-card-body">
+              <div class="mb-3" style="font-size:.8rem;color:#888;"><i class="bi bi-info-circle me-1"></i>Tin nhắn này được gửi <strong>sau khi bot gửi xong toàn bộ bài viết</strong> của một album. Nên có nút "Quay lại danh sách album".</div>
+              <div class="row g-3">
+                <div class="col-12 col-md-6">
+                  <label class="form-label fw-semibold" style="font-size:.85rem;">Nội dung tin nhắn kết thúc</label>
+                  <textarea id="sm-end-text" class="form-control" rows="4" placeholder="VD: Bạn đã xem xong album! Nhấn nút bên dưới để quay lại..."></textarea>
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label fw-semibold" style="font-size:.85rem;">Nút bấm</label>
+                  <div id="sm-end-buttons" class="mb-2"></div>
+                  <div class="d-flex gap-2 flex-wrap">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="smAddBtn('end')"><i class="bi bi-plus-lg me-1"></i>Thêm nút</button>
+                    <button type="button" class="btn btn-sm btn-outline-success" onclick="smAddAlbumListBtn('end')"><i class="bi bi-arrow-left-circle me-1"></i>Thêm nút Quay lại Album</button>
+                  </div>
+                </div>
+              </div>
+              <button class="btn btn-accent btn-sm mt-3" onclick="smSaveAlbumEnd(this)"><i class="bi bi-floppy me-1"></i>Lưu Tin nhắn Kết thúc</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- CONFIG SECTION -->
@@ -776,6 +906,7 @@ function showSection(name) {
   else if (name === 'ids') { loadIdList(1); refreshIdStats(); }
   else if (name === 'bots') { loadBotHealth(null); }
   else if (name === 'analytics') { loadAnalytics(null); }
+  else if (name === 'script') { loadScriptData(); }
   closeSidebar();
   window.location.hash = name;
 }
@@ -812,6 +943,7 @@ function toggleAddPost(albumId) {
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
 }
 function previewImages(event, albumId) { renderPreviews(event.target.files, albumId); }
+function previewMedia(event, albumId) { renderPreviews(event.target.files, albumId); }
 function handleDrop(event, albumId) {
   event.preventDefault();
   document.getElementById('dz-' + albumId).classList.remove('dragover');
@@ -820,7 +952,19 @@ function handleDrop(event, albumId) {
 function renderPreviews(files, albumId) {
   const preview = document.getElementById('preview-' + albumId);
   preview.innerHTML = '';
-  for (const file of files) { if (!file.type.startsWith('image/')) continue; const img = document.createElement('img'); img.src = URL.createObjectURL(file); img.style.cssText = 'width:70px;height:70px;object-fit:cover;border-radius:6px;border:1px solid #2a2d35;'; preview.appendChild(img); }
+  for (const file of files) {
+    if (file.type.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(file);
+      img.style.cssText = 'width:70px;height:70px;object-fit:cover;border-radius:6px;border:1px solid #2a2d35;';
+      preview.appendChild(img);
+    } else if (file.type.startsWith('video/')) {
+      const div = document.createElement('div');
+      div.style.cssText = 'width:70px;height:70px;border-radius:6px;border:1px solid #2a2d35;background:#0f1117;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:.65rem;color:#aaa;gap:2px;flex-shrink:0;';
+      div.innerHTML = '<i class="bi bi-camera-video-fill" style="font-size:1.4rem;color:#4d9fff;"></i><span>Video</span>';
+      preview.appendChild(div);
+    }
+  }
 }
 function showSpinner(form) { const s = form.querySelector('.upload-spinner'); if (s) s.style.display = 'inline-block'; }
 /* ====== LIGHTBOX ====== */
@@ -1340,10 +1484,120 @@ async function doSaveSlogans(btn) {
   catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = origHtml; }
 }
+/* ====== SCRIPT MANAGER ====== */
+let _smFlow = {};
+async function loadScriptData() {
+  try {
+    const res = await fetch('/messages');
+    if (!res.ok) return;
+    _smFlow = await res.json();
+    renderScriptWelcome();
+    renderScriptAlbumEnd();
+  } catch(e) { console.error('Failed to load script data:', e); }
+}
+function renderScriptWelcome() {
+  const node = _smFlow['start'] || { text: '', buttons: [] };
+  const el = document.getElementById('sm-welcome-text');
+  if (el) el.value = node.text || '';
+  const container = document.getElementById('sm-welcome-buttons');
+  if (!container) return;
+  container.innerHTML = '';
+  (node.buttons || []).forEach(function(btn) { smRenderBtn('welcome', btn.label, btn.type, btn.value); });
+}
+function renderScriptAlbumEnd() {
+  const node = _smFlow['album_end'] || {
+    text: 'Bạn đã xem xong album! 😊\nNhấn nút bên dưới để quay lại danh sách.',
+    buttons: [{ label: '🔙 Quay lại danh sách Album', type: 'open_album_list', value: 'menu' }]
+  };
+  const el = document.getElementById('sm-end-text');
+  if (el) el.value = node.text || '';
+  const container = document.getElementById('sm-end-buttons');
+  if (!container) return;
+  container.innerHTML = '';
+  (node.buttons || []).forEach(function(btn) { smRenderBtn('end', btn.label, btn.type, btn.value); });
+}
+function smRenderBtn(section, label, type, value) {
+  const container = document.getElementById('sm-' + section + '-buttons');
+  if (!container) return;
+  const isOpenAlbum = type === 'open_album_list';
+  const isNode = type === 'node';
+  const isUrl = !isOpenAlbum && !isNode;
+  const nodeOptions = Object.keys(_smFlow).map(function(id) {
+    return '<option value="'+escapeHtml(id)+'"'+(isNode&&value===id?' selected':'')+'>'+escapeHtml(id)+'</option>';
+  }).join('');
+  const div = document.createElement('div');
+  div.className = 'sm-btn-row mb-2 p-2 rounded';
+  div.style.cssText = 'background:rgba(255,255,255,.03);border:1px solid var(--border-color);font-size:.82rem;';
+  div.innerHTML = '<div class="d-flex gap-2 align-items-center flex-wrap">'
+    + '<input class="form-control form-control-sm sm-btn-label" placeholder="Tên nút" value="'+escapeHtml(label||'')+'" style="flex:1;min-width:90px;">'
+    + '<select class="form-select form-select-sm sm-btn-type" onchange="smToggleBtnType(this)" style="max-width:200px;flex-shrink:0;">'
+    + '<option value="url"'+(isUrl?' selected':'')+'>🔗 Mở Link Web</option>'
+    + '<option value="open_album_list"'+(isOpenAlbum?' selected':'')+'>📂 Xem Danh sách Album</option>'
+    + '<option value="node"'+(isNode?' selected':'')+'>💬 Mở Kịch bản Khác</option>'
+    + '</select>'
+    + '<input class="form-control form-control-sm sm-btn-url'+(isUrl?'':' d-none')+'" placeholder="https://..." value="'+escapeHtml(isUrl?(value||''):'')+'" style="flex:1;min-width:100px;">'
+    + (nodeOptions ? '<select class="form-select form-select-sm sm-btn-node'+(isNode?'':' d-none')+'" style="flex:1;">'+nodeOptions+'</select>' : '')
+    + '<button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="this.closest(\'.sm-btn-row\').remove()"><i class="bi bi-x-lg"></i></button>'
+    + '</div>';
+  container.appendChild(div);
+}
+function smAddBtn(section) { smRenderBtn(section, '', 'url', ''); }
+function smAddAlbumListBtn(section) {
+  smRenderBtn(section, section === 'end' ? '🔙 Quay lại danh sách Album' : '📂 Xem Album', 'open_album_list', 'menu');
+}
+function smToggleBtnType(select) {
+  const row = select.closest('.sm-btn-row');
+  const urlInput = row.querySelector('.sm-btn-url');
+  const nodeSelect = row.querySelector('.sm-btn-node');
+  if (urlInput) urlInput.classList.toggle('d-none', select.value !== 'url');
+  if (nodeSelect) nodeSelect.classList.toggle('d-none', select.value !== 'node');
+}
+function smCollectButtons(section) {
+  const buttons = [];
+  document.querySelectorAll('#sm-' + section + '-buttons .sm-btn-row').forEach(function(row) {
+    const label = row.querySelector('.sm-btn-label').value.trim();
+    const type = row.querySelector('.sm-btn-type').value;
+    let value = '';
+    if (type === 'url') value = (row.querySelector('.sm-btn-url') || {}).value || '';
+    else if (type === 'node') value = (row.querySelector('.sm-btn-node') || {}).value || '';
+    else if (type === 'open_album_list') value = 'menu';
+    if (label) {
+      const cleanValue = type === 'open_album_list' ? 'menu' : value.trim();
+      if (cleanValue || type === 'open_album_list') {
+        buttons.push({ label: label, type: type, value: cleanValue });
+      }
+    }
+  });
+  return buttons;
+}
+async function smSaveWelcome(btn) {
+  await smSaveNode('start', document.getElementById('sm-welcome-text').value, smCollectButtons('welcome'), btn, 'Tin nhắn Chào mừng');
+}
+async function smSaveAlbumEnd(btn) {
+  await smSaveNode('album_end', document.getElementById('sm-end-text').value, smCollectButtons('end'), btn, 'Tin nhắn Kết thúc Album');
+}
+async function smSaveNode(nodeId, text, buttons, btn, label) {
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
+  try {
+    const res = await fetch('/messages/' + encodeURIComponent(nodeId), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text, buttons: buttons })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      _smFlow[nodeId] = { text: text, buttons: buttons };
+      showToast('&#9989; Đã lưu ' + (label || nodeId) + '!', 'success');
+    } else { showToast('&#10060; ' + (data.error || '?'), 'error'); }
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
 /* ====== INIT ====== */
 window.addEventListener('DOMContentLoaded', function() {
   const hash = window.location.hash.replace('#','')||'dashboard';
-  const validSections = ['dashboard','bots','analytics','ids','albums','config','system'];
+  const validSections = ['dashboard','bots','analytics','ids','albums','script','config','system'];
   showSection(validSections.includes(hash) ? hash : 'dashboard');
   const activeAlbumId = '{{ active_album }}';
   if (activeAlbumId) {
