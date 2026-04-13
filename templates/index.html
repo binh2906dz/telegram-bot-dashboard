@@ -276,7 +276,21 @@
             <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-megaphone-fill me-2" style="color:#00c853;"></i>Broadcast to IDs</span></div>
             <div class="dash-card-body">
               <p style="font-size:.82rem;color:#aaa;">Gửi tới tất cả ID (unknown + active). <strong>Tất cả bot</strong> sẽ cùng gửi. Bot tự phân loại kết quả.</p>
-              <textarea id="idBroadcastMessage" class="form-control mb-3" rows="4" placeholder="Nhập nội dung tin nhắn..."></textarea>
+              <textarea id="idBroadcastMessage" class="form-control mb-2" rows="3" placeholder="Nhập nội dung tin nhắn..."></textarea>
+              <div class="mb-2">
+                <select id="idBroadcastMediaType" class="form-select form-select-sm" onchange="toggleIdBroadcastMedia(this.value)">
+                  <option value="none">Chỉ text</option>
+                  <option value="image">&#128247; Hình ảnh</option>
+                  <option value="video">&#127916; Video</option>
+                </select>
+              </div>
+              <div id="idBroadcastMediaUrlRow" class="mb-2" style="display:none;">
+                <input type="url" id="idBroadcastMediaUrl" class="form-control form-control-sm" placeholder="URL ảnh/video (Cloudinary, direct link)...">
+              </div>
+              <div class="mb-2">
+                <div id="idBroadcastBtnList" class="mb-1"></div>
+                <button type="button" class="btn btn-xs btn-outline-secondary" style="font-size:.76rem;padding:2px 8px;" onclick="idBroadcastAddBtn()"><i class="bi bi-plus-lg me-1"></i>Thêm nút Inline</button>
+              </div>
               <button class="btn btn-success btn-sm w-100" id="btnIdBroadcast" onclick="doIdBroadcast(this)">
                 <i class="bi bi-send-fill me-1"></i>Bắt đầu Broadcast
               </button>
@@ -887,9 +901,49 @@ function _renderBotResultsTable(botResults, containerId) {
   html += '</tbody></table>';
   container.innerHTML = html;
 }
+function toggleIdBroadcastMedia(val) {
+  document.getElementById('idBroadcastMediaUrlRow').style.display = val === 'none' ? 'none' : '';
+}
+function idBroadcastAddBtn(text, url, cbData) {
+  const container = document.getElementById('idBroadcastBtnList');
+  const isUrl = !cbData;
+  const div = document.createElement('div');
+  div.className = 'ib-btn-row mb-1 p-2 rounded';
+  div.style.cssText = 'background:rgba(255,255,255,.03);border:1px solid var(--border-color);font-size:.78rem;';
+  div.innerHTML = '<div class="d-flex gap-1 align-items-center flex-wrap">'
+    + '<input class="form-control form-control-sm ib-btn-text" placeholder="Tên nút" value="'+escapeHtml(text||'')+'" style="flex:1;min-width:80px;">'
+    + '<select class="form-select form-select-sm ib-btn-type" onchange="ibToggleBtnType(this)" style="max-width:110px;">'
+    + '<option value="url"'+(isUrl?' selected':'')+'>URL</option>'
+    + '<option value="callback"'+(!isUrl?' selected':'')+'>Callback</option>'
+    + '</select>'
+    + '<input class="form-control form-control-sm ib-btn-url'+(isUrl?'':' d-none')+'" placeholder="https://..." value="'+escapeHtml(isUrl?(url||''):'')+'" style="flex:1;min-width:80px;">'
+    + '<input class="form-control form-control-sm ib-btn-cb'+(!isUrl?'':' d-none')+'" placeholder="callback_data" value="'+escapeHtml(!isUrl?(cbData||''):'')+'" style="flex:1;min-width:80px;">'
+    + '<button class="btn btn-sm btn-outline-danger" onclick="this.closest(\'.ib-btn-row\').remove()" style="padding:1px 5px;"><i class="bi bi-x-lg"></i></button>'
+    + '</div>';
+  container.appendChild(div);
+}
+function ibToggleBtnType(select) {
+  const row = select.closest('.ib-btn-row');
+  const urlInp = row.querySelector('.ib-btn-url'); const cbInp = row.querySelector('.ib-btn-cb');
+  if (select.value === 'callback') { urlInp.classList.add('d-none'); cbInp.classList.remove('d-none'); }
+  else { urlInp.classList.remove('d-none'); cbInp.classList.add('d-none'); }
+}
 async function doIdBroadcast(btn) {
   const message = document.getElementById('idBroadcastMessage').value.trim();
-  if (!message) { showToast('&#9888;&#65039; Nhập nội dung tin nhắn', 'error'); return; }
+  const mediaType = document.getElementById('idBroadcastMediaType').value;
+  const mediaUrl = (document.getElementById('idBroadcastMediaUrl').value || '').trim();
+  if (!message && mediaType === 'none') { showToast('&#9888;&#65039; Nhập nội dung tin nhắn', 'error'); return; }
+  if (mediaType !== 'none' && !mediaUrl) { showToast('&#9888;&#65039; Nhập URL media', 'error'); return; }
+  // Collect inline buttons
+  const buttons = [];
+  document.querySelectorAll('#idBroadcastBtnList .ib-btn-row').forEach(function(row) {
+    const text = row.querySelector('.ib-btn-text').value.trim();
+    const type = row.querySelector('.ib-btn-type').value;
+    const url = row.querySelector('.ib-btn-url').value.trim();
+    const cb = row.querySelector('.ib-btn-cb').value.trim();
+    if (type === 'callback' && text && cb) buttons.push({ text: text, callback_data: cb });
+    else if (type === 'url' && text && url) buttons.push({ text: text, url: url });
+  });
   if (!confirm('Bắt đầu broadcast tới tất cả ID (unknown + active) bằng TẤT CẢ bot?')) return;
   const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang khởi động...';
   document.getElementById('broadcastProgress').style.display = '';
@@ -897,7 +951,9 @@ async function doIdBroadcast(btn) {
   document.getElementById('bpActive').textContent = '0'; document.getElementById('bpBlocked').textContent = '0'; document.getElementById('bpInvalid').textContent = '0';
   document.getElementById('bpBotResults').style.display = 'none';
   try {
-    const form = new FormData(); form.append('message', message);
+    const form = new FormData();
+    form.append('message', message); form.append('media_type', mediaType);
+    form.append('media_url', mediaUrl); form.append('buttons_json', JSON.stringify(buttons));
     const res = await fetch('/ids/broadcast', { method: 'POST', body: form }); const data = await res.json();
     if (data.ok) {
       showToast('&#9989; Broadcast bắt đầu! ' + data.total + ' ID · ' + (data.bots_count||1) + ' bot...', 'success');
@@ -988,10 +1044,8 @@ async function doBroadcastAll(btn) {
     const type = row.querySelector('.ba-btn-type').value;
     const url = row.querySelector('.ba-btn-url').value.trim();
     const cb = row.querySelector('.ba-btn-cb').value.trim();
-    if (text && (url || cb)) {
-      if (type === 'callback') buttons.push({ text: text, callback_data: cb });
-      else buttons.push({ text: text, url: url });
-    }
+    if (type === 'callback' && text && cb) buttons.push({ text: text, callback_data: cb });
+    else if (type === 'url' && text && url) buttons.push({ text: text, url: url });
   });
   if (!confirm('Bắt đầu Broadcast All tới tất cả ID active bằng TẤT CẢ bot?')) return;
   const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang khởi động...';
