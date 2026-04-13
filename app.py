@@ -149,14 +149,6 @@ def init_db():
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS shortener_apis (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                template TEXT NOT NULL,
-                position INTEGER NOT NULL DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
         conn.commit()
 
 
@@ -390,6 +382,8 @@ def upload_to_cloudinary(file_stream, resource_type: str = "auto") -> str:
         resource_type=resource_type,
         use_filename=False,
         unique_filename=False,
+        quality="auto",
+        fetch_format="auto",
     )
     return result["secure_url"]
 
@@ -463,7 +457,7 @@ def logout():
 @app.route("/")
 @login_required
 def index():
-    albums = load_json(ALBUMS_FILE, {})
+    all_albums = load_json(ALBUMS_FILE, {})
     subs = load_json(SUBS_FILE, [])
     bots = load_json(BOTS_FILE, [])
     messages_cfg = load_json(MESSAGES_FILE, {
@@ -484,11 +478,25 @@ def index():
                 id_stats["total"] += row["cnt"]
     except Exception:
         pass
+    # Paginate albums: 20 per page
+    ALBUMS_PER_PAGE = 20
+    sorted_keys = sorted(all_albums.keys())
+    total_albums = len(sorted_keys)
+    total_pages = max(1, (total_albums + ALBUMS_PER_PAGE - 1) // ALBUMS_PER_PAGE)
+    try:
+        page = max(1, min(int(request.args.get("page", 1)), total_pages))
+    except (ValueError, TypeError):
+        page = 1
+    start = (page - 1) * ALBUMS_PER_PAGE
+    end = start + ALBUMS_PER_PAGE
+    paginated_keys = sorted_keys[start:end]
+    albums = {k: all_albums[k] for k in paginated_keys}
     return render_template("index.html", albums=albums, subs=subs,
-                           active_album=active_album, total_posts=total_posts(albums),
+                           active_album=active_album, total_posts=total_posts(all_albums),
                            role=session.get("role", ""), username=session.get("username", ""),
                            bots=bots, messages_cfg=messages_cfg, cfg=cfg, slogans=slogans,
-                           id_stats=id_stats)
+                           id_stats=id_stats, page=page, total_pages=total_pages,
+                           total_albums=total_albums)
 
 
 # --- Album management ---
@@ -1389,198 +1397,6 @@ def save_slogans():
     return jsonify({"ok": True})
 
 
-# ===== LINK SHORTENER =====
-
-@app.route("/shortener/apis", methods=["GET"])
-@login_required
-def shortener_apis_list():
-    """Return all configured shortener API templates ordered by position."""
-    try:
-        with get_db() as conn:
-            rows = conn.execute(
-                "SELECT id, template, position FROM shortener_apis ORDER BY position ASC, id ASC"
-            ).fetchall()
-        return jsonify({"ok": True, "apis": [dict(r) for r in rows]})
-    except Exception as e:
-        log.error(f"shortener_apis_list error: {e}")
-        return jsonify({"ok": False, "error": "Lỗi đọc database"}), 500
-
-
-@app.route("/shortener/apis", methods=["POST"])
-@login_required
-def shortener_apis_add():
-    """Add a new shortener API template."""
-    data = request.get_json(silent=True) or {}
-    template = str(data.get("template", "")).strip()
-    if not template:
-        return jsonify({"ok": False, "error": "Template không được để trống"}), 400
-    if "{url}" not in template:
-        return jsonify({"ok": False, "error": "Template phải chứa {url}"}), 400
-    if not (template.startswith("http://") or template.startswith("https://")):
-        return jsonify({"ok": False, "error": "Template phải bắt đầu bằng http:// hoặc https://"}), 400
-    try:
-        with get_db() as conn:
-            max_pos = conn.execute("SELECT COALESCE(MAX(position), -1) FROM shortener_apis").fetchone()[0]
-            conn.execute(
-                "INSERT INTO shortener_apis (template, position) VALUES (?, ?)",
-                (template, max_pos + 1),
-            )
-            conn.commit()
-            new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-        return jsonify({"ok": True, "id": new_id})
-    except Exception as e:
-        log.error(f"shortener_apis_add error: {e}")
-        return jsonify({"ok": False, "error": "Lỗi lưu database"}), 500
-
-
-@app.route("/shortener/apis/<int:api_id>", methods=["PUT"])
-@login_required
-def shortener_apis_update(api_id):
-    """Update an existing shortener API template."""
-    data = request.get_json(silent=True) or {}
-    template = str(data.get("template", "")).strip()
-    if not template:
-        return jsonify({"ok": False, "error": "Template không được để trống"}), 400
-    if "{url}" not in template:
-        return jsonify({"ok": False, "error": "Template phải chứa {url}"}), 400
-    if not (template.startswith("http://") or template.startswith("https://")):
-        return jsonify({"ok": False, "error": "Template phải bắt đầu bằng http:// hoặc https://"}), 400
-    try:
-        with get_db() as conn:
-            conn.execute(
-                "UPDATE shortener_apis SET template = ? WHERE id = ?",
-                (template, api_id),
-            )
-            conn.commit()
-        return jsonify({"ok": True})
-    except Exception as e:
-        log.error(f"shortener_apis_update error: {e}")
-        return jsonify({"ok": False, "error": "Lỗi cập nhật database"}), 500
-
-
-@app.route("/shortener/apis/<int:api_id>", methods=["DELETE"])
-@login_required
-def shortener_apis_delete(api_id):
-    """Delete a shortener API template."""
-    try:
-        with get_db() as conn:
-            conn.execute("DELETE FROM shortener_apis WHERE id = ?", (api_id,))
-            conn.commit()
-        return jsonify({"ok": True})
-    except Exception as e:
-        log.error(f"shortener_apis_delete error: {e}")
-        return jsonify({"ok": False, "error": "Lỗi xóa database"}), 500
-
-
-@app.route("/shortener/apis/reorder", methods=["POST"])
-@login_required
-def shortener_apis_reorder():
-    """Reorder APIs by accepting a list of IDs in the new order."""
-    data = request.get_json(silent=True) or {}
-    ids = data.get("ids", [])
-    if not isinstance(ids, list):
-        return jsonify({"ok": False, "error": "ids phải là mảng"}), 400
-    try:
-        with get_db() as conn:
-            for pos, api_id in enumerate(ids):
-                conn.execute(
-                    "UPDATE shortener_apis SET position = ? WHERE id = ?",
-                    (pos, int(api_id)),
-                )
-            conn.commit()
-        return jsonify({"ok": True})
-    except Exception as e:
-        log.error(f"shortener_apis_reorder error: {e}")
-        return jsonify({"ok": False, "error": "Lỗi sắp xếp thứ tự"}), 500
-
-
-_MAX_SHORTENER_RESPONSE_BYTES = 4096
-
-
-@app.route("/shortener/shorten", methods=["POST"])
-@login_required
-def shortener_shorten():
-    """Call all configured shortener APIs with the given URL and return results."""
-    import urllib.parse as _urlparse
-
-    data = request.get_json(silent=True) or {}
-    long_url = str(data.get("url", "")).strip()
-    if not long_url:
-        return jsonify({"ok": False, "error": "URL không được để trống"}), 400
-
-    try:
-        with get_db() as conn:
-            rows = conn.execute(
-                "SELECT id, template FROM shortener_apis ORDER BY position ASC, id ASC"
-            ).fetchall()
-        apis = [dict(r) for r in rows]
-    except Exception as e:
-        log.error(f"shortener_shorten DB read error: {e}")
-        return jsonify({"ok": False, "error": "Lỗi đọc database"}), 500
-
-    if not apis:
-        return jsonify({"ok": False, "error": "Chưa cấu hình API rút gọn nào"}), 400
-
-    encoded_url = _urlparse.quote(long_url, safe="")
-    results = []
-    for api in apis:
-        request_url = api["template"].replace("{url}", encoded_url)
-        # Auto-correct common AdLinkFly mistake: /st?api= → /api?api=
-        request_url = request_url.replace("/st?api=", "/api?api=")
-        # Only allow http/https schemes to prevent SSRF via other URI schemes
-        if not (request_url.startswith("http://") or request_url.startswith("https://")):
-            results.append({"ok": False, "error": "Lỗi: Template API không hợp lệ (chỉ hỗ trợ http/https)"})
-            continue
-        try:
-            resp = httpx.get(
-                request_url,
-                timeout=10,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                    "Accept": "application/json, text/javascript, */*; q=0.01",
-                    "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
-                    "Referer": "https://google.com/",
-                },
-            )
-            raw = resp.text[:_MAX_SHORTENER_RESPONSE_BYTES].strip()
-            # Check for HTML response first (e.g. Cloudflare challenge page)
-            raw_lower = raw.lower()
-            if "<html" in raw_lower or "<!doctype" in raw_lower:
-                results.append({"ok": False, "error": "Lỗi: Bị chặn bởi Cloudflare hoặc website từ chối kết nối (nhận được trang web thay vì dữ liệu)."})
-                continue
-            # Try to parse response as JSON first (AdLinkFly-based shorteners)
-            try:
-                payload = json.loads(raw)
-                status = payload.get("status")
-                if status == "success" or payload.get("error") == 0:
-                    short_url = (
-                        payload.get("shortenedUrl")
-                        or payload.get("short_url")
-                        or payload.get("shortlink")
-                        or payload.get("url")
-                    )
-                    if short_url and (short_url.startswith("http://") or short_url.startswith("https://")):
-                        results.append({"ok": True, "url": short_url})
-                    else:
-                        results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
-                elif status == "error":
-                    msg = payload.get("message") or payload.get("msg") or "Lỗi không xác định từ API"
-                    results.append({"ok": False, "error": f"Lỗi API: {msg}"})
-                else:
-                    results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
-            except json.JSONDecodeError:
-                # Not JSON – check if the response is a plain-text URL
-                if raw.startswith("http://") or raw.startswith("https://"):
-                    results.append({"ok": True, "url": raw})
-                else:
-                    results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
-        except Exception as exc:
-            log.warning(f"shortener_shorten API call error: {exc}")
-            results.append({"ok": False, "error": "Lỗi: Không thể kết nối hoặc API không phản hồi"})
-
-    return jsonify({"ok": True, "results": results})
-
-
 # ===== ID MANAGEMENT =====
 
 def _parse_ids_from_text(text: str) -> list:
@@ -1819,7 +1635,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
             buttons.append([InlineKeyboardButton(f"🔥 {title}", callback_data=key)])
         buttons.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="back")])
 
-        await query.edit_message_text("Chọn album:", reply_markup=InlineKeyboardMarkup(buttons))
+        await query.edit_message_text("CHỌN COMBO LlNK HOT🔥", reply_markup=InlineKeyboardMarkup(buttons))
 
     async def send_album(chat_id, bot, album):
         """Send all posts in an album (supports images, videos, and legacy photos[] format)."""
