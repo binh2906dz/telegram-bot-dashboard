@@ -1535,9 +1535,19 @@ def shortener_shorten():
             resp = httpx.get(
                 request_url,
                 timeout=10,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    "Accept": "application/json, text/javascript, */*; q=0.01",
+                    "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
+                    "Referer": "https://google.com/",
+                },
             )
             raw = resp.text[:_MAX_SHORTENER_RESPONSE_BYTES].strip()
+            # Check for HTML response first (e.g. Cloudflare challenge page)
+            raw_lower = raw.lower()
+            if "<html" in raw_lower or "<!doctype" in raw_lower:
+                results.append({"ok": False, "error": "Lỗi: Bị chặn bởi Cloudflare hoặc website từ chối kết nối (nhận được trang web thay vì dữ liệu)."})
+                continue
             # Try to parse response as JSON first (AdLinkFly-based shorteners)
             try:
                 payload = json.loads(raw)
@@ -1559,11 +1569,8 @@ def shortener_shorten():
                 else:
                     results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
             except json.JSONDecodeError:
-                # Not JSON – check if the response is an HTML page (e.g. Cloudflare challenge)
-                raw_lower = raw.lower()
-                if raw_lower.strip().startswith("<!doctype") or "<html" in raw_lower:
-                    results.append({"ok": False, "error": "Lỗi: Bị chặn bởi Cloudflare hoặc sai URL/Token API (nhận được HTML thay vì JSON)."})
-                elif raw.startswith("http://") or raw.startswith("https://"):
+                # Not JSON – check if the response is a plain-text URL
+                if raw.startswith("http://") or raw.startswith("https://"):
                     results.append({"ok": True, "url": raw})
                 else:
                     results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
