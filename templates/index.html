@@ -213,12 +213,16 @@
           {% if bots %}
           <div class="table-responsive">
             <table class="table table-dark table-borderless data-table mb-0" id="botsTable">
-              <thead><tr><th class="ps-3">Tên Bot</th><th>Token</th><th>Admin ID</th><th>Trạng thái</th><th>Subscribers</th><th>Đã gửi</th><th style="width:50px;"></th></tr></thead>
+              <thead><tr><th class="ps-3">Tên Bot</th><th>Token</th><th>Admin ID</th><th>Trạng thái</th><th>Subscribers</th><th>Đã gửi</th><th style="width:100px;"></th></tr></thead>
               <tbody>
                 {% for bot in bots %}
                 <tr id="bot-row-{{ bot.id }}">
                   <td class="ps-3"><i class="bi bi-robot me-2" style="color:var(--accent);"></i>{{ bot.name }}</td>
-                  <td><span class="bot-token-mask">{{ bot.token[:4] }}&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;</span></td>
+                  <td>
+                    <span class="bot-token-mask" id="bot-token-mask-{{ bot.id }}">{{ bot.token[:4] }}&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;</span>
+                    <span id="bot-token-full-{{ bot.id }}" class="font-monospace text-warning" style="font-size:.75rem;display:none;word-break:break-all;"></span>
+                    {% if role == 'owner' %}<button class="btn btn-sm btn-outline-secondary ms-1" style="padding:1px 6px;font-size:.7rem;" onclick="toggleTokenView('{{ bot.id }}', this)" title="Xem/ẩn token"><i class="bi bi-eye"></i></button>{% endif %}
+                  </td>
                   <td>{{ bot.admin_id if bot.admin_id else '&#8212;' }}</td>
                   <td id="bot-status-{{ bot.id }}"><span class="text-muted" style="font-size:.8rem;">&#8212;</span></td>
                   <td id="bot-subs-{{ bot.id }}">&#8212;</td>
@@ -271,7 +275,7 @@
           <div class="dash-card">
             <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-megaphone-fill me-2" style="color:#00c853;"></i>Broadcast to IDs</span></div>
             <div class="dash-card-body">
-              <p style="font-size:.82rem;color:#aaa;">Gửi tới tất cả ID (unknown + active). Bot tự phân loại kết quả.</p>
+              <p style="font-size:.82rem;color:#aaa;">Gửi tới tất cả ID (unknown + active). <strong>Tất cả bot</strong> sẽ cùng gửi. Bot tự phân loại kết quả.</p>
               <textarea id="idBroadcastMessage" class="form-control mb-3" rows="4" placeholder="Nhập nội dung tin nhắn..."></textarea>
               <button class="btn btn-success btn-sm w-100" id="btnIdBroadcast" onclick="doIdBroadcast(this)">
                 <i class="bi bi-send-fill me-1"></i>Bắt đầu Broadcast
@@ -279,10 +283,14 @@
               <div id="broadcastProgress" class="mt-3" style="display:none;">
                 <div class="d-flex justify-content-between mb-1" style="font-size:.78rem;"><span id="bpLabel">Đang gửi...</span><span id="bpPercent">0%</span></div>
                 <div class="progress mb-2"><div class="progress-bar progress-bar-striped progress-bar-animated bg-success" id="bpBar" style="width:0%"></div></div>
-                <div class="d-flex gap-3 flex-wrap" style="font-size:.76rem;color:#aaa;">
+                <div class="d-flex gap-3 flex-wrap mb-2" style="font-size:.76rem;color:#aaa;">
                   <span>&#9989; Active: <strong id="bpActive">0</strong></span>
                   <span>&#128683; Blocked: <strong id="bpBlocked">0</strong></span>
                   <span>&#10060; Invalid: <strong id="bpInvalid">0</strong></span>
+                </div>
+                <div id="bpBotResults" style="display:none;">
+                  <div style="font-size:.76rem;font-weight:600;color:#aaa;margin-bottom:4px;"><i class="bi bi-robot me-1"></i>Kết quả từng Bot:</div>
+                  <div id="bpBotResultsTable"></div>
                 </div>
               </div>
             </div>
@@ -488,6 +496,27 @@
             </div>
           </div>
         </div>
+        <div class="col-12">
+          <div class="dash-card">
+            <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-broadcast me-2" style="color:#ce93d8;"></i>Broadcast All (Active IDs)</span></div>
+            <div class="dash-card-body">
+              <p style="font-size:.85rem;color:#aaa;">Gửi tới <strong>tất cả ID active</strong> trong database bằng <strong>tất cả bot</strong>. Hỗ trợ text, ảnh, video và nút bấm inline.</p>
+              <button class="btn btn-sm btn-purple" data-bs-toggle="modal" data-bs-target="#broadcastAllModal" style="background:rgba(156,39,176,.8);border:none;color:#fff;font-weight:600;"><i class="bi bi-broadcast me-1"></i>Mở Broadcast All</button>
+              <div id="broadcastAllProgress" class="mt-3" style="display:none;">
+                <div class="d-flex justify-content-between mb-1" style="font-size:.78rem;"><span id="bapLabel">Đang gửi...</span><span id="bapPercent">0%</span></div>
+                <div class="progress mb-2"><div class="progress-bar progress-bar-striped progress-bar-animated" id="bapBar" style="width:0%;background:rgba(156,39,176,.8);"></div></div>
+                <div class="d-flex gap-3 flex-wrap mb-2" style="font-size:.76rem;color:#aaa;">
+                  <span>&#9989; Thành công: <strong id="bapSuccess">0</strong></span>
+                  <span>&#10060; Thất bại: <strong id="bapFail">0</strong></span>
+                </div>
+                <div id="bapBotResults" style="display:none;">
+                  <div style="font-size:.76rem;font-weight:600;color:#aaa;margin-bottom:4px;"><i class="bi bi-robot me-1"></i>Kết quả từng Bot:</div>
+                  <div id="bapBotResultsTable"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -511,6 +540,44 @@
         <div class="text-muted mt-2" style="font-size:.8rem;"><i class="bi bi-info-circle me-1"></i>Gửi tới tất cả người đã bấm /start.</div>
       </div>
       <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button><button type="button" class="btn btn-success" id="btnBroadcast" onclick="doBroadcast(this)"><i class="bi bi-send-fill me-1"></i>Gửi ngay</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- Broadcast All Modal -->
+<div class="modal fade" id="broadcastAllModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-broadcast me-2" style="color:#ce93d8;"></i>Broadcast All (Active IDs)</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold"><i class="bi bi-chat-left-text me-1" style="color:var(--accent);"></i>Nội dung tin nhắn</label>
+          <textarea id="baMessage" class="form-control" rows="4" placeholder="Nhập nội dung..."></textarea>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold"><i class="bi bi-image me-1" style="color:#4d9fff;"></i>Loại Media</label>
+          <select id="baMediaType" class="form-select" onchange="toggleBaMedia(this.value)">
+            <option value="none">Không có (chỉ text)</option>
+            <option value="image">&#128247; Hình ảnh</option>
+            <option value="video">&#127916; Video</option>
+          </select>
+        </div>
+        <div id="baMediaUrlRow" class="mb-3" style="display:none;">
+          <label class="form-label fw-semibold"><i class="bi bi-link-45deg me-1" style="color:#4d9fff;"></i>URL Media <span class="text-danger">*</span></label>
+          <input type="url" id="baMediaUrl" class="form-control" placeholder="https://... (Cloudinary, direct URL)">
+          <div class="form-text text-muted">Nhập đường dẫn trực tiếp tới ảnh hoặc video (hỗ trợ Cloudinary URL).</div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label fw-semibold"><i class="bi bi-grid-1x2 me-1" style="color:var(--accent);"></i>Nút bấm Inline <span class="text-muted">(tuỳ chọn)</span></label>
+          <div id="baBtnList" class="mb-2"></div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="baAddBtn()"><i class="bi bi-plus-lg me-1"></i>Thêm nút</button>
+          <div class="form-text text-muted mt-1">Mỗi nút có thể mở link (URL) hoặc gửi callback_data.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-sm" id="btnBroadcastAll" onclick="doBroadcastAll(this)" style="background:rgba(156,39,176,.85);border:none;color:#fff;font-weight:600;"><i class="bi bi-broadcast me-1"></i>Bắt đầu Broadcast All</button>
+      </div>
     </div>
   </div>
 </div>
@@ -694,6 +761,28 @@ async function loadBotHealth(btn) {
   } catch(e) { if (btn) showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { if (btn) { btn.disabled = false; btn.innerHTML = origHtml; } }
 }
+const _tokenVisible = {};
+async function toggleTokenView(botId, btn) {
+  const maskEl = document.getElementById('bot-token-mask-' + botId);
+  const fullEl = document.getElementById('bot-token-full-' + botId);
+  if (!maskEl || !fullEl) return;
+  if (_tokenVisible[botId]) {
+    // Hide token
+    maskEl.style.display = ''; fullEl.style.display = 'none';
+    _tokenVisible[botId] = false; btn.innerHTML = '<i class="bi bi-eye"></i>';
+    return;
+  }
+  // Show token – fetch from server
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+  try {
+    const res = await fetch('/bots/' + botId + '/token'); const data = await res.json();
+    if (data.ok) {
+      fullEl.textContent = data.token; maskEl.style.display = 'none'; fullEl.style.display = '';
+      _tokenVisible[botId] = true; btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+    } else { showToast('&#10060; ' + (data.error || '?'), 'error'); btn.innerHTML = origHtml; }
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); btn.innerHTML = origHtml; }
+  finally { btn.disabled = false; }
+}
 async function doAddBot(btn) {
   const name = document.getElementById('botName').value.trim(), token = document.getElementById('botToken').value.trim(), adminId = document.getElementById('botAdminId').value.trim();
   if (!name || !token) { showToast('&#9888;&#65039; Tên và Token không được để trống', 'error'); return; }
@@ -788,19 +877,30 @@ async function doClearIds(statusFilter) {
     else { showToast('&#10060; ' + (data.error || '?'), 'error'); }
   } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
 }
+function _renderBotResultsTable(botResults, containerId) {
+  const container = document.getElementById(containerId);
+  if (!container || !botResults || Object.keys(botResults).length === 0) return;
+  let html = '<table class="table table-dark table-borderless mb-0" style="font-size:.76rem;"><thead><tr><th>Bot</th><th class="text-success">&#9989; Thành công</th><th class="text-danger">&#10060; Thất bại</th></tr></thead><tbody>';
+  for (const [botId, res] of Object.entries(botResults)) {
+    html += '<tr><td><i class="bi bi-robot me-1" style="color:var(--accent);"></i>' + escapeHtml(res.name || botId) + '</td><td class="text-success">' + (res.success || 0) + '</td><td class="text-danger">' + (res.fail || 0) + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
 async function doIdBroadcast(btn) {
   const message = document.getElementById('idBroadcastMessage').value.trim();
   if (!message) { showToast('&#9888;&#65039; Nhập nội dung tin nhắn', 'error'); return; }
-  if (!confirm('Bắt đầu broadcast tới tất cả ID (unknown + active)?')) return;
+  if (!confirm('Bắt đầu broadcast tới tất cả ID (unknown + active) bằng TẤT CẢ bot?')) return;
   const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang khởi động...';
   document.getElementById('broadcastProgress').style.display = '';
   document.getElementById('bpBar').style.width = '0%'; document.getElementById('bpLabel').textContent = 'Đang khởi động...'; document.getElementById('bpPercent').textContent = '0%';
   document.getElementById('bpActive').textContent = '0'; document.getElementById('bpBlocked').textContent = '0'; document.getElementById('bpInvalid').textContent = '0';
+  document.getElementById('bpBotResults').style.display = 'none';
   try {
     const form = new FormData(); form.append('message', message);
     const res = await fetch('/ids/broadcast', { method: 'POST', body: form }); const data = await res.json();
     if (data.ok) {
-      showToast('&#9989; Broadcast bắt đầu! ' + data.total + ' ID...', 'success');
+      showToast('&#9989; Broadcast bắt đầu! ' + data.total + ' ID · ' + (data.bots_count||1) + ' bot...', 'success');
       btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang gửi...';
       if (_idBroadcastInterval) clearInterval(_idBroadcastInterval);
       _idBroadcastInterval = setInterval(async function() {
@@ -810,6 +910,10 @@ async function doIdBroadcast(btn) {
           document.getElementById('bpBar').style.width = pct + '%'; document.getElementById('bpPercent').textContent = pct + '%';
           document.getElementById('bpLabel').textContent = s.running ? 'Đang gửi (' + s.done + '/' + s.total + ')...' : '&#9989; Hoàn thành!';
           document.getElementById('bpActive').textContent = s.active; document.getElementById('bpBlocked').textContent = s.blocked; document.getElementById('bpInvalid').textContent = s.invalid;
+          if (s.bot_results && Object.keys(s.bot_results).length > 0) {
+            document.getElementById('bpBotResults').style.display = '';
+            _renderBotResultsTable(s.bot_results, 'bpBotResultsTable');
+          }
           if (!s.running) { clearInterval(_idBroadcastInterval); btn.disabled = false; btn.innerHTML = origHtml; showToast('&#9989; Hoàn tất! Active:' + s.active + ' Blocked:' + s.blocked + ' Invalid:' + s.invalid, 'success'); loadIdList(_idCurrentPage); refreshIdStats(); }
         } catch(e) {}
       }, 2000);
@@ -841,6 +945,86 @@ async function doBroadcast(btn) {
     else { showToast('&#10060; ' + (data.error||'?'), 'error'); }
   } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
+/* ====== BROADCAST ALL ====== */
+let _broadcastAllInterval = null;
+function toggleBaMedia(val) {
+  document.getElementById('baMediaUrlRow').style.display = val === 'none' ? 'none' : '';
+}
+function baAddBtn(text, url, cbData) {
+  const container = document.getElementById('baBtnList');
+  const isUrl = !cbData;
+  const div = document.createElement('div');
+  div.className = 'ba-btn-row mb-2 p-2 rounded';
+  div.style.cssText = 'background:rgba(255,255,255,.03);border:1px solid var(--border-color);';
+  div.innerHTML = '<div class="mb-1"><input class="form-control form-control-sm ba-btn-text" placeholder="Tên nút" value="'+escapeHtml(text||'')+'"></div>'
+    + '<div class="d-flex gap-2 align-items-center flex-wrap">'
+    + '<select class="form-select form-select-sm ba-btn-type" onchange="baToggleBtnType(this)" style="max-width:160px;">'
+    + '<option value="url"'+(isUrl?' selected':'')+'>&#128279; URL</option>'
+    + '<option value="callback"'+(!isUrl?' selected':'')+'>&#128172; Callback</option>'
+    + '</select>'
+    + '<input class="form-control form-control-sm ba-btn-url'+(isUrl?'':' d-none')+'" placeholder="https://..." value="'+escapeHtml(isUrl?(url||''):'') +'" style="flex:1;">'
+    + '<input class="form-control form-control-sm ba-btn-cb'+(!isUrl?'':' d-none')+'" placeholder="callback_data" value="'+escapeHtml(!isUrl?(cbData||''):'') +'" style="flex:1;">'
+    + '<button class="btn btn-sm btn-outline-danger" onclick="this.closest(\'.ba-btn-row\').remove()"><i class="bi bi-x-lg"></i></button>'
+    + '</div>';
+  container.appendChild(div);
+}
+function baToggleBtnType(select) {
+  const row = select.closest('.ba-btn-row');
+  const urlInp = row.querySelector('.ba-btn-url'); const cbInp = row.querySelector('.ba-btn-cb');
+  if (select.value === 'callback') { urlInp.classList.add('d-none'); cbInp.classList.remove('d-none'); }
+  else { urlInp.classList.remove('d-none'); cbInp.classList.add('d-none'); }
+}
+async function doBroadcastAll(btn) {
+  const message = document.getElementById('baMessage').value.trim();
+  const mediaType = document.getElementById('baMediaType').value;
+  const mediaUrl = document.getElementById('baMediaUrl').value.trim();
+  if (!message && mediaType === 'none') { showToast('&#9888;&#65039; Nhập nội dung hoặc chọn media', 'error'); return; }
+  if (mediaType !== 'none' && !mediaUrl) { showToast('&#9888;&#65039; Nhập URL media', 'error'); return; }
+  // Collect buttons
+  const buttons = [];
+  document.querySelectorAll('#baBtnList .ba-btn-row').forEach(function(row) {
+    const text = row.querySelector('.ba-btn-text').value.trim();
+    const type = row.querySelector('.ba-btn-type').value;
+    const url = row.querySelector('.ba-btn-url').value.trim();
+    const cb = row.querySelector('.ba-btn-cb').value.trim();
+    if (text && (url || cb)) {
+      if (type === 'callback') buttons.push({ text: text, callback_data: cb });
+      else buttons.push({ text: text, url: url });
+    }
+  });
+  if (!confirm('Bắt đầu Broadcast All tới tất cả ID active bằng TẤT CẢ bot?')) return;
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang khởi động...';
+  bootstrap.Modal.getInstance(document.getElementById('broadcastAllModal')).hide();
+  document.getElementById('broadcastAllProgress').style.display = '';
+  document.getElementById('bapBar').style.width = '0%'; document.getElementById('bapLabel').textContent = 'Đang khởi động...'; document.getElementById('bapPercent').textContent = '0%';
+  document.getElementById('bapSuccess').textContent = '0'; document.getElementById('bapFail').textContent = '0';
+  document.getElementById('bapBotResults').style.display = 'none';
+  try {
+    const form = new FormData();
+    form.append('message', message); form.append('media_type', mediaType);
+    form.append('media_url', mediaUrl); form.append('buttons_json', JSON.stringify(buttons));
+    const res = await fetch('/broadcast/all', { method: 'POST', body: form }); const data = await res.json();
+    if (data.ok) {
+      showToast('&#9989; Broadcast All bắt đầu! ' + data.total + ' IDs · ' + (data.bots_count||1) + ' bot...', 'success');
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang gửi...';
+      if (_broadcastAllInterval) clearInterval(_broadcastAllInterval);
+      _broadcastAllInterval = setInterval(async function() {
+        try {
+          const sr = await fetch('/broadcast/all/status'); const s = await sr.json();
+          const pct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
+          document.getElementById('bapBar').style.width = pct + '%'; document.getElementById('bapPercent').textContent = pct + '%';
+          document.getElementById('bapLabel').textContent = s.running ? 'Đang gửi (' + s.done + '/' + s.total + ')...' : '&#9989; Hoàn thành!';
+          document.getElementById('bapSuccess').textContent = s.success || 0; document.getElementById('bapFail').textContent = s.fail || 0;
+          if (s.bot_results && Object.keys(s.bot_results).length > 0) {
+            document.getElementById('bapBotResults').style.display = '';
+            _renderBotResultsTable(s.bot_results, 'bapBotResultsTable');
+          }
+          if (!s.running) { clearInterval(_broadcastAllInterval); btn.disabled = false; btn.innerHTML = '<i class="bi bi-broadcast me-1"></i>Mở Broadcast All'; showToast('&#9989; Broadcast All hoàn tất! Thành công: ' + (s.success||0) + ' · Thất bại: ' + (s.fail||0), 'success'); }
+        } catch(e) {}
+      }, 2000);
+    } else { showToast('&#10060; ' + (data.error || '?'), 'error'); btn.disabled = false; btn.innerHTML = origHtml; document.getElementById('broadcastAllProgress').style.display = 'none'; }
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); btn.disabled = false; btn.innerHTML = origHtml; document.getElementById('broadcastAllProgress').style.display = 'none'; }
 }
 async function doSaveSchedule(btn) {
   const hour = parseInt(document.getElementById('scheduleHour').value, 10), minute = parseInt(document.getElementById('scheduleMinute').value, 10);

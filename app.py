@@ -113,6 +113,22 @@ def init_db():
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS broadcast_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_type TEXT NOT NULL DEFAULT 'ids',
+                message TEXT,
+                media_type TEXT,
+                media_url TEXT,
+                buttons_json TEXT,
+                total_ids INTEGER DEFAULT 0,
+                success_count INTEGER DEFAULT 0,
+                fail_count INTEGER DEFAULT 0,
+                bot_results_json TEXT,
+                started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                finished_at DATETIME
+            )
+        ''')
         conn.commit()
 
 
@@ -140,6 +156,15 @@ _broadcast_lock = threading.Lock()
 _broadcast_status: dict = {
     "running": False, "total": 0, "done": 0,
     "active": 0, "blocked": 0, "invalid": 0, "error": 0,
+    "bot_results": {},  # {bot_id: {"name": str, "success": int, "fail": int}}
+}
+
+# Broadcast All task state (global broadcast to active IDs with rich media)
+_broadcast_all_lock = threading.Lock()
+_broadcast_all_status: dict = {
+    "running": False, "total": 0, "done": 0,
+    "success": 0, "fail": 0,
+    "bot_results": {},  # {bot_id: {"name": str, "success": int, "fail": int}}
 }
 
 
@@ -558,11 +583,9 @@ def backup_restore():
 @app.route("/broadcast", methods=["POST"])
 @login_required
 def broadcast():
-    """Send a broadcast message to all subscribers via Telegram Bot API."""
-    # Use first bot in bots.json, fallback to env BOT_TOKEN
-    bots_list = load_json(BOTS_FILE, [])
-    token = bots_list[0]["token"] if bots_list else BOT_TOKEN
-    if not token:
+    """Send a broadcast message to all subscribers via all configured bots."""
+    bots_list = _get_all_active_bots()
+    if not bots_list:
         return jsonify({"ok": False, "error": "Bot chưa được cấu hình"}), 500
     message = request.form.get("message", "").strip()
     if not message:
@@ -571,18 +594,173 @@ def broadcast():
     if not subs:
         return jsonify({"ok": False, "error": "Chưa có người đăng ký nào"}), 400
     success, fail = 0, 0
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    for user_id in subs:
-        try:
-            resp = httpx.post(url, json={"chat_id": user_id, "text": message}, timeout=10)
-            if resp.status_code == 200:
-                success += 1
-            else:
+    for bot in bots_list:
+        token = (bot.get("token") or "").strip()
+        if not token:
+            continue
+        api_url = f"https://api.telegram.org/bot{token}/sendMessage"
+        for user_id in subs:
+            try:
+                resp = httpx.post(api_url, json={"chat_id": user_id, "text": message}, timeout=10)
+                if resp.status_code == 200:
+                    success += 1
+                else:
+                    fail += 1
+            except Exception as e:
+                log.warning(f"Broadcast to {user_id} failed: {e}")
                 fail += 1
-        except Exception as e:
-            log.warning(f"Broadcast to {user_id} failed: {e}")
-            fail += 1
     return jsonify({"ok": True, "success": success, "fail": fail})
+
+
+@app.route("/broadcast/all/status", methods=["GET"])
+@login_required
+def broadcast_all_status():
+    """Return current 'Broadcast All' task status."""
+    return jsonify(_broadcast_all_status)
+
+
+@app.route("/broadcast/all", methods=["POST"])
+@login_required
+def broadcast_all():
+    """Broadcast to all active IDs in the database using all bots, with optional rich media and inline buttons."""
+    import json as _json
+    import time as _time
+
+    with _broadcast_all_lock:
+        if _broadcast_all_status.get("running"):
+            return jsonify({"ok": False, "error": "Đang có broadcast đang chạy, vui lòng đợi"}), 409
+
+    # Also block if IDs broadcast is running
+    with _broadcast_lock:
+        if _broadcast_status.get("running"):
+            return jsonify({"ok": False, "error": "Đang có broadcast (IDs) đang chạy, vui lòng đợi"}), 409
+
+    bots_list = _get_all_active_bots()
+    if not bots_list:
+        return jsonify({"ok": False, "error": "Chưa cấu hình bot nào"}), 400
+
+    message = request.form.get("message", "").strip()
+    media_type = request.form.get("media_type", "none").strip().lower()
+    media_url = request.form.get("media_url", "").strip()
+    buttons_raw = request.form.get("buttons_json", "").strip()
+
+    if not message and media_type == "none":
+        return jsonify({"ok": False, "error": "Vui lòng nhập nội dung tin nhắn hoặc chọn media"}), 400
+    if media_type in ("image", "video") and not media_url:
+        return jsonify({"ok": False, "error": "Vui lòng nhập URL media"}), 400
+
+    # Parse buttons
+    buttons = []
+    if buttons_raw:
+        try:
+            buttons = _json.loads(buttons_raw)
+            if not isinstance(buttons, list):
+                buttons = []
+        except Exception:
+            return jsonify({"ok": False, "error": "buttons_json không hợp lệ"}), 400
+
+    # Fetch active user IDs
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT user_id FROM telegram_ids WHERE status = 'active'"
+            ).fetchall()
+        user_ids = [r["user_id"] for r in rows]
+    except Exception as e:
+        log.error(f"broadcast_all DB read error: {e}")
+        return jsonify({"ok": False, "error": "Lỗi đọc database. Vui lòng thử lại."}), 500
+
+    if not user_ids:
+        return jsonify({"ok": False, "error": "Không có ID active nào để gửi. Hãy chạy Broadcast to IDs trước."}), 400
+
+    bot_results_init = {b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0} for b in bots_list}
+
+    with _broadcast_all_lock:
+        _broadcast_all_status.update({
+            "running": True, "total": len(user_ids), "done": 0,
+            "success": 0, "fail": 0,
+            "bot_results": bot_results_init,
+        })
+
+    # Log campaign start in DB
+    campaign_id = None
+    try:
+        with get_db() as conn:
+            cur = conn.execute(
+                "INSERT INTO broadcast_logs (campaign_type, message, media_type, media_url, buttons_json, total_ids) VALUES (?, ?, ?, ?, ?, ?)",
+                ("all", message, media_type if media_type != "none" else None, media_url or None,
+                 buttons_raw or None, len(user_ids)),
+            )
+            campaign_id = cur.lastrowid
+            conn.commit()
+    except Exception as e:
+        log.warning(f"broadcast_logs insert failed: {e}")
+
+    def _run_broadcast_all(bots: list, user_ids: list, message: str,
+                           media_type: str, media_url: str, buttons: list, camp_id):
+        import time as _t
+        bot_res = {b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0} for b in bots}
+        total_success = 0
+        total_fail = 0
+
+        for uid in user_ids:
+            uid_any_success = False
+            for bot in bots:
+                token = (bot.get("token") or "").strip()
+                bot_id = bot.get("id", "")
+                if not token:
+                    continue
+                endpoint, payload = _build_telegram_payload(uid, message, media_type, media_url, buttons)
+                if payload is None:
+                    bot_res[bot_id]["fail"] += 1
+                    continue
+                api_url = f"https://api.telegram.org/bot{token}/{endpoint}"
+                try:
+                    resp = httpx.post(api_url, json=payload, timeout=10)
+                    if resp.status_code == 200 and resp.json().get("ok"):
+                        bot_res[bot_id]["success"] += 1
+                        uid_any_success = True
+                    else:
+                        bot_res[bot_id]["fail"] += 1
+                except Exception:
+                    bot_res[bot_id]["fail"] += 1
+                _t.sleep(0.05)
+
+            if uid_any_success:
+                total_success += 1
+            else:
+                total_fail += 1
+
+            with _broadcast_all_lock:
+                _broadcast_all_status["done"] += 1
+                _broadcast_all_status["success"] = total_success
+                _broadcast_all_status["fail"] = total_fail
+                _broadcast_all_status["bot_results"] = bot_res
+
+        with _broadcast_all_lock:
+            _broadcast_all_status["running"] = False
+            _broadcast_all_status["bot_results"] = bot_res
+
+        # Update campaign log
+        if camp_id is not None:
+            try:
+                import json as _j
+                with get_db() as conn:
+                    conn.execute(
+                        "UPDATE broadcast_logs SET success_count=?, fail_count=?, bot_results_json=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (total_success, total_fail, _j.dumps(bot_res), camp_id),
+                    )
+                    conn.commit()
+            except Exception as e:
+                log.warning(f"broadcast_logs update failed: {e}")
+
+    t = threading.Thread(
+        target=_run_broadcast_all,
+        args=(bots_list, user_ids, message, media_type, media_url, buttons, campaign_id),
+        daemon=True,
+    )
+    t.start()
+    return jsonify({"ok": True, "total": len(user_ids), "bots_count": len(bots_list), "message": "Broadcast All đã bắt đầu"})
 
 
 @app.route("/settings/time", methods=["POST"])
@@ -672,6 +850,68 @@ def bots_health():
             "messages_sent": bot_stats.get("messages_sent", 0),
         })
     return jsonify(result)
+
+
+@app.route("/bots/<bot_id>/token", methods=["GET"])
+@owner_required
+def get_bot_token(bot_id):
+    """Return the full token of a bot (owner only)."""
+    bots = load_json(BOTS_FILE, [])
+    bot = next((b for b in bots if b.get("id") == bot_id), None)
+    if not bot:
+        return jsonify({"ok": False, "error": "Bot không tồn tại"}), 404
+    return jsonify({"ok": True, "token": bot.get("token", "")})
+
+
+def _get_all_active_bots() -> list:
+    """Return list of all configured bots with valid tokens."""
+    bots_list = load_json(BOTS_FILE, [])
+    if not bots_list and BOT_TOKEN:
+        bots_list = [{"id": "env_default", "name": "Default Bot", "token": BOT_TOKEN}]
+    return [b for b in bots_list if (b.get("token") or "").strip()]
+
+
+def _build_telegram_payload(uid: str, message: str, media_type: str, media_url: str, buttons: list) -> tuple:
+    """Build (endpoint_suffix, payload_dict) for a Telegram API call with optional media and buttons."""
+    import json as _json
+    reply_markup = None
+    if buttons:
+        inline_keyboard = []
+        for btn in buttons:
+            text = (btn.get("text") or "").strip()
+            url = (btn.get("url") or "").strip()
+            cb = (btn.get("callback_data") or "").strip()
+            if text and (url or cb):
+                if url:
+                    inline_keyboard.append([{"text": text, "url": url}])
+                else:
+                    inline_keyboard.append([{"text": text, "callback_data": cb}])
+        if inline_keyboard:
+            reply_markup = _json.dumps({"inline_keyboard": inline_keyboard})
+
+    chat_id_str = str(uid)
+    chat_id = int(chat_id_str) if (chat_id_str.startswith("-") and chat_id_str[1:].isdigit()) or chat_id_str.isdigit() else uid
+    if media_type == "image" and media_url:
+        payload: dict = {"chat_id": chat_id, "photo": media_url}
+        if message:
+            payload["caption"] = message
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        return "sendPhoto", payload
+    elif media_type == "video" and media_url:
+        payload = {"chat_id": chat_id, "video": media_url}
+        if message:
+            payload["caption"] = message
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        return "sendVideo", payload
+    else:
+        if not message:
+            return "sendMessage", None  # Caller should validate before calling
+        payload = {"chat_id": chat_id, "text": message}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        return "sendMessage", payload
 
 
 @app.route("/messages", methods=["GET"])
@@ -911,14 +1151,18 @@ def ids_broadcast_status():
 @app.route("/ids/broadcast", methods=["POST"])
 @login_required
 def ids_broadcast():
-    """Broadcast a message to all uploaded IDs, classifying status via Telegram API errors."""
+    """Broadcast a message to all uploaded IDs using ALL configured bots, classifying status via Telegram API errors."""
     with _broadcast_lock:
         if _broadcast_status.get("running"):
             return jsonify({"ok": False, "error": "Đang có broadcast đang chạy, vui lòng đợi"}), 409
 
-    bots_list = load_json(BOTS_FILE, [])
-    token = bots_list[0]["token"] if bots_list else BOT_TOKEN
-    if not token:
+    # Also block if Broadcast All is running
+    with _broadcast_all_lock:
+        if _broadcast_all_status.get("running"):
+            return jsonify({"ok": False, "error": "Đang có Broadcast All đang chạy, vui lòng đợi"}), 409
+
+    bots_list = _get_all_active_bots()
+    if not bots_list:
         return jsonify({"ok": False, "error": "Chưa cấu hình bot nào"}), 400
 
     message = request.form.get("message", "").strip()
@@ -932,38 +1176,60 @@ def ids_broadcast():
             ).fetchall()
         user_ids = [r["user_id"] for r in rows]
     except Exception as e:
-        return jsonify({"ok": False, "error": f"Lỗi đọc database: {e}"}), 500
+        log.error(f"ids_broadcast DB read error: {e}")
+        return jsonify({"ok": False, "error": "Lỗi đọc database. Vui lòng thử lại."}), 500
 
     if not user_ids:
         return jsonify({"ok": False, "error": "Không có ID nào để gửi"}), 400
+
+    bot_results_init = {b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0} for b in bots_list}
 
     with _broadcast_lock:
         _broadcast_status.update({
             "running": True, "total": len(user_ids), "done": 0,
             "active": 0, "blocked": 0, "invalid": 0, "error": 0,
+            "bot_results": bot_results_init,
         })
 
-    def _run_broadcast(token: str, message: str, user_ids: list):
-        api_url = f"https://api.telegram.org/bot{token}/sendMessage"
+    def _run_broadcast(bots: list, message: str, user_ids: list):
+        import time as _time
+        bot_res = {b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0} for b in bots}
+
         for uid in user_ids:
-            new_status = "active"
-            try:
-                resp = httpx.post(
-                    api_url,
-                    json={"chat_id": int(uid), "text": message},
-                    timeout=10,
-                )
-                data = resp.json()
-                if resp.status_code == 200 and data.get("ok"):
-                    new_status = "active"
-                elif resp.status_code == 403:
-                    new_status = "blocked"
-                elif resp.status_code in (400, 404):
-                    new_status = "invalid"
-                else:
-                    new_status = "invalid"
-            except Exception:
-                new_status = "invalid"
+            # Determine the best reachability status for this user across all bots
+            uid_status = None  # None means not yet determined
+            for bot in bots:
+                token = (bot.get("token") or "").strip()
+                bot_id = bot.get("id", "")
+                if not token:
+                    continue
+                api_url = f"https://api.telegram.org/bot{token}/sendMessage"
+                try:
+                    resp = httpx.post(
+                        api_url,
+                        json={"chat_id": int(uid), "text": message},
+                        timeout=10,
+                    )
+                    data = resp.json()
+                    if resp.status_code == 200 and data.get("ok"):
+                        bot_res[bot_id]["success"] += 1
+                        uid_status = "active"  # At least one success → user is reachable
+                    elif resp.status_code == 403:
+                        bot_res[bot_id]["fail"] += 1
+                        if uid_status != "active":
+                            uid_status = "blocked"
+                    else:
+                        bot_res[bot_id]["fail"] += 1
+                        if uid_status not in ("active", "blocked"):
+                            uid_status = "invalid"
+                except Exception:
+                    bot_res[bot_id]["fail"] += 1
+                    if uid_status not in ("active", "blocked"):
+                        uid_status = "invalid"
+                # Rate-limit: max ~20 messages/sec per bot
+                _time.sleep(0.05)
+
+            new_status = uid_status or "invalid"
             # Update DB
             try:
                 with get_db() as conn:
@@ -977,15 +1243,15 @@ def ids_broadcast():
             with _broadcast_lock:
                 _broadcast_status["done"] += 1
                 _broadcast_status[new_status if new_status in ("active", "blocked", "invalid") else "error"] += 1
-            # Rate-limit: max ~20 messages/sec to stay well under Telegram's 30/sec limit
-            import time as _time
-            _time.sleep(0.05)
+                _broadcast_status["bot_results"] = bot_res
+
         with _broadcast_lock:
             _broadcast_status["running"] = False
+            _broadcast_status["bot_results"] = bot_res
 
-    t = threading.Thread(target=_run_broadcast, args=(token, message, user_ids), daemon=True)
+    t = threading.Thread(target=_run_broadcast, args=(bots_list, message, user_ids), daemon=True)
     t.start()
-    return jsonify({"ok": True, "total": len(user_ids), "message": "Broadcast đã bắt đầu"})
+    return jsonify({"ok": True, "total": len(user_ids), "bots_count": len(bots_list), "message": "Broadcast đã bắt đầu"})
 
 
 # ===== BOT HANDLERS =====
