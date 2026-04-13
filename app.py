@@ -1502,7 +1502,6 @@ _MAX_SHORTENER_RESPONSE_BYTES = 4096
 def shortener_shorten():
     """Call all configured shortener APIs with the given URL and return results."""
     import urllib.parse as _urlparse
-    import urllib.request as _urlrequest
 
     data = request.get_json(silent=True) or {}
     long_url = str(data.get("url", "")).strip()
@@ -1533,12 +1532,12 @@ def shortener_shorten():
             results.append({"ok": False, "error": "Lỗi: Template API không hợp lệ (chỉ hỗ trợ http/https)"})
             continue
         try:
-            req = _urlrequest.Request(
+            resp = httpx.get(
                 request_url,
-                headers={"User-Agent": "TelegramBotDashboard/1.0"},
+                timeout=10,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
             )
-            with _urlrequest.urlopen(req, timeout=10) as resp:  # noqa: S310
-                raw = resp.read(_MAX_SHORTENER_RESPONSE_BYTES).decode("utf-8", errors="replace").strip()
+            raw = resp.text[:_MAX_SHORTENER_RESPONSE_BYTES].strip()
             # Try to parse response as JSON first (AdLinkFly-based shorteners)
             try:
                 payload = json.loads(raw)
