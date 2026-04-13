@@ -127,6 +127,7 @@
     <div class="nav-item" id="nav-ids" onclick="showSection('ids')"><i class="bi bi-people-fill"></i> Quản lý ID</div>
     <div class="nav-item" id="nav-albums" onclick="showSection('albums')"><i class="bi bi-collection"></i> Albums</div>
     <div class="nav-item" id="nav-script" onclick="showSection('script')"><i class="bi bi-diagram-3"></i> Kịch bản &amp; Album</div>
+    <div class="nav-item" id="nav-shortener" onclick="showSection('shortener')"><i class="bi bi-scissors"></i> Rút gọn Link</div>
     <div class="nav-section-label">Cài đặt</div>
     <div class="nav-item" id="nav-config" onclick="showSection('config')"><i class="bi bi-gear-fill"></i> Cấu hình Bot</div>
     <div class="nav-section-label">Hệ thống</div>
@@ -734,6 +735,55 @@
       </div>
     </div>
 
+    <!-- LINK SHORTENER SECTION -->
+    <div class="section-page" id="section-shortener">
+      <div class="page-header">
+        <span class="page-title"><i class="bi bi-scissors"></i>Rút gọn Link</span>
+        <span style="font-size:.78rem;color:#888;">Rút gọn link qua nhiều API cùng lúc</span>
+      </div>
+      <div class="row g-3">
+        <!-- API Management Card -->
+        <div class="col-12 col-lg-6">
+          <div class="dash-card h-100">
+            <div class="dash-card-header d-flex align-items-center justify-content-between">
+              <span class="dash-card-title"><i class="bi bi-plug me-2" style="color:var(--accent);"></i>Quản lý API Rút gọn</span>
+              <button class="btn btn-sm btn-accent" onclick="shortenerOpenAddModal()"><i class="bi bi-plus-lg me-1"></i>Thêm API</button>
+            </div>
+            <div class="dash-card-body">
+              <p style="font-size:.82rem;color:#aaa;">Nhập template API theo định dạng:<br><code style="font-size:.78rem;color:#ff8533;">https://mual.ink/st?api=TOKEN&amp;url={url}</code><br>Trong đó <code>{url}</code> sẽ được thay bằng link gốc đã mã hóa.</p>
+              <div id="shortenerApiList">
+                <div class="text-center text-muted py-3" style="font-size:.85rem;"><i class="bi bi-arrow-clockwise me-1"></i>Đang tải...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Shortener Tool Card -->
+        <div class="col-12 col-lg-6">
+          <div class="dash-card h-100">
+            <div class="dash-card-header">
+              <span class="dash-card-title"><i class="bi bi-link-45deg me-2" style="color:#4d9fff;"></i>Công cụ Rút gọn Link</span>
+            </div>
+            <div class="dash-card-body">
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Nhập Link gốc cần rút gọn</label>
+                <div class="input-group">
+                  <input type="url" id="shortenerInput" class="form-control" placeholder="https://www.google.com/">
+                  <button class="btn btn-accent" id="btnShorten" onclick="doShorten(this)"><i class="bi bi-scissors me-1"></i>Rút gọn</button>
+                </div>
+              </div>
+              <div id="shortenerResults" style="display:none;">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <span style="font-size:.85rem;font-weight:600;color:#ddd;"><i class="bi bi-list-ul me-1" style="color:var(--accent);"></i>Kết quả:</span>
+                  <button class="btn btn-sm btn-outline-secondary" id="btnCopyAll" onclick="shortenerCopyAll()"><i class="bi bi-clipboard me-1"></i>Copy Tất Cả</button>
+                </div>
+                <div id="shortenerResultList"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </main>
 </div><!-- /layout -->
 
@@ -874,6 +924,30 @@
   </div>
 </div>
 
+<!-- Shortener API Modal -->
+<div class="modal fade" id="shortenerApiModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="shortenerApiModalTitle"><i class="bi bi-plug me-2" style="color:var(--accent);"></i>Thêm API Rút gọn</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="shortenerApiEditId" value="">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Template API <span class="text-danger">*</span></label>
+          <input type="text" id="shortenerApiTemplate" class="form-control font-monospace" placeholder="https://mual.ink/st?api=TOKEN&url={url}">
+          <div class="form-text text-muted">Dùng <code>{url}</code> làm chỗ thay thế cho link gốc đã mã hóa.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-accent" onclick="doSaveShortenerApi(this)"><i class="bi bi-floppy me-1"></i>Lưu</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 /* ====== SIDEBAR & NAVIGATION ====== */
@@ -907,6 +981,7 @@ function showSection(name) {
   else if (name === 'bots') { loadBotHealth(null); }
   else if (name === 'analytics') { loadAnalytics(null); }
   else if (name === 'script') { loadScriptData(); }
+  else if (name === 'shortener') { shortenerLoadApis(); }
   closeSidebar();
   window.location.hash = name;
 }
@@ -1594,10 +1669,158 @@ async function smSaveNode(nodeId, text, buttons, btn, label) {
   } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = origHtml; }
 }
+/* ====== LINK SHORTENER ====== */
+let _shortenerApis = [];
+
+function shortenerOpenAddModal(id) {
+  document.getElementById('shortenerApiEditId').value = id || '';
+  document.getElementById('shortenerApiTemplate').value = id ? (_shortenerApis.find(a=>a.id===id)||{}).template||'' : '';
+  document.getElementById('shortenerApiModalTitle').innerHTML = id
+    ? '<i class="bi bi-pencil me-2" style="color:var(--accent);"></i>Sửa API Rút gọn'
+    : '<i class="bi bi-plug me-2" style="color:var(--accent);"></i>Thêm API Rút gọn';
+  new bootstrap.Modal(document.getElementById('shortenerApiModal')).show();
+}
+
+async function shortenerLoadApis() {
+  try {
+    const res = await fetch('/shortener/apis');
+    const data = await res.json();
+    if (data.ok) { _shortenerApis = data.apis; renderShortenerApiList(); }
+  } catch(e) {
+    document.getElementById('shortenerApiList').innerHTML = '<div class="text-danger" style="font-size:.82rem;">Lỗi tải danh sách API.</div>';
+  }
+}
+
+function renderShortenerApiList() {
+  const el = document.getElementById('shortenerApiList');
+  if (!_shortenerApis.length) {
+    el.innerHTML = '<div class="text-center text-muted py-3" style="font-size:.85rem;"><i class="bi bi-inbox me-1"></i>Chưa có API nào. Nhấn "+ Thêm API" để bắt đầu.</div>';
+    return;
+  }
+  el.innerHTML = _shortenerApis.map((api, idx) =>
+    '<div class="d-flex align-items-center gap-2 mb-2 p-2" style="background:rgba(255,255,255,.04);border-radius:8px;border:1px solid var(--border-color);">'
+    + '<span class="badge bg-secondary" style="min-width:22px;text-align:center;">' + (idx+1) + '</span>'
+    + '<div class="flex-grow-1 text-truncate font-monospace" style="font-size:.75rem;color:#ccc;" title="'+escapeHtml(api.template)+'">'+escapeHtml(api.template)+'</div>'
+    + '<div class="d-flex gap-1 flex-shrink-0">'
+    + '<button class="btn btn-sm btn-outline-secondary p-1" onclick="shortenerMoveUp('+idx+')" '+(idx===0?'disabled':'')+' title="Lên" style="line-height:1;"><i class="bi bi-arrow-up" style="font-size:.7rem;"></i></button>'
+    + '<button class="btn btn-sm btn-outline-secondary p-1" onclick="shortenerMoveDown('+idx+')" '+(idx===_shortenerApis.length-1?'disabled':'')+' title="Xuống" style="line-height:1;"><i class="bi bi-arrow-down" style="font-size:.7rem;"></i></button>'
+    + '<button class="btn btn-sm btn-outline-warning p-1" onclick="shortenerOpenAddModal('+api.id+')" title="Sửa" style="line-height:1;"><i class="bi bi-pencil" style="font-size:.7rem;"></i></button>'
+    + '<button class="btn btn-sm btn-outline-danger p-1" onclick="shortenerDeleteApi('+api.id+')" title="Xóa" style="line-height:1;"><i class="bi bi-trash" style="font-size:.7rem;"></i></button>'
+    + '</div></div>'
+  ).join('');
+}
+
+async function shortenerMoveUp(idx) {
+  if (idx === 0) return;
+  [_shortenerApis[idx-1], _shortenerApis[idx]] = [_shortenerApis[idx], _shortenerApis[idx-1]];
+  await shortenerSaveOrder();
+}
+async function shortenerMoveDown(idx) {
+  if (idx >= _shortenerApis.length-1) return;
+  [_shortenerApis[idx+1], _shortenerApis[idx]] = [_shortenerApis[idx], _shortenerApis[idx+1]];
+  await shortenerSaveOrder();
+}
+async function shortenerSaveOrder() {
+  renderShortenerApiList();
+  try {
+    await fetch('/shortener/apis/reorder', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ids: _shortenerApis.map(a=>a.id)})
+    });
+  } catch(e) { showToast('&#10060; Lỗi lưu thứ tự: '+e.message,'error'); }
+}
+
+async function doSaveShortenerApi(btn) {
+  const id = document.getElementById('shortenerApiEditId').value;
+  const template = document.getElementById('shortenerApiTemplate').value.trim();
+  if (!template) { showToast('&#10060; Template không được để trống','error'); return; }
+  if (!template.includes('{url}')) { showToast('&#10060; Template phải chứa {url}','error'); return; }
+  const origHtml = btn.innerHTML; btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang lưu...';
+  try {
+    const url = id ? '/shortener/apis/'+id : '/shortener/apis';
+    const method = id ? 'PUT' : 'POST';
+    const res = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify({template})});
+    const data = await res.json();
+    if (data.ok) {
+      bootstrap.Modal.getInstance(document.getElementById('shortenerApiModal')).hide();
+      showToast('&#9989; Đã lưu API!','success');
+      shortenerLoadApis();
+    } else { showToast('&#10060; '+(data.error||'?'),'error'); }
+  } catch(e) { showToast('&#10060; Lỗi: '+e.message,'error'); }
+  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
+
+async function shortenerDeleteApi(id) {
+  if (!confirm('Xóa API này?')) return;
+  try {
+    const res = await fetch('/shortener/apis/'+id, {method:'DELETE'});
+    const data = await res.json();
+    if (data.ok) { showToast('&#9989; Đã xóa!','success'); shortenerLoadApis(); }
+    else { showToast('&#10060; '+(data.error||'?'),'error'); }
+  } catch(e) { showToast('&#10060; Lỗi: '+e.message,'error'); }
+}
+
+async function doShorten(btn) {
+  const url = document.getElementById('shortenerInput').value.trim();
+  if (!url) { showToast('&#10060; Vui lòng nhập link','error'); return; }
+  if (!_shortenerApis.length) { showToast('&#10060; Chưa cấu hình API nào. Vui lòng thêm API trước.','error'); return; }
+  const origHtml = btn.innerHTML; btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang rút gọn...';
+  document.getElementById('shortenerResults').style.display = 'none';
+  try {
+    const res = await fetch('/shortener/shorten', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({url})
+    });
+    const data = await res.json();
+    if (!data.ok) { showToast('&#10060; '+(data.error||'?'),'error'); return; }
+    const list = document.getElementById('shortenerResultList');
+    list.innerHTML = data.results.map((r, i) => {
+      if (r.ok) {
+        return '<div class="d-flex align-items-center gap-2 mb-2 p-2" style="background:rgba(255,255,255,.04);border-radius:8px;border:1px solid var(--border-color);">'
+          + '<span style="font-size:.83rem;color:#aaa;white-space:nowrap;flex-shrink:0;font-weight:600;">Link '+(i+1)+':</span>'
+          + '<span class="flex-grow-1 text-truncate shortener-result-url" style="font-size:.83rem;color:#4dffb0;" data-url="'+escapeHtml(r.url)+'" title="'+escapeHtml(r.url)+'">'+escapeHtml(r.url)+'</span>'
+          + '<button class="btn btn-sm btn-outline-secondary flex-shrink-0" onclick="shortenerCopyOne(this,\''+escapeHtml(r.url)+'\')" style="font-size:.75rem;padding:2px 8px;"><i class="bi bi-clipboard me-1"></i>Copy</button>'
+          + '</div>';
+      } else {
+        return '<div class="d-flex align-items-center gap-2 mb-2 p-2" style="background:rgba(255,80,80,.06);border-radius:8px;border:1px solid rgba(255,80,80,.25);">'
+          + '<span style="font-size:.83rem;color:#aaa;white-space:nowrap;flex-shrink:0;font-weight:600;">Link '+(i+1)+':</span>'
+          + '<span class="flex-grow-1 text-truncate text-danger" style="font-size:.82rem;" title="'+escapeHtml(r.error||'Lỗi')+'">'+escapeHtml(r.error||'Lỗi không xác định')+'</span>'
+          + '</div>';
+      }
+    }).join('');
+    document.getElementById('shortenerResults').style.display = 'block';
+  } catch(e) { showToast('&#10060; Lỗi: '+e.message,'error'); }
+  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
+
+function shortenerCopyOne(btn, url) {
+  navigator.clipboard.writeText(url).then(() => {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Đã copy!';
+    btn.classList.add('btn-success'); btn.classList.remove('btn-outline-secondary');
+    setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('btn-success'); btn.classList.add('btn-outline-secondary'); }, 1500);
+  }).catch(() => showToast('&#10060; Không thể copy','error'));
+}
+
+function shortenerCopyAll() {
+  const urlEls = document.querySelectorAll('#shortenerResultList .shortener-result-url');
+  const urls = Array.from(urlEls).map(el => el.getAttribute('data-url')).filter(Boolean);
+  if (!urls.length) { showToast('&#10060; Không có link nào để copy','error'); return; }
+  navigator.clipboard.writeText(urls.join('\n')).then(() => {
+    showToast('&#9989; Đã copy ' + urls.length + ' link!', 'success');
+    const btn = document.getElementById('btnCopyAll');
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Đã copy!';
+    setTimeout(() => { btn.innerHTML = orig; }, 1500);
+  }).catch(() => showToast('&#10060; Không thể copy','error'));
+}
+
 /* ====== INIT ====== */
 window.addEventListener('DOMContentLoaded', function() {
   const hash = window.location.hash.replace('#','')||'dashboard';
-  const validSections = ['dashboard','bots','analytics','ids','albums','script','config','system'];
+  const validSections = ['dashboard','bots','analytics','ids','albums','script','shortener','config','system'];
   showSection(validSections.includes(hash) ? hash : 'dashboard');
   const activeAlbumId = '{{ active_album }}';
   if (activeAlbumId) {
