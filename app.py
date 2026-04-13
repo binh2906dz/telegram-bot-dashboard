@@ -16,10 +16,9 @@ from datetime import datetime, timezone, timedelta, time as dt_time
 from functools import wraps
 from flask import Flask, request, redirect, render_template, jsonify, Response, session, url_for
 
+import subprocess
+
 import httpx
-import cloudinary
-import cloudinary.uploader
-import cloudinary.api
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
@@ -53,16 +52,15 @@ STATS_FILE = "stats.json"
 SLOGANS_FILE = "slogans.json"
 DB_FILE = "data.db"
 
-# ===== CLOUDINARY CONFIG =====
-# Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET
-# as environment variables in your deployment (e.g. Railway Variables).
-cloudinary.config(
-    cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME", ""),
-    api_key=os.environ.get("CLOUDINARY_API_KEY", ""),
-    api_secret=os.environ.get("CLOUDINARY_API_SECRET", ""),
-    secure=True,
-)
-CLOUDINARY_BACKUP_FOLDER = "backups"
+# ===== LOCAL STORAGE CONFIG =====
+UPLOAD_BASE_DIR = os.path.join("static", "uploads")
+UPLOAD_IMAGES_DIR = os.path.join(UPLOAD_BASE_DIR, "images")
+UPLOAD_VIDEOS_DIR = os.path.join(UPLOAD_BASE_DIR, "videos")
+BACKUP_DIR = os.path.join("static", "backups")
+
+# Ensure upload directories exist at startup
+for _d in (UPLOAD_IMAGES_DIR, UPLOAD_VIDEOS_DIR, BACKUP_DIR):
+    os.makedirs(_d, exist_ok=True)
 
 
 _cache: dict = {}  # {file: {"mtime": float, "data": ...}}
@@ -367,58 +365,82 @@ def owner_required(f):
     return decorated
 
 
-# ===== CLOUDINARY HELPERS =====
+# ===== LOCAL STORAGE HELPERS =====
 
-def upload_to_cloudinary(file_stream, resource_type: str = "auto") -> str:
-    """Upload a file stream to Cloudinary and return the secure URL.
+def save_file_locally(file_stream, filename: str, file_type: str) -> str:
+    """Save an uploaded file to the local static/uploads directory.
 
-    Uses resource_type='auto' by default to support images, videos, and other
-    media types without requiring the caller to specify the type explicitly.
+    Returns the URL path (e.g. /static/uploads/images/abc123.jpg).
     """
-    public_id = f"uploads/{uuid.uuid4().hex}"
-    result = cloudinary.uploader.upload(
-        file_stream,
-        public_id=public_id,
-        resource_type=resource_type,
-        use_filename=False,
-        unique_filename=False,
-        quality="auto",
-        fetch_format="auto",
-    )
-    return result["secure_url"]
+    ext = os.path.splitext(filename)[1].lower() or (".mp4" if file_type == "video" else ".jpg")
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    if file_type == "video":
+        save_dir = UPLOAD_VIDEOS_DIR
+    else:
+        save_dir = UPLOAD_IMAGES_DIR
+    save_path = os.path.join(save_dir, unique_name)
+    with open(save_path, "wb") as f:
+        f.write(file_stream.read())
+    return f"/static/uploads/{'videos' if file_type == 'video' else 'images'}/{unique_name}"
+
+
+def process_video_to_hls(input_video_path: str, output_dir: str) -> str:
+    """Convert a video file to HLS format using FFmpeg.
+
+    Creates index.m3u8 and .ts segment files in output_dir.
+    Returns the URL path to the .m3u8 playlist file, or raises RuntimeError on failure.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    m3u8_path = os.path.join(output_dir, "index.m3u8")
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", input_video_path,
+        "-profile:v", "baseline",
+        "-level", "3.0",
+        "-s", "640x360",
+        "-start_number", "0",
+        "-hls_time", "10",
+        "-hls_list_size", "0",
+        "-f", "hls",
+        m3u8_path,
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, check=True, timeout=300)
+    except subprocess.CalledProcessError as exc:
+        log.error(f"FFmpeg HLS conversion failed: {exc.stderr.decode(errors='replace')}")
+        raise RuntimeError("FFmpeg conversion failed") from exc
+    except FileNotFoundError:
+        log.warning("ffmpeg not found – serving original video without HLS conversion")
+        raise RuntimeError("ffmpeg not installed")
+    # Construct URL from known components to avoid platform-specific path issues
+    file_id = os.path.basename(output_dir)
+    return f"/static/uploads/videos/{file_id}/index.m3u8"
 
 
 def run_daily_backup():
-    """Package JSON data files into a zip and upload to Cloudinary backups/ folder.
-    Deletes the previous day's backup to keep only the latest."""
+    """Package JSON data files into a zip and save to local backups/ folder.
+    Keeps only the latest backup by removing the previous day's file."""
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     yesterday_str = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-    backup_public_id = f"{CLOUDINARY_BACKUP_FOLDER}/backup_{today_str}"
-    old_public_id = f"{CLOUDINARY_BACKUP_FOLDER}/backup_{yesterday_str}"
+    backup_filename = f"backup_{today_str}.zip"
+    old_backup_filename = f"backup_{yesterday_str}.zip"
+    backup_path = os.path.join(BACKUP_DIR, backup_filename)
+    old_backup_path = os.path.join(BACKUP_DIR, old_backup_filename)
 
-    # Delete yesterday's backup (raw resource type)
+    # Delete yesterday's backup
     try:
-        cloudinary.uploader.destroy(old_public_id, resource_type="raw", invalidate=True)
-        log.info(f"Deleted old backup: {old_public_id}")
+        if os.path.exists(old_backup_path):
+            os.remove(old_backup_path)
+            log.info(f"Deleted old backup: {old_backup_path}")
     except Exception as e:
-        log.warning(f"Could not delete old backup {old_public_id}: {e}")
+        log.warning(f"Could not delete old backup {old_backup_path}: {e}")
 
-    # Build zip in memory
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+    # Build zip and save locally
+    with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
         _backup_files_to_zip(zf)
-    buf.seek(0)
 
-    # Upload to Cloudinary as raw file
-    result = cloudinary.uploader.upload(
-        buf,
-        public_id=backup_public_id,
-        resource_type="raw",
-        use_filename=False,
-        unique_filename=False,
-    )
-    log.info(f"Backup uploaded to Cloudinary: {result.get('secure_url')}")
-    return result.get("secure_url")
+    log.info(f"Backup saved locally: {backup_path}")
+    return f"/static/backups/{backup_filename}"
 
 
 # ===== FLASK ROUTES =====
@@ -549,10 +571,18 @@ def add_post(album_id):
             try:
                 mime = (f.content_type or "").lower()
                 item_type = "video" if mime.startswith("video/") else "image"
-                url = upload_to_cloudinary(f.stream)
+                url = save_file_locally(f.stream, f.filename, item_type)
+                if item_type == "video":
+                    file_id = os.path.splitext(os.path.basename(url))[0]
+                    hls_dir = os.path.join(UPLOAD_VIDEOS_DIR, file_id)
+                    src_path = url.lstrip("/")
+                    try:
+                        url = process_video_to_hls(src_path, hls_dir)
+                    except RuntimeError:
+                        pass  # fall back to serving original video
                 media_items.append({"url": url, "type": item_type})
             except Exception as e:
-                log.error(f"Cloudinary upload failed: {e}")
+                log.error(f"Local upload failed: {e}")
     post = {
         "id": uuid.uuid4().hex,
         "caption": caption,
@@ -601,10 +631,19 @@ def upload():
             try:
                 mime = (img.content_type or "").lower()
                 item_type = "video" if mime.startswith("video/") else "image"
-                url = upload_to_cloudinary(img.stream)
+                url = save_file_locally(img.stream, img.filename, item_type)
+                if item_type == "video":
+                    # Build HLS output dir from the saved file path
+                    file_id = os.path.splitext(os.path.basename(url))[0]
+                    hls_dir = os.path.join(UPLOAD_VIDEOS_DIR, file_id)
+                    src_path = url.lstrip("/")
+                    try:
+                        url = process_video_to_hls(src_path, hls_dir)
+                    except RuntimeError:
+                        pass  # fall back to serving original video
                 photos.append({"url": url, "type": item_type})
             except Exception as e:
-                log.error(f"Cloudinary upload failed: {e}")
+                log.error(f"Local upload failed: {e}")
     if photos:
         post = {
             "id": uuid.uuid4().hex,
@@ -631,6 +670,20 @@ def healthz():
     return "OK", 200
 
 
+@app.route("/stream/<file_id>")
+def stream_video(file_id):
+    """Serve the HLS player page for a given video file_id."""
+    # Validate file_id: only allow hex UUIDs (32 hex chars) to prevent path traversal
+    import re as _re
+    if not _re.fullmatch(r"[0-9a-f]{32}", file_id):
+        return "Invalid file ID", 400
+    hls_dir = os.path.join(UPLOAD_VIDEOS_DIR, file_id)
+    if not os.path.isdir(hls_dir):
+        return "Stream not found", 404
+    m3u8_url = f"/static/uploads/videos/{file_id}/index.m3u8"
+    return render_template("player.html", m3u8_url=m3u8_url)
+
+
 @app.route("/backup/download")
 @owner_required
 def backup_download():
@@ -650,7 +703,7 @@ def backup_download():
 @app.route("/backup/manual", methods=["POST"])
 @owner_required
 def backup_manual():
-    """Trigger a manual backup to Cloudinary and return JSON result."""
+    """Trigger a manual backup and save locally, returning the download URL."""
     try:
         url = run_daily_backup()
         return jsonify({"ok": True, "url": url})
@@ -662,42 +715,27 @@ def backup_manual():
 @app.route("/backup/restore", methods=["POST"])
 @owner_required
 def backup_restore():
-    """Fetch the latest backup from Cloudinary and restore JSON data files."""
-    backup_url = None
+    """Restore JSON data files from the most recent local backup zip."""
+    backup_zip_path = None
     for days_ago in range(0, 7):
         date_str = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%d")
-        public_id = f"{CLOUDINARY_BACKUP_FOLDER}/backup_{date_str}"
-        try:
-            resource = cloudinary.api.resource(public_id, resource_type="raw")
-            backup_url = resource.get("secure_url")
-            if backup_url:
-                break
-        except Exception:
-            continue
+        candidate = os.path.join(BACKUP_DIR, f"backup_{date_str}.zip")
+        if os.path.exists(candidate):
+            backup_zip_path = candidate
+            break
 
-    if not backup_url:
-        return jsonify({"ok": False, "error": "Không tìm thấy bản sao lưu trên Cloudinary"}), 404
-
-    # Validate that the URL is a secure Cloudinary URL to prevent SSRF
-    if not (backup_url.startswith("https://") and "cloudinary.com" in backup_url):
-        log.error(f"Restore aborted: unexpected backup URL: {backup_url}")
-        return jsonify({"ok": False, "error": "URL sao lưu không hợp lệ"}), 400
+    if not backup_zip_path:
+        return jsonify({"ok": False, "error": "Không tìm thấy bản sao lưu cục bộ"}), 404
 
     try:
-        max_bytes = 10 * 1024 * 1024  # 10 MB limit
-        with urllib.request.urlopen(backup_url, timeout=30) as resp:  # noqa: S310
-            zip_data = resp.read(max_bytes)
-
-        buf = io.BytesIO(zip_data)
         allowed_static = {ALBUMS_FILE, SUBS_FILE, CONFIG_FILE, BOTS_FILE, MESSAGES_FILE, BANNED_FILE}
-        with zipfile.ZipFile(buf, "r") as zf:
+        with zipfile.ZipFile(backup_zip_path, "r") as zf:
             for fname in zf.namelist():
                 if fname == DB_FILE:
-                    # Restore SQLite database
                     db_data = zf.read(fname)
                     with open(DB_FILE, "wb") as f:
                         f.write(db_data)
-                    init_db()  # ensure schema is up to date
+                    init_db()
                     continue
                 if fname not in allowed_static and not (
                     fname.startswith("subs_") and fname.endswith(".json")
@@ -1638,7 +1676,14 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         await query.edit_message_text("CHỌN COMBO LlNK HOT🔥", reply_markup=InlineKeyboardMarkup(buttons))
 
     async def send_album(chat_id, bot, album):
-        """Send all posts in an album (supports images, videos, and legacy photos[] format)."""
+        """Send all posts in an album (supports images, videos, and legacy photos[] format).
+
+        HLS videos (.m3u8) are sent as inline Web App buttons so the user can
+        stream them through the built-in player page instead of downloading a
+        raw video file.
+        """
+        base_url = os.environ.get("APP_BASE_URL", "").rstrip("/")
+
         if "posts" in album:
             groups = [(post.get("photos", []), post.get("caption", "")) for post in album["posts"]]
         else:
@@ -1647,10 +1692,28 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         for photos_list, group_caption in groups:
             media = []
             open_files = []
+            hls_buttons = []
             try:
                 for i, p in enumerate(photos_list):
                     url = p["url"]
                     item_type = p.get("type", "image")
+
+                    # HLS video: extract file_id from the m3u8 URL and send as Web App button
+                    if item_type == "video" and url.endswith("/index.m3u8"):
+                        # URL pattern: /static/uploads/videos/<file_id>/index.m3u8
+                        if not base_url:
+                            log.warning("APP_BASE_URL not set – cannot create HLS stream button; skipping video")
+                            continue
+                        parts = url.rstrip("/").split("/")
+                        if len(parts) < 2:
+                            log.warning(f"Unexpected HLS URL format, skipping: {url}")
+                            continue
+                        file_id = parts[-2]
+                        stream_url = f"{base_url}/stream/{file_id}"
+                        label = f"▶️ Xem video {len(hls_buttons) + 1}"
+                        hls_buttons.append([InlineKeyboardButton(label, url=stream_url)])
+                        continue
+
                     if url.startswith("/static/uploads/"):
                         f = open(url.lstrip("/"), "rb")
                         open_files.append(f)
@@ -1662,8 +1725,16 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                         media.append(InputMediaVideo(media_src, caption=caption))
                     else:
                         media.append(InputMediaPhoto(media_src, caption=caption))
+
                 if media:
                     await bot.send_media_group(chat_id, media)
+                if hls_buttons:
+                    caption_text = group_caption or "🎬 Nhấn để xem video"
+                    await bot.send_message(
+                        chat_id,
+                        caption_text,
+                        reply_markup=InlineKeyboardMarkup(hls_buttons),
+                    )
             finally:
                 for f in open_files:
                     f.close()
