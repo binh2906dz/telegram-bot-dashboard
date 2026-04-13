@@ -1963,27 +1963,38 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
 
     _bot_manager = _BotManager()
 
-    def run_bot_thread():
-        """Entry point called by run_bot.py — runs the dynamic BotManager loop."""
-        bots_cfg = load_json(BOTS_FILE, [])
-        if not bots_cfg and not BOT_TOKEN:
-            log.warning("No bots configured – bot disabled")
-            return
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        manager = _BotManager()
-        try:
-            loop.run_until_complete(manager._manage())
-        except Exception as e:
-            log.error("Bot thread error: %s", e)
-            raise
-
 else:
     log.warning("No bot token configured – bot disabled, Flask only")
 
-    def run_bot_thread():  # type: ignore[no-redef]
-        log.warning("run_bot_thread called but no bot token configured")
+
+def run_bot_thread():
+    """Entry point called by run_bot.py — runs the dynamic BotManager loop.
+
+    If no bot token is configured and bots.json is empty, this is a no-op.
+    Otherwise it starts a BotManager that dynamically polls bots.json and
+    manages Telegram bot polling instances.
+    """
+    bots_cfg = load_json(BOTS_FILE, [])
+    if not bots_cfg and not BOT_TOKEN:
+        log.warning("run_bot_thread: no bots configured – exiting")
+        return
+
+    try:
+        # _BotManager is defined inside the 'if BOT_TOKEN or ...' block above;
+        # if that block ran, _BotManager is available in the module globals.
+        BotManagerCls = globals()["_BotManager"]
+    except KeyError:
+        log.warning("run_bot_thread: _BotManager not available – no bot token configured")
+        return
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    manager = BotManagerCls()
+    try:
+        loop.run_until_complete(manager._manage())
+    except Exception as e:
+        log.error("Bot thread error: %s", e)
+        raise
 
 
 # ===== APSCHEDULER — automated daily backup at 0:01 AM Vietnam Time =====
