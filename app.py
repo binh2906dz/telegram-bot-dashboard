@@ -1403,7 +1403,7 @@ def shortener_apis_list():
         return jsonify({"ok": True, "apis": [dict(r) for r in rows]})
     except Exception as e:
         log.error(f"shortener_apis_list error: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": "Lỗi đọc database"}), 500
 
 
 @app.route("/shortener/apis", methods=["POST"])
@@ -1416,6 +1416,8 @@ def shortener_apis_add():
         return jsonify({"ok": False, "error": "Template không được để trống"}), 400
     if "{url}" not in template:
         return jsonify({"ok": False, "error": "Template phải chứa {url}"}), 400
+    if not (template.startswith("http://") or template.startswith("https://")):
+        return jsonify({"ok": False, "error": "Template phải bắt đầu bằng http:// hoặc https://"}), 400
     try:
         with get_db() as conn:
             max_pos = conn.execute("SELECT COALESCE(MAX(position), -1) FROM shortener_apis").fetchone()[0]
@@ -1428,7 +1430,7 @@ def shortener_apis_add():
         return jsonify({"ok": True, "id": new_id})
     except Exception as e:
         log.error(f"shortener_apis_add error: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": "Lỗi lưu database"}), 500
 
 
 @app.route("/shortener/apis/<int:api_id>", methods=["PUT"])
@@ -1441,6 +1443,8 @@ def shortener_apis_update(api_id):
         return jsonify({"ok": False, "error": "Template không được để trống"}), 400
     if "{url}" not in template:
         return jsonify({"ok": False, "error": "Template phải chứa {url}"}), 400
+    if not (template.startswith("http://") or template.startswith("https://")):
+        return jsonify({"ok": False, "error": "Template phải bắt đầu bằng http:// hoặc https://"}), 400
     try:
         with get_db() as conn:
             conn.execute(
@@ -1451,7 +1455,7 @@ def shortener_apis_update(api_id):
         return jsonify({"ok": True})
     except Exception as e:
         log.error(f"shortener_apis_update error: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": "Lỗi cập nhật database"}), 500
 
 
 @app.route("/shortener/apis/<int:api_id>", methods=["DELETE"])
@@ -1465,7 +1469,7 @@ def shortener_apis_delete(api_id):
         return jsonify({"ok": True})
     except Exception as e:
         log.error(f"shortener_apis_delete error: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": "Lỗi xóa database"}), 500
 
 
 @app.route("/shortener/apis/reorder", methods=["POST"])
@@ -1487,7 +1491,10 @@ def shortener_apis_reorder():
         return jsonify({"ok": True})
     except Exception as e:
         log.error(f"shortener_apis_reorder error: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": "Lỗi sắp xếp thứ tự"}), 500
+
+
+_MAX_SHORTENER_RESPONSE_BYTES = 4096
 
 
 @app.route("/shortener/shorten", methods=["POST"])
@@ -1519,19 +1526,24 @@ def shortener_shorten():
     results = []
     for api in apis:
         request_url = api["template"].replace("{url}", encoded_url)
+        # Only allow http/https schemes to prevent SSRF via other URI schemes
+        if not (request_url.startswith("http://") or request_url.startswith("https://")):
+            results.append({"ok": False, "error": "Lỗi: Template API không hợp lệ (chỉ hỗ trợ http/https)"})
+            continue
         try:
             req = _urlrequest.Request(
                 request_url,
                 headers={"User-Agent": "TelegramBotDashboard/1.0"},
             )
             with _urlrequest.urlopen(req, timeout=10) as resp:  # noqa: S310
-                raw = resp.read(4096).decode("utf-8", errors="replace").strip()
+                raw = resp.read(_MAX_SHORTENER_RESPONSE_BYTES).decode("utf-8", errors="replace").strip()
             # If the response looks like a URL, use it; otherwise treat as error
             if raw.startswith("http://") or raw.startswith("https://"):
                 results.append({"ok": True, "url": raw})
             else:
                 results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
         except Exception as exc:
+            log.warning(f"shortener_shorten API call error: {exc}")
             results.append({"ok": False, "error": f"Lỗi: {exc}"})
 
     return jsonify({"ok": True, "results": results})

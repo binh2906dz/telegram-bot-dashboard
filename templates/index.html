@@ -1781,7 +1781,7 @@ async function doShorten(btn) {
         return '<div class="d-flex align-items-center gap-2 mb-2 p-2" style="background:rgba(255,255,255,.04);border-radius:8px;border:1px solid var(--border-color);">'
           + '<span style="font-size:.83rem;color:#aaa;white-space:nowrap;flex-shrink:0;font-weight:600;">Link '+(i+1)+':</span>'
           + '<span class="flex-grow-1 text-truncate shortener-result-url" style="font-size:.83rem;color:#4dffb0;" data-url="'+escapeHtml(r.url)+'" title="'+escapeHtml(r.url)+'">'+escapeHtml(r.url)+'</span>'
-          + '<button class="btn btn-sm btn-outline-secondary flex-shrink-0" onclick="shortenerCopyOne(this,\''+escapeHtml(r.url)+'\')" style="font-size:.75rem;padding:2px 8px;"><i class="bi bi-clipboard me-1"></i>Copy</button>'
+          + '<button class="btn btn-sm btn-outline-secondary flex-shrink-0 shortener-copy-btn" data-url="'+escapeHtml(r.url)+'" style="font-size:.75rem;padding:2px 8px;"><i class="bi bi-clipboard me-1"></i>Copy</button>'
           + '</div>';
       } else {
         return '<div class="d-flex align-items-center gap-2 mb-2 p-2" style="background:rgba(255,80,80,.06);border-radius:8px;border:1px solid rgba(255,80,80,.25);">'
@@ -1795,14 +1795,18 @@ async function doShorten(btn) {
   finally { btn.disabled = false; btn.innerHTML = origHtml; }
 }
 
-function shortenerCopyOne(btn, url) {
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('.shortener-copy-btn');
+  if (!btn) return;
+  const url = btn.getAttribute('data-url');
+  if (!url) return;
   navigator.clipboard.writeText(url).then(() => {
     const orig = btn.innerHTML;
     btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Đã copy!';
     btn.classList.add('btn-success'); btn.classList.remove('btn-outline-secondary');
     setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('btn-success'); btn.classList.add('btn-outline-secondary'); }, 1500);
   }).catch(() => showToast('&#10060; Không thể copy','error'));
-}
+});
 
 function shortenerCopyAll() {
   const urlEls = document.querySelectorAll('#shortenerResultList .shortener-result-url');
