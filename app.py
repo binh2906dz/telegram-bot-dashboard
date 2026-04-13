@@ -139,6 +139,16 @@ def init_db():
                 finished_at DATETIME
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS bot_analytics (
+                bot_id TEXT PRIMARY KEY,
+                starts_count INTEGER DEFAULT 0,
+                messages_sent INTEGER DEFAULT 0,
+                interactions_count INTEGER DEFAULT 0,
+                replies_count INTEGER DEFAULT 0,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         conn.commit()
 
 
@@ -182,6 +192,18 @@ _broadcast_all_status: dict = {
 init_db()
 
 
+class _BotManagerStub:
+    """Minimal placeholder before the real BotManager is instantiated."""
+    def notify_change(self):
+        pass
+    def start_in_thread(self):
+        pass
+
+
+# Will be replaced with a real _BotManager instance once the bot block runs
+_bot_manager: _BotManagerStub = _BotManagerStub()
+
+
 def total_posts(albums):
     return sum(len(a.get("posts", [])) for a in albums.values() if isinstance(a, dict))
 
@@ -193,10 +215,72 @@ def subs_file(bot_id: str) -> str:
     return f"subs_{bot_id}.json"
 
 
+def increment_bot_stat(bot_id: str, field: str, count: int = 1):
+    """Atomically increment a stat field in bot_analytics table."""
+    valid_fields = ("starts_count", "messages_sent", "interactions_count", "replies_count")
+    if field not in valid_fields or count <= 0:
+        return
+    try:
+        with get_db() as conn:
+            conn.execute(
+                f"""INSERT INTO bot_analytics (bot_id, {field}, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(bot_id) DO UPDATE SET
+                        {field} = {field} + excluded.{field},
+                        updated_at = CURRENT_TIMESTAMP""",
+                (bot_id, count),
+            )
+            conn.commit()
+    except Exception as e:
+        log.warning("increment_bot_stat failed for %s.%s: %s", bot_id, field, e)
+
+
+def get_all_analytics() -> list:
+    """Return analytics rows for all bots, merged with bot names from bots.json."""
+    bots_cfg = load_json(BOTS_FILE, [])
+    name_map = {b.get("id", ""): b.get("name", "?") for b in bots_cfg}
+    if BOT_TOKEN and "env_default" not in name_map:
+        name_map["env_default"] = "Default Bot"
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT bot_id, starts_count, messages_sent, interactions_count, replies_count FROM bot_analytics"
+            ).fetchall()
+        analytics = []
+        seen = set()
+        for row in rows:
+            bid = row["bot_id"]
+            seen.add(bid)
+            analytics.append({
+                "bot_id": bid,
+                "name": name_map.get(bid, bid),
+                "starts_count": row["starts_count"],
+                "messages_sent": row["messages_sent"],
+                "interactions_count": row["interactions_count"],
+                "replies_count": row["replies_count"],
+            })
+        # Add bots with no analytics yet
+        for bid, bname in name_map.items():
+            if bid not in seen:
+                analytics.append({
+                    "bot_id": bid,
+                    "name": bname,
+                    "starts_count": 0,
+                    "messages_sent": 0,
+                    "interactions_count": 0,
+                    "replies_count": 0,
+                })
+        return analytics
+    except Exception as e:
+        log.warning("get_all_analytics failed: %s", e)
+        return []
+
+
 def increment_messages_sent(bot_id: str, count: int):
-    """Increment the messages-sent counter for a bot in stats.json."""
+    """Increment the messages-sent counter for a bot in stats.json and analytics DB."""
     if count <= 0:
         return
+    increment_bot_stat(bot_id, "messages_sent", count)
     stats = load_json(STATS_FILE, {})
     b = stats.get(bot_id, {})
     b["messages_sent"] = b.get("messages_sent", 0) + count
@@ -1007,8 +1091,10 @@ def add_bot():
         "name": name,
         "token": token,
         "admin_id": admin_id_val,
+        "auto_responder": True,
     })
     save_json(BOTS_FILE, bots)
+    _bot_manager.notify_change()
     return jsonify({"ok": True})
 
 
@@ -1019,7 +1105,27 @@ def delete_bot(bot_id):
     bots = load_json(BOTS_FILE, [])
     bots = [b for b in bots if b.get("id") != bot_id]
     save_json(BOTS_FILE, bots)
+    _bot_manager.notify_change()
     return jsonify({"ok": True})
+
+
+@app.route("/bots/<bot_id>/toggle_responder", methods=["POST"])
+@owner_required
+def toggle_bot_responder(bot_id):
+    """Toggle the auto_responder flag for a bot."""
+    bots = load_json(BOTS_FILE, [])
+    updated = False
+    new_state = None
+    for bot in bots:
+        if bot.get("id") == bot_id:
+            bot["auto_responder"] = not bot.get("auto_responder", True)
+            new_state = bot["auto_responder"]
+            updated = True
+            break
+    if not updated:
+        return jsonify({"ok": False, "error": "Bot không tồn tại"}), 404
+    save_json(BOTS_FILE, bots)
+    return jsonify({"ok": True, "auto_responder": new_state})
 
 
 @app.route("/bots/health", methods=["GET"])
@@ -1028,6 +1134,8 @@ def bots_health():
     """Return health status and per-bot stats for all bots in bots.json."""
     bots_list = load_json(BOTS_FILE, [])
     stats = load_json(STATS_FILE, {})
+    # Load analytics from DB
+    analytics_map = {a["bot_id"]: a for a in get_all_analytics()}
     result = []
     for bot in bots_list:
         token = (bot.get("token") or "").strip()
@@ -1051,13 +1159,32 @@ def bots_health():
         if not bot_subs:
             bot_subs = load_json(SUBS_FILE, [])
         bot_stats = stats.get(bot_id, {})
+        a = analytics_map.get(bot_id, {})
         result.append({
             "id": bot_id,
             "status": status,
+            "auto_responder": bot.get("auto_responder", True),
             "subs_count": len(bot_subs),
-            "messages_sent": bot_stats.get("messages_sent", 0),
+            "messages_sent": a.get("messages_sent", bot_stats.get("messages_sent", 0)),
+            "starts_count": a.get("starts_count", 0),
+            "interactions_count": a.get("interactions_count", 0),
+            "replies_count": a.get("replies_count", 0),
         })
     return jsonify(result)
+
+
+@app.route("/analytics/data", methods=["GET"])
+@login_required
+def analytics_data():
+    """Return aggregated analytics for all bots."""
+    rows = get_all_analytics()
+    totals = {
+        "starts_count": sum(r["starts_count"] for r in rows),
+        "messages_sent": sum(r["messages_sent"] for r in rows),
+        "interactions_count": sum(r["interactions_count"] for r in rows),
+        "replies_count": sum(r["replies_count"] for r in rows),
+    }
+    return jsonify({"ok": True, "totals": totals, "bots": rows})
 
 
 @app.route("/bots/<bot_id>/token", methods=["GET"])
@@ -1544,6 +1671,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
     def _build_ptb_app(token: str, bot_admin_id, bot_cfg_id: str = "env_default"):
         """Build and return a PTB Application for one bot token, with admin handlers
         and subscriber state bound to bot_cfg_id via closures."""
+        from telegram.ext import MessageHandler, filters as tg_filters
 
         _last_sent = [None]  # mutable list so the nested coroutine can update it
         _subs_file = subs_file(bot_cfg_id)
@@ -1554,10 +1682,21 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
             if user_id in banned:
                 await update.message.reply_text("⛔ Bạn đã bị cấm sử dụng bot này.")
                 return
+
+            # Track starts analytics (always, regardless of auto_responder)
+            increment_bot_stat(bot_cfg_id, "starts_count")
+
             bot_subs = load_json(_subs_file, [])
             if user_id not in bot_subs:
                 bot_subs.append(user_id)
                 save_json(_subs_file, bot_subs)
+
+            # Check auto_responder flag dynamically (can be toggled without restart)
+            bots_cfg = load_json(BOTS_FILE, [])
+            bot_entry = next((b for b in bots_cfg if b.get("id") == bot_cfg_id), None)
+            auto_responder = bot_entry.get("auto_responder", True) if bot_entry else True
+            if not auto_responder:
+                return
 
             # Send slogans sequentially if enabled
             slogans_cfg = load_json(SLOGANS_FILE, {"enabled": False, "items": []})
@@ -1594,6 +1733,27 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
 
+        async def track_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            """Count incoming text messages (user replies) for analytics."""
+            increment_bot_stat(bot_cfg_id, "replies_count")
+
+        async def track_interaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            """Track callback query interactions before delegating to real handlers."""
+            # Only count once; actual handling is done by other handlers (menu/flow/album_click)
+            increment_bot_stat(bot_cfg_id, "interactions_count")
+
+        async def menu_tracked(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            await track_interaction(update, context)
+            await menu(update, context)
+
+        async def flow_handler_tracked(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            await track_interaction(update, context)
+            await flow_handler(update, context)
+
+        async def album_click_tracked(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            await track_interaction(update, context)
+            await album_click(update, context)
+
         async def set_time_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not bot_admin_id or update.effective_chat.id != bot_admin_id:
                 return
@@ -1614,14 +1774,17 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
             bot_subs = load_json(_subs_file, [])
             albums = load_json(ALBUMS_FILE, {})
             total = total_posts(albums)
-            stats = load_json(STATS_FILE, {})
-            sent = stats.get(bot_cfg_id, {}).get("messages_sent", 0)
+            a_rows = get_all_analytics()
+            a_data = next((r for r in a_rows if r["bot_id"] == bot_cfg_id), {})
             await update.message.reply_text(
                 f"📊 Thống kê Bot:\n"
                 f"👥 Người đăng ký: {len(bot_subs)}\n"
                 f"📁 Albums: {len(albums)}\n"
                 f"📝 Bài viết: {total}\n"
-                f"📤 Tin đã gửi: {sent}"
+                f"▶️ Lượt /start: {a_data.get('starts_count', 0)}\n"
+                f"📤 Tin đã gửi: {a_data.get('messages_sent', 0)}\n"
+                f"🖱️ Tương tác nút: {a_data.get('interactions_count', 0)}\n"
+                f"💬 Phản hồi: {a_data.get('replies_count', 0)}"
             )
 
         async def sendall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1706,74 +1869,121 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         ptb_app.add_handler(CommandHandler("stats", stats_cmd))
         ptb_app.add_handler(CommandHandler("sendall", sendall_cmd))
         ptb_app.add_handler(CommandHandler("ban", ban_cmd))
-        ptb_app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
-        ptb_app.add_handler(CallbackQueryHandler(flow_handler, pattern="^flow_"))
-        ptb_app.add_handler(CallbackQueryHandler(album_click))
+        ptb_app.add_handler(CallbackQueryHandler(menu_tracked, pattern="^menu$"))
+        ptb_app.add_handler(CallbackQueryHandler(flow_handler_tracked, pattern="^flow_"))
+        ptb_app.add_handler(CallbackQueryHandler(album_click_tracked))
+        # Track non-command text messages as user replies
+        ptb_app.add_handler(MessageHandler(tg_filters.TEXT & ~tg_filters.COMMAND, track_reply))
         ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
         ptb_app.job_queue.run_daily(daily_backup_job, time=dt_time(1, 0, 0, tzinfo=timezone.utc))
         return ptb_app
 
-    def run_bot_thread():
-        """Start all configured bots concurrently in one asyncio event loop."""
-        bots_cfg = load_json(BOTS_FILE, [])
-        # Fallback: if bots.json is empty, use the env-var token to bootstrap
-        if not bots_cfg:
-            if BOT_TOKEN:
+    class _BotManager:
+        """Dynamically manages PTB bot instances: starts new bots and stops removed bots
+        by periodically reloading bots.json without requiring a server restart."""
+
+        def __init__(self):
+            self._running_apps: dict = {}  # {bot_id: ptb_app}
+            self._loop: asyncio.AbstractEventLoop | None = None
+            self._reload_event: asyncio.Event | None = None
+
+        def notify_change(self):
+            """Signal that bots.json has changed; triggers an immediate reload cycle."""
+            if self._loop and self._reload_event and not self._loop.is_closed():
+                self._loop.call_soon_threadsafe(self._reload_event.set)
+
+        async def _reload(self):
+            """Sync running PTB apps with the current bots.json on disk."""
+            bots_cfg = load_json(BOTS_FILE, [])
+            if not bots_cfg and BOT_TOKEN:
                 bots_cfg = [{"id": "env_default", "name": "Default Bot",
                               "token": BOT_TOKEN, "admin_id": ADMIN_ID}]
-            else:
-                log.warning("No bots configured – bot disabled")
-                return
 
-        async def _run_all():
-            ptb_apps = []
+            current_ids = {
+                b.get("id") for b in bots_cfg if (b.get("token") or "").strip()
+            }
+            running_ids = set(self._running_apps.keys())
+
+            # Stop apps for bots that have been removed
+            for bot_id in list(running_ids - current_ids):
+                ptb = self._running_apps.pop(bot_id)
+                try:
+                    await ptb.updater.stop()
+                    await ptb.stop()
+                    await ptb.shutdown()
+                    log.info("Bot %s stopped and removed", bot_id)
+                except Exception as exc:
+                    log.warning("Error stopping bot %s: %s", bot_id, exc)
+
+            # Start apps for newly added bots
             for cfg_entry in bots_cfg:
+                bot_id = cfg_entry.get("id", "env_default")
                 token = (cfg_entry.get("token") or "").strip()
-                if not token:
-                    log.warning(f"Bot '{cfg_entry.get('name', '?')}' has no token – skipping")
+                if not token or bot_id in self._running_apps:
                     continue
-                _aid_raw = cfg_entry.get("admin_id")
-                _aid = int(_aid_raw) if _aid_raw and str(_aid_raw).isdigit() else ADMIN_ID
-                _bid = cfg_entry.get("id", "env_default")
-                ptb_apps.append(_build_ptb_app(token, _aid, _bid))
+                try:
+                    _aid_raw = cfg_entry.get("admin_id")
+                    _aid = int(_aid_raw) if _aid_raw and str(_aid_raw).isdigit() else ADMIN_ID
+                    ptb = _build_ptb_app(token, _aid, bot_id)
+                    await ptb.initialize()
+                    await ptb.start()
+                    await ptb.updater.start_polling(
+                        allowed_updates=["message", "callback_query"],
+                        drop_pending_updates=True,
+                    )
+                    self._running_apps[bot_id] = ptb
+                    log.info("✅ Bot %s (%s) started polling", bot_id, cfg_entry.get("name", "?"))
+                except Exception as exc:
+                    log.error("Failed to start bot %s: %s", bot_id, exc)
 
-            if not ptb_apps:
-                log.warning("No valid bot tokens found – bot disabled")
-                return
+        async def _manage(self):
+            """Main async management loop: reload on signal or every 30 s."""
+            self._reload_event = asyncio.Event()
+            await self._reload()
+            while True:
+                try:
+                    await asyncio.wait_for(self._reload_event.wait(), timeout=30.0)
+                    self._reload_event.clear()
+                except asyncio.TimeoutError:
+                    pass
+                await self._reload()
 
-            for a in ptb_apps:
-                await a.initialize()
-                await a.start()
-                await a.updater.start_polling(
-                    allowed_updates=["message", "callback_query"],
-                    drop_pending_updates=True,
-                )
-            log.info(f"✅ {len(ptb_apps)} bot(s) started successfully")
+        def start_in_thread(self):
+            """Run the management loop in a dedicated daemon thread."""
+            def _run():
+                self._loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self._loop)
+                try:
+                    self._loop.run_until_complete(self._manage())
+                except Exception as exc:
+                    log.error("BotManager loop error: %s", exc)
+            t = threading.Thread(target=_run, daemon=True, name="bot-manager")
+            t.start()
+            return t
 
-            try:
-                while True:
-                    await asyncio.sleep(3600)
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                pass
-            finally:
-                for a in reversed(ptb_apps):
-                    try:
-                        await a.updater.stop()
-                        await a.stop()
-                        await a.shutdown()
-                    except Exception as exc:
-                        log.warning(f"Error stopping bot: {exc}")
+    _bot_manager = _BotManager()
+
+    def run_bot_thread():
+        """Entry point called by run_bot.py — runs the dynamic BotManager loop."""
+        bots_cfg = load_json(BOTS_FILE, [])
+        if not bots_cfg and not BOT_TOKEN:
+            log.warning("No bots configured – bot disabled")
+            return
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        manager = _BotManager()
         try:
-            loop.run_until_complete(_run_all())
+            loop.run_until_complete(manager._manage())
         except Exception as e:
-            log.error(f"Bot thread error: {e}")
+            log.error("Bot thread error: %s", e)
             raise
 
 else:
     log.warning("No bot token configured – bot disabled, Flask only")
+
+    def run_bot_thread():  # type: ignore[no-redef]
+        log.warning("run_bot_thread called but no bot token configured")
 
 
 # ===== APSCHEDULER — automated daily backup at 0:01 AM Vietnam Time =====
