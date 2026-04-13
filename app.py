@@ -1544,7 +1544,7 @@ def shortener_shorten():
                 results.append({"ok": False, "error": f"Phản hồi không hợp lệ: {raw[:120]}"})
         except Exception as exc:
             log.warning(f"shortener_shorten API call error: {exc}")
-            results.append({"ok": False, "error": f"Lỗi: {exc}"})
+            results.append({"ok": False, "error": "Lỗi: Không thể kết nối hoặc API không phản hồi"})
 
     return jsonify({"ok": True, "results": results})
 
