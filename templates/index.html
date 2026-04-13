@@ -8,1543 +8,983 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
   <style>
     :root {
-      --accent: #ff5e00;
-      --accent-light: #ff8533;
-      --card-bg: #1a1d23;
-      --sidebar-bg: #13151a;
-      --body-bg: #0f1117;
-      --border-color: #2a2d35;
+      --accent: #ff5e00; --accent-light: #ff8533;
+      --card-bg: #1a1d23; --sidebar-bg: #13151a;
+      --sidebar-width: 240px; --topbar-height: 56px;
+      --body-bg: #0f1117; --border-color: #2a2d35;
     }
-
-    body {
-      background-color: var(--body-bg);
-      color: #e0e0e0;
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      min-height: 100vh;
-    }
-
-    /* ---- Topbar ---- */
-    .topbar {
-      background: var(--sidebar-bg);
-      border-bottom: 1px solid var(--border-color);
-      padding: 12px 20px;
-      position: sticky;
-      top: 0;
-      z-index: 1000;
-    }
-
-    .topbar .brand {
-      font-size: 1.15rem;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      color: var(--accent);
-    }
-
-    /* ---- Stats cards ---- */
-    .stat-card {
-      background: var(--card-bg);
-      border: 1px solid var(--border-color);
-      border-radius: 14px;
-      padding: 18px 22px;
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      transition: transform .15s, box-shadow .15s;
-    }
-
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { background: var(--body-bg); color: #e0e0e0; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; }
+    .topbar { height: var(--topbar-height); background: var(--sidebar-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; padding: 0 16px; gap: 12px; position: fixed; top: 0; left: 0; right: 0; z-index: 1050; }
+    .topbar .brand { font-size: 1.1rem; font-weight: 700; color: var(--accent); white-space: nowrap; margin-right: auto; }
+    .sidebar-toggle { background: none; border: none; color: #ccc; font-size: 1.4rem; cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+    .sidebar-toggle:hover { background: rgba(255,255,255,.06); }
+    .layout { display: flex; flex: 1; margin-top: var(--topbar-height); overflow: hidden; }
+    .sidebar { width: var(--sidebar-width); min-width: var(--sidebar-width); background: var(--sidebar-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; height: calc(100vh - var(--topbar-height)); position: fixed; top: var(--topbar-height); left: 0; z-index: 1040; transition: transform .25s ease; overflow-y: auto; }
+    .sidebar.collapsed { transform: translateX(calc(-1 * var(--sidebar-width))); }
+    .nav-section-label { font-size: .68rem; text-transform: uppercase; color: #555; font-weight: 700; letter-spacing: 1px; padding: 16px 16px 6px; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; font-size: .9rem; color: #aaa; border-left: 3px solid transparent; user-select: none; transition: background .15s, color .15s; }
+    .nav-item:hover { background: rgba(255,255,255,.04); color: #e0e0e0; }
+    .nav-item.active { color: var(--accent); background: rgba(255,94,0,.08); border-left-color: var(--accent); }
+    .nav-item i { font-size: 1rem; width: 20px; text-align: center; }
+    .sidebar-footer { margin-top: auto; padding: 12px 16px; border-top: 1px solid var(--border-color); }
+    .main-content { flex: 1; margin-left: var(--sidebar-width); transition: margin-left .25s ease; overflow-y: auto; height: calc(100vh - var(--topbar-height)); padding: 24px 20px; }
+    .main-content.expanded { margin-left: 0; }
+    .section-page { display: none; }
+    .section-page.active { display: block; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+    .page-title { font-size: 1.2rem; font-weight: 700; color: #fff; }
+    .page-title i { color: var(--accent); margin-right: 8px; }
+    .stat-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 18px 20px; display: flex; align-items: center; gap: 14px; transition: transform .15s, box-shadow .15s; }
     .stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(0,0,0,.4); }
-
-    .stat-icon {
-      width: 52px; height: 52px;
-      border-radius: 12px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.5rem;
-    }
-
+    .stat-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; flex-shrink: 0; }
     .stat-icon.orange { background: rgba(255,94,0,.15); color: var(--accent); }
     .stat-icon.blue   { background: rgba(0,120,255,.15); color: #4d9fff; }
     .stat-icon.green  { background: rgba(0,200,83,.15);  color: #00c853; }
-
-    .stat-value { font-size: 1.8rem; font-weight: 700; line-height: 1; }
-    .stat-label { font-size: .78rem; color: #888; margin-top: 2px; }
-
-    /* ---- Section header ---- */
-    .section-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-    }
-
-    .section-title {
-      font-size: 1.05rem;
-      font-weight: 600;
-      color: #ccc;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-    }
-
-    /* ---- Album card ---- */
-    .album-card {
-      background: var(--card-bg);
-      border: 1px solid var(--border-color);
-      border-radius: 14px;
-      overflow: hidden;
-      transition: box-shadow .15s;
-    }
-
-    .album-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.5); }
-
-    .album-card.active-album { border-color: var(--accent); }
-
-    .album-header {
-      padding: 14px 18px;
-      background: rgba(255,255,255,.03);
-      border-bottom: 1px solid var(--border-color);
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-
-    .album-title { font-weight: 600; font-size: .98rem; }
-    .album-desc  { font-size: .8rem; color: #777; margin-top: 1px; }
-
-    .badge-posts {
-      background: rgba(255,94,0,.2);
-      color: var(--accent);
-      border-radius: 20px;
-      padding: 2px 10px;
-      font-size: .75rem;
-      font-weight: 600;
-    }
-
-    /* ---- Add-post form area ---- */
-    .add-post-panel {
-      background: rgba(255,94,0,.05);
-      border-bottom: 1px solid var(--border-color);
-      padding: 16px 18px;
-    }
-
-    /* ---- Post item ---- */
-    .post-item {
-      border: 1px solid var(--border-color);
-      border-radius: 10px;
-      padding: 14px;
-      background: rgba(255,255,255,.02);
-      position: relative;
-    }
-
-    .post-caption {
-      font-size: .9rem;
-      color: #ccc;
-      margin-bottom: 10px;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
-    .photo-thumb {
-      width: 80px; height: 80px;
-      object-fit: cover;
-      border-radius: 8px;
-      border: 1px solid var(--border-color);
-      cursor: pointer;
-      transition: transform .15s;
-    }
-
-    .photo-thumb:hover { transform: scale(1.05); }
-
-    /* ---- Empty state ---- */
-    .empty-state {
-      text-align: center;
-      padding: 40px 20px;
-      color: #555;
-    }
-
-    .empty-state i { font-size: 2.5rem; display: block; margin-bottom: 12px; }
-
-    /* ---- Btn accent ---- */
-    .btn-accent {
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      font-weight: 600;
-    }
-
+    .stat-icon.red    { background: rgba(244,67,54,.15);  color: #f44336; }
+    .stat-icon.purple { background: rgba(156,39,176,.15); color: #ce93d8; }
+    .stat-icon.yellow { background: rgba(255,193,7,.15);  color: #ffc107; }
+    .stat-value { font-size: 1.7rem; font-weight: 700; line-height: 1.1; }
+    .stat-label { font-size: .76rem; color: #888; margin-top: 2px; }
+    .dash-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; overflow: hidden; }
+    .dash-card-header { padding: 14px 18px; background: rgba(255,255,255,.03); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+    .dash-card-title { font-size: .9rem; font-weight: 600; color: #ccc; text-transform: uppercase; letter-spacing: .6px; }
+    .dash-card-body { padding: 16px 18px; }
+    .btn-accent { background: var(--accent); color: #fff; border: none; font-weight: 600; }
     .btn-accent:hover { background: var(--accent-light); color: #fff; }
-
-    /* ---- Upload drop zone ---- */
-    .drop-zone {
-      border: 2px dashed var(--border-color);
-      border-radius: 10px;
-      padding: 20px;
-      text-align: center;
-      cursor: pointer;
-      transition: border-color .2s, background .2s;
-      background: rgba(255,255,255,.02);
-    }
-
-    .drop-zone:hover, .drop-zone.dragover {
-      border-color: var(--accent);
-      background: rgba(255,94,0,.05);
-    }
-
-    .drop-zone input[type=file] {
-      position: absolute; opacity: 0; width: 100%; height: 100%;
-      top: 0; left: 0; cursor: pointer;
-    }
-
-    /* ---- Preview grid ---- */
-    .preview-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-    .preview-grid img { width: 70px; height: 70px; object-fit: cover; border-radius: 6px; }
-    .preview-grid .remove-thumb {
-      position: relative;
-    }
-    .preview-grid .remove-thumb::after {
-      content: '×';
-      position: absolute; top: -6px; right: -6px;
-      width: 18px; height: 18px;
-      background: #e33; color: #fff;
-      border-radius: 50%; font-size: 12px;
-      display: flex; align-items: center; justify-content: center;
-      cursor: pointer;
-      line-height: 18px; text-align: center;
-    }
-
-    /* ---- Modal ---- */
-    .modal-content {
-      background: var(--card-bg);
-      border: 1px solid var(--border-color);
-      border-radius: 16px;
-    }
-
-    .modal-header { border-bottom: 1px solid var(--border-color); }
-    .modal-footer { border-top: 1px solid var(--border-color); }
-
-    /* ---- Form controls ---- */
-    .form-control, .form-control:focus {
-      background: #0f1117;
-      border-color: var(--border-color);
-      color: #e0e0e0;
-    }
-
-    .form-control:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(255,94,0,.15);
-    }
-
-    textarea.form-control { resize: vertical; }
-
-    /* ---- Spinner ---- */
-    .upload-spinner { display: none; }
-
-    /* ---- Bot management table ---- */
-    .bot-table th { font-size: .78rem; text-transform: uppercase; color: #888; font-weight: 600; }
-    .bot-table td { font-size: .88rem; vertical-align: middle; }
-    .bot-token-mask { font-family: monospace; letter-spacing: .5px; color: #aaa; font-size: .78rem; }
-
-    /* ---- Status badges ---- */
+    .data-table th { font-size: .75rem; text-transform: uppercase; color: #777; font-weight: 600; }
+    .data-table td { font-size: .85rem; vertical-align: middle; }
+    .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 20px; font-size: .72rem; font-weight: 600; }
+    .status-active  { background: rgba(0,200,83,.15); color: #00c853; }
+    .status-blocked { background: rgba(244,67,54,.15); color: #f44336; }
+    .status-invalid { background: rgba(255,152,0,.15); color: #ff9800; }
+    .status-unknown { background: rgba(150,150,150,.15); color: #999; }
     .status-live  { color: #00c853; font-weight: 700; font-size: .82rem; }
     .status-ban   { color: #f44336; font-weight: 700; font-size: .82rem; }
     .status-error { color: #ff9800; font-weight: 700; font-size: .82rem; }
-    .status-checking { color: #888; font-size: .82rem; }
-
-    /* ---- Button list in message management ---- */
-    .btn-row {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      background: rgba(255,255,255,.03);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 8px 10px;
-      margin-bottom: 8px;
+    .form-control, .form-control:focus, .form-select, .form-select:focus { background: #0f1117; border-color: var(--border-color); color: #e0e0e0; }
+    .form-control:focus, .form-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,94,0,.12); }
+    textarea.form-control { resize: vertical; }
+    .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; }
+    .modal-header { border-bottom: 1px solid var(--border-color); }
+    .modal-footer { border-top: 1px solid var(--border-color); }
+    .drop-zone { border: 2px dashed var(--border-color); border-radius: 10px; padding: 24px; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; background: rgba(255,255,255,.02); position: relative; }
+    .drop-zone:hover, .drop-zone.dragover { border-color: var(--accent); background: rgba(255,94,0,.05); }
+    .preview-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .preview-grid img { width: 70px; height: 70px; object-fit: cover; border-radius: 6px; }
+    .photo-thumb { width: 80px; height: 80px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border-color); cursor: pointer; transition: transform .15s; }
+    .photo-thumb:hover { transform: scale(1.05); }
+    .album-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; overflow: hidden; transition: box-shadow .15s; margin-bottom: 16px; }
+    .album-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.5); }
+    .album-card.active-album { border-color: var(--accent); }
+    .bot-token-mask { font-family: monospace; letter-spacing: .5px; color: #aaa; font-size: .78rem; }
+    .progress { background: rgba(255,255,255,.06); height: 8px; }
+    .empty-state { text-align: center; padding: 40px 20px; color: #555; }
+    .empty-state i { font-size: 2.5rem; display: block; margin-bottom: 12px; }
+    .config-tabs .nav-link { color: #aaa; border: none; border-bottom: 2px solid transparent; background: none; padding: 10px 18px; font-size: .88rem; font-weight: 500; border-radius: 0; }
+    .config-tabs .nav-link.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .config-tabs .nav-link:hover { color: #e0e0e0; background: rgba(255,255,255,.03); }
+    .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1039; }
+    .sidebar-overlay.show { display: block; }
+    @media (max-width: 768px) {
+      .sidebar { transform: translateX(calc(-1 * var(--sidebar-width))); }
+      .sidebar.mobile-open { transform: translateX(0); }
+      .main-content { margin-left: 0; }
     }
-    .btn-row .btn-row-inputs { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; }
-    .btn-row .btn-row-inputs input { min-width: 120px; flex: 1; }
-
-    /* ---- Responsive topbar ---- */
-    @media (max-width: 767px) {
-      .topbar-actions { display: none; flex-direction: column; width: 100%; gap: 6px; padding-top: 10px; }
-      .topbar-actions.show { display: flex; }
-      .topbar-actions .btn { width: 100%; text-align: left; justify-content: flex-start; }
+    @media (min-width: 769px) {
+      .sidebar.collapsed { transform: translateX(calc(-1 * var(--sidebar-width))); }
+      .main-content.expanded { margin-left: 0; }
     }
-
-    /* ---- Lightbox ---- */
-    #lightbox {
-      display: none;
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,.92);
-      z-index: 9999;
-      align-items: center;
-      justify-content: center;
-    }
-
+    #lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.92); z-index: 9999; align-items: center; justify-content: center; }
     #lightbox.show { display: flex; }
     #lightbox img { max-width: 92vw; max-height: 90vh; border-radius: 8px; }
-    #lightbox .close-lb {
-      position: absolute; top: 18px; right: 22px;
-      font-size: 2rem; color: #fff; cursor: pointer;
-    }
+    #lightbox .close-lb { position: absolute; top: 18px; right: 22px; font-size: 2rem; color: #fff; cursor: pointer; }
   </style>
 </head>
 <body>
 
-<!-- ========== TOPBAR ========== -->
+<!-- TOPBAR -->
 <div class="topbar">
-  <div class="d-flex align-items-center justify-content-between">
-    <span class="brand"><i class="bi bi-fire me-2"></i>DASHBOARD VIP</span>
-    <div class="d-flex align-items-center gap-2">
-      <!-- Online badge always visible -->
-      <span class="badge bg-success rounded-pill d-none d-sm-inline-flex"><i class="bi bi-circle-fill me-1" style="font-size:.5rem;"></i>Online</span>
-      <!-- User badge always visible -->
-      <span class="badge bg-secondary rounded-pill">
-        <i class="bi bi-person-fill me-1"></i>
-        {{ username }}
-        {% if role == 'owner' %}<span class="ms-1 text-warning">👑</span>{% endif %}
-      </span>
-      <!-- Hamburger toggle for mobile -->
-      <button class="btn btn-sm btn-outline-secondary d-md-none" id="topbarToggle" onclick="toggleTopbar()">
-        <i class="bi bi-list fs-5"></i>
-      </button>
-    </div>
-  </div>
-  <!-- Collapsible actions area -->
-  <div class="topbar-actions d-md-flex flex-md-row align-items-md-center gap-2 flex-wrap justify-content-md-end mt-md-0" id="topbarActions">
-    <!-- Broadcast button (all roles) -->
-    <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#broadcastModal">
-      <i class="bi bi-megaphone-fill me-1"></i>Gửi Thông Báo 📢
-    </button>
-    <!-- Schedule settings (all roles) -->
-    <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#scheduleModal">
-      <i class="bi bi-clock-fill me-1"></i>Cài đặt giờ
-    </button>
-    <!-- Utilities dropdown (owner only) -->
-    {% if role == 'owner' %}
-    <div class="dropdown">
-      <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-        <i class="bi bi-tools me-1"></i>Tiện ích
-      </button>
-      <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
-        <li><h6 class="dropdown-header"><i class="bi bi-shield-check me-1"></i>Hệ thống</h6></li>
-        <li>
-          <button class="dropdown-item" id="btnBackup" onclick="doBackup(this)">
-            <i class="bi bi-cloud-arrow-up me-2"></i>Sao lưu thủ công
-          </button>
-        </li>
-        <li>
-          <button class="dropdown-item" id="btnRestore" onclick="doRestore(this)">
-            <i class="bi bi-cloud-arrow-down me-2"></i>Khôi phục dữ liệu
-          </button>
-        </li>
-      </ul>
-    </div>
-    {% endif %}
-    <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#createAlbumModal">
-      <i class="bi bi-plus-lg me-1"></i>Tạo Album
-    </button>
-    <!-- Logout -->
-    <a href="/logout" class="btn btn-sm btn-outline-danger">
-      <i class="bi bi-box-arrow-right me-1"></i>Đăng xuất
-    </a>
-  </div>
+  <button class="sidebar-toggle" onclick="toggleSidebar()"><i class="bi bi-list"></i></button>
+  <span class="brand"><i class="bi bi-fire me-1"></i>DASHBOARD VIP</span>
+  <span class="badge bg-success rounded-pill d-none d-sm-inline-flex"><i class="bi bi-circle-fill me-1" style="font-size:.5rem;"></i>Online</span>
+  <span class="badge bg-secondary rounded-pill ms-1"><i class="bi bi-person-fill me-1"></i>{{ username }}{% if role == 'owner' %}<span class="ms-1 text-warning">&#128081;</span>{% endif %}</span>
+  <a href="/logout" class="btn btn-sm btn-outline-danger ms-2"><i class="bi bi-box-arrow-right me-1"></i><span class="d-none d-sm-inline">Đăng xuất</span></a>
 </div>
 
-<!-- ========== MAIN CONTENT ========== -->
-<div class="container-fluid px-3 px-md-4 py-4" style="max-width:960px; margin:auto;">
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
-  <!-- Stats row -->
-  <div class="row g-3 mb-4">
-    <div class="col-12 col-md-4">
-      <div class="stat-card">
-        <div class="stat-icon orange"><i class="bi bi-people-fill"></i></div>
-        <div>
-          <div class="stat-value">{{ subs|length }}</div>
-          <div class="stat-label">Người đăng ký</div>
+<div class="layout">
+  <!-- Sidebar -->
+  <nav class="sidebar" id="sidebar">
+    <div style="padding-top:8px;"></div>
+    <div class="nav-section-label">Tổng quan</div>
+    <div class="nav-item active" id="nav-dashboard" onclick="showSection('dashboard')"><i class="bi bi-speedometer2"></i> Dashboard</div>
+    <div class="nav-section-label">Quản lý</div>
+    <div class="nav-item" id="nav-bots" onclick="showSection('bots')"><i class="bi bi-robot"></i> Quản lý Bot</div>
+    <div class="nav-item" id="nav-ids" onclick="showSection('ids')"><i class="bi bi-people-fill"></i> Quản lý ID</div>
+    <div class="nav-item" id="nav-albums" onclick="showSection('albums')"><i class="bi bi-collection"></i> Albums</div>
+    <div class="nav-section-label">Cài đặt</div>
+    <div class="nav-item" id="nav-config" onclick="showSection('config')"><i class="bi bi-gear-fill"></i> Cấu hình Bot</div>
+    <div class="nav-section-label">Hệ thống</div>
+    <div class="nav-item" id="nav-system" onclick="showSection('system')"><i class="bi bi-shield-fill"></i> Backup &amp; Hệ thống</div>
+    <div class="sidebar-footer"><div style="font-size:.72rem; color:#555;"><i class="bi bi-database me-1"></i>SQLite · Cloudinary · APScheduler</div></div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="main-content" id="mainContent">
+
+    <!-- DASHBOARD SECTION -->
+    <div class="section-page active" id="section-dashboard">
+      <div class="page-header">
+        <span class="page-title"><i class="bi bi-speedometer2"></i>Dashboard</span>
+        <span class="text-muted" style="font-size:.8rem;"><i class="bi bi-clock me-1"></i><span id="dashClock"></span></span>
+      </div>
+      <div class="row g-3 mb-4">
+        <div class="col-6 col-md-4 col-lg-2">
+          <div class="stat-card"><div class="stat-icon orange"><i class="bi bi-robot"></i></div><div><div class="stat-value">{{ bots|length }}</div><div class="stat-label">Bot đang có</div></div></div>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+          <div class="stat-card"><div class="stat-icon blue"><i class="bi bi-people-fill"></i></div><div><div class="stat-value">{{ subs|length }}</div><div class="stat-label">Subscribers</div></div></div>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+          <div class="stat-card"><div class="stat-icon green"><i class="bi bi-person-check-fill"></i></div><div><div class="stat-value">{{ id_stats.active }}</div><div class="stat-label">ID Active</div></div></div>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+          <div class="stat-card"><div class="stat-icon red"><i class="bi bi-person-x-fill"></i></div><div><div class="stat-value">{{ id_stats.blocked + id_stats.invalid }}</div><div class="stat-label">Blocked/Invalid</div></div></div>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+          <div class="stat-card"><div class="stat-icon purple"><i class="bi bi-images"></i></div><div><div class="stat-value">{{ albums|length }}</div><div class="stat-label">Albums</div></div></div>
+        </div>
+        <div class="col-6 col-md-4 col-lg-2">
+          <div class="stat-card"><div class="stat-icon yellow"><i class="bi bi-file-earmark-image"></i></div><div><div class="stat-value">{{ total_posts }}</div><div class="stat-label">Bài viết</div></div></div>
         </div>
       </div>
-    </div>
-    <div class="col-12 col-md-4">
-      <div class="stat-card">
-        <div class="stat-icon blue"><i class="bi bi-images"></i></div>
-        <div>
-          <div class="stat-value">{{ albums|length }}</div>
-          <div class="stat-label">Albums</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-12 col-md-4">
-      <div class="stat-card">
-        <div class="stat-icon green"><i class="bi bi-file-earmark-image"></i></div>
-        <div>
-          <div class="stat-value">{{ total_posts }}</div>
-          <div class="stat-label">Bài viết</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Albums section -->
-  <div class="section-header">
-    <span class="section-title"><i class="bi bi-collection me-2"></i>Albums</span>
-    <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#createAlbumModal">
-      <i class="bi bi-plus-lg me-1"></i>Tạo Album mới
-    </button>
-  </div>
-
-  {% if albums %}
-    {% for album_id, album in albums.items() %}
-    <div class="album-card mb-3 {% if active_album == album_id %}active-album{% endif %}" id="album-{{ album_id }}">
-
-      <!-- Album header -->
-      <div class="album-header">
-        <div class="flex-grow-1">
-          <div class="album-title">
-            <i class="bi bi-folder2-open me-2" style="color:var(--accent);"></i>
-            {{ album.title if album.title else album_id }}
+      <div class="row g-3">
+        <div class="col-12 col-md-6">
+          <div class="dash-card">
+            <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-lightning-fill me-2" style="color:var(--accent);"></i>Hành động nhanh</span></div>
+            <div class="dash-card-body d-flex flex-wrap gap-2">
+              <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#broadcastModal"><i class="bi bi-megaphone-fill me-1"></i>Gửi thông báo</button>
+              <button class="btn btn-sm btn-accent" onclick="showSection('ids')"><i class="bi bi-cloud-upload me-1"></i>Upload IDs</button>
+              <button class="btn btn-sm btn-outline-info" onclick="showSection('albums')"><i class="bi bi-folder-plus me-1"></i>Tạo Album</button>
+              {% if role == 'owner' %}<a href="/backup/download" class="btn btn-sm btn-outline-warning"><i class="bi bi-download me-1"></i>Tải Backup</a>{% endif %}
+            </div>
           </div>
-          {% if album.description %}
-          <div class="album-desc">{{ album.description }}</div>
+        </div>
+        <div class="col-12 col-md-6">
+          <div class="dash-card">
+            <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-bar-chart-fill me-2" style="color:#4d9fff;"></i>Thống kê ID</span></div>
+            <div class="dash-card-body">
+              <div class="d-flex flex-wrap gap-3 mb-2">
+                <div><div style="font-size:.8rem;color:#888;">Tổng</div><div style="font-size:1.3rem;font-weight:700;">{{ id_stats.total }}</div></div>
+                <div><div style="font-size:.8rem;color:#888;">Chưa test</div><div style="font-size:1.3rem;font-weight:700;color:#aaa;">{{ id_stats.unknown }}</div></div>
+                <div><div style="font-size:.8rem;color:#888;">Active</div><div style="font-size:1.3rem;font-weight:700;color:#00c853;">{{ id_stats.active }}</div></div>
+                <div><div style="font-size:.8rem;color:#888;">Blocked</div><div style="font-size:1.3rem;font-weight:700;color:#f44336;">{{ id_stats.blocked }}</div></div>
+                <div><div style="font-size:.8rem;color:#888;">Invalid</div><div style="font-size:1.3rem;font-weight:700;color:#ff9800;">{{ id_stats.invalid }}</div></div>
+              </div>
+              {% if id_stats.total > 0 %}
+              <div class="progress" style="height:10px;border-radius:10px;">
+                <div class="progress-bar bg-success" style="width:{{ (id_stats.active / id_stats.total * 100)|round(1) }}%"></div>
+                <div class="progress-bar bg-danger"  style="width:{{ (id_stats.blocked / id_stats.total * 100)|round(1) }}%"></div>
+                <div class="progress-bar bg-warning" style="width:{{ (id_stats.invalid / id_stats.total * 100)|round(1) }}%"></div>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BOT MANAGEMENT SECTION -->
+    <div class="section-page" id="section-bots">
+      <div class="page-header">
+        <span class="page-title"><i class="bi bi-robot"></i>Quản lý Bot</span>
+        {% if role == 'owner' %}
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-info" onclick="loadBotHealth(this)"><i class="bi bi-activity me-1"></i>Kiểm tra trạng thái</button>
+          <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#addBotModal"><i class="bi bi-plus-lg me-1"></i>Thêm Bot</button>
+        </div>
+        {% endif %}
+      </div>
+      <div class="dash-card">
+        <div class="dash-card-body p-0">
+          {% if bots %}
+          <div class="table-responsive">
+            <table class="table table-dark table-borderless data-table mb-0" id="botsTable">
+              <thead><tr><th class="ps-3">Tên Bot</th><th>Token</th><th>Admin ID</th><th>Trạng thái</th><th>Subscribers</th><th>Đã gửi</th><th style="width:50px;"></th></tr></thead>
+              <tbody>
+                {% for bot in bots %}
+                <tr id="bot-row-{{ bot.id }}">
+                  <td class="ps-3"><i class="bi bi-robot me-2" style="color:var(--accent);"></i>{{ bot.name }}</td>
+                  <td><span class="bot-token-mask">{{ bot.token[:4] }}&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;</span></td>
+                  <td>{{ bot.admin_id if bot.admin_id else '&#8212;' }}</td>
+                  <td id="bot-status-{{ bot.id }}"><span class="text-muted" style="font-size:.8rem;">&#8212;</span></td>
+                  <td id="bot-subs-{{ bot.id }}">&#8212;</td>
+                  <td id="bot-msgs-{{ bot.id }}">&#8212;</td>
+                  <td>{% if role == 'owner' %}<button class="btn btn-sm btn-outline-danger" onclick="doDeleteBot('{{ bot.id }}', '{{ bot.name }}', this)"><i class="bi bi-trash3"></i></button>{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="empty-state py-5"><i class="bi bi-robot" style="font-size:2.5rem;color:var(--accent);"></i><p class="mt-2">Chưa có bot nào.</p></div>
           {% endif %}
         </div>
-        <span class="badge-posts">{{ album.posts|length if album.posts else 0 }} bài</span>
-        <button class="btn btn-sm btn-success ms-2"
-                onclick="toggleAddPost('{{ album_id }}')"
-                title="Thêm bài viết">
-          <i class="bi bi-plus-lg"></i> Thêm bài
-        </button>
-        {% if role == 'owner' %}
-        <form action="/albums/{{ album_id }}/delete" method="post" class="d-inline ms-1"
-              onsubmit="return confirm('Xóa album «{{ album.title }}»?')">
-          <button type="submit" class="btn btn-sm btn-outline-danger" title="Xóa album">
-            <i class="bi bi-trash3"></i>
-          </button>
-        </form>
-        {% endif %}
+        <div class="dash-card-body pt-2" style="border-top:1px solid var(--border-color);">
+          <div style="font-size:.76rem;color:#666;"><i class="bi bi-info-circle me-1"></i>Sau khi thêm/xóa bot, vui lòng <strong>khởi động lại server</strong>.</div>
+        </div>
       </div>
+    </div>
 
-      <!-- Add-post panel (hidden by default) -->
-      <div class="add-post-panel" id="add-post-panel-{{ album_id }}" style="display:none;">
-        <form action="/albums/{{ album_id }}/posts" method="post"
-              enctype="multipart/form-data"
-              onsubmit="showSpinner(this)">
-          <div class="mb-2">
-            <textarea name="caption" class="form-control" rows="3"
-                      placeholder="Caption / Nội dung bài viết..."></textarea>
-          </div>
-          <div class="mb-2 position-relative drop-zone" id="dz-{{ album_id }}"
-               onclick="document.getElementById('fi-{{ album_id }}').click()"
-               ondragover="event.preventDefault(); this.classList.add('dragover')"
-               ondragleave="this.classList.remove('dragover')"
-               ondrop="handleDrop(event,'{{ album_id }}')">
-            <input type="file" name="images" id="fi-{{ album_id }}" multiple accept="image/*"
-                   style="display:none" onchange="previewImages(event,'{{ album_id }}')">
-            <i class="bi bi-cloud-arrow-up fs-3 d-block mb-1 text-muted"></i>
-            <span class="text-muted" style="font-size:.85rem;">Click hoặc kéo thả ảnh vào đây</span>
-          </div>
-          <div class="preview-grid" id="preview-{{ album_id }}"></div>
-          <div class="d-flex gap-2 mt-3">
-            <button type="submit" class="btn btn-accent btn-sm">
-              <span class="upload-spinner spinner-border spinner-border-sm me-1" role="status"></span>
-              <i class="bi bi-upload me-1"></i>Đăng bài
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm"
-                    onclick="toggleAddPost('{{ album_id }}')">Hủy</button>
-          </div>
-        </form>
+    <!-- ID MANAGEMENT SECTION -->
+    <div class="section-page" id="section-ids">
+      <div class="page-header"><span class="page-title"><i class="bi bi-people-fill"></i>Quản lý ID Telegram</span></div>
+      <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3"><div class="stat-card"><div class="stat-icon blue"><i class="bi bi-database"></i></div><div><div class="stat-value" id="idStat-total">{{ id_stats.total }}</div><div class="stat-label">Tổng ID</div></div></div></div>
+        <div class="col-6 col-md-3"><div class="stat-card"><div class="stat-icon green"><i class="bi bi-check-circle-fill"></i></div><div><div class="stat-value" id="idStat-active">{{ id_stats.active }}</div><div class="stat-label">Active</div></div></div></div>
+        <div class="col-6 col-md-3"><div class="stat-card"><div class="stat-icon red"><i class="bi bi-slash-circle-fill"></i></div><div><div class="stat-value" id="idStat-blocked">{{ id_stats.blocked }}</div><div class="stat-label">Blocked</div></div></div></div>
+        <div class="col-6 col-md-3"><div class="stat-card"><div class="stat-icon yellow"><i class="bi bi-x-circle-fill"></i></div><div><div class="stat-value" id="idStat-invalid">{{ id_stats.invalid }}</div><div class="stat-label">Invalid</div></div></div></div>
       </div>
-
-      <!-- Posts list -->
-      <div class="p-3">
-        {% set posts = album.posts if album.posts else [] %}
-        {% if posts %}
-          {% for post in posts %}
-          <div class="post-item mb-2">
-            <div class="d-flex justify-content-between align-items-start mb-2">
-              <div class="post-caption flex-grow-1 me-2">
-                {% if post.caption %}
-                  {{ post.caption }}
-                {% else %}
-                  <span class="text-muted fst-italic" style="font-size:.8rem;">(Không có caption)</span>
+      <div class="row g-3">
+        <div class="col-12 col-lg-4">
+          <div class="dash-card mb-3">
+            <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-cloud-upload me-2"></i>Upload ID</span></div>
+            <div class="dash-card-body">
+              <p style="font-size:.82rem;color:#aaa;">Tải lên file <code>.txt</code> hoặc <code>.csv</code> chứa Telegram User IDs (mỗi dòng một ID).</p>
+              <div class="drop-zone" id="idDropZone" onclick="document.getElementById('idFileInput').click()"
+                   ondragover="event.preventDefault();this.classList.add('dragover')"
+                   ondragleave="this.classList.remove('dragover')"
+                   ondrop="handleIdFileDrop(event)">
+                <input type="file" id="idFileInput" accept=".txt,.csv" style="display:none" onchange="handleIdFileSelect(event)">
+                <i class="bi bi-file-earmark-text fs-2 d-block mb-2 text-muted"></i>
+                <span class="text-muted" style="font-size:.85rem;">Click hoặc kéo thả file vào đây</span>
+                <div id="idFileName" class="mt-2" style="font-size:.8rem;color:var(--accent);display:none;"></div>
+              </div>
+              <button class="btn btn-accent btn-sm w-100 mt-3" id="btnUploadIds" onclick="doUploadIds(this)" disabled>
+                <i class="bi bi-upload me-1"></i>Tải lên &amp; Phân tích
+              </button>
+            </div>
+          </div>
+          <div class="dash-card">
+            <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-megaphone-fill me-2" style="color:#00c853;"></i>Broadcast to IDs</span></div>
+            <div class="dash-card-body">
+              <p style="font-size:.82rem;color:#aaa;">Gửi tới tất cả ID (unknown + active). Bot tự phân loại kết quả.</p>
+              <textarea id="idBroadcastMessage" class="form-control mb-3" rows="4" placeholder="Nhập nội dung tin nhắn..."></textarea>
+              <button class="btn btn-success btn-sm w-100" id="btnIdBroadcast" onclick="doIdBroadcast(this)">
+                <i class="bi bi-send-fill me-1"></i>Bắt đầu Broadcast
+              </button>
+              <div id="broadcastProgress" class="mt-3" style="display:none;">
+                <div class="d-flex justify-content-between mb-1" style="font-size:.78rem;"><span id="bpLabel">Đang gửi...</span><span id="bpPercent">0%</span></div>
+                <div class="progress mb-2"><div class="progress-bar progress-bar-striped progress-bar-animated bg-success" id="bpBar" style="width:0%"></div></div>
+                <div class="d-flex gap-3 flex-wrap" style="font-size:.76rem;color:#aaa;">
+                  <span>&#9989; Active: <strong id="bpActive">0</strong></span>
+                  <span>&#128683; Blocked: <strong id="bpBlocked">0</strong></span>
+                  <span>&#10060; Invalid: <strong id="bpInvalid">0</strong></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-lg-8">
+          <div class="dash-card">
+            <div class="dash-card-header">
+              <span class="dash-card-title"><i class="bi bi-list-ul me-2"></i>Danh sách ID</span>
+              <div class="d-flex gap-2 align-items-center flex-wrap">
+                <select class="form-select form-select-sm" id="idStatusFilter" onchange="loadIdList(1)" style="width:auto;">
+                  <option value="">Tất cả</option><option value="unknown">Unknown</option><option value="active">Active</option><option value="blocked">Blocked</option><option value="invalid">Invalid</option>
+                </select>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadIdList(1)"><i class="bi bi-arrow-clockwise"></i></button>
+                {% if role == 'owner' %}
+                <div class="dropdown">
+                  <button class="btn btn-sm btn-outline-danger dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-trash3"></i></button>
+                  <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
+                    <li><button class="dropdown-item text-danger" onclick="doClearIds('')">Xóa tất cả</button></li>
+                    <li><button class="dropdown-item" onclick="doClearIds('blocked')">Xóa Blocked</button></li>
+                    <li><button class="dropdown-item" onclick="doClearIds('invalid')">Xóa Invalid</button></li>
+                  </ul>
+                </div>
                 {% endif %}
               </div>
-              {% if role == 'owner' %}
-              <form action="/albums/{{ album_id }}/posts/{{ post.id }}/delete" method="post"
-                    onsubmit="return confirm('Xóa bài viết này?')">
-                <button type="submit" class="btn btn-sm btn-outline-danger"
-                        style="padding:2px 8px;" title="Xóa bài">
-                  <i class="bi bi-x-lg"></i>
-                </button>
-              </form>
-              {% endif %}
             </div>
-            <div class="d-flex flex-wrap gap-2">
-              {% for photo in post.photos %}
-              <img src="{{ photo.url }}" class="photo-thumb"
-                   onclick="openLightbox('{{ photo.url }}')"
-                   alt="photo">
+            <div class="dash-card-body p-0">
+              <div id="idListContainer"><div class="empty-state py-4"><i class="bi bi-people"></i><p>Nhấn làm mới để tải danh sách</p></div></div>
+              <div class="d-flex justify-content-between align-items-center px-3 py-2" style="border-top:1px solid var(--border-color);">
+                <span id="idPaginationInfo" style="font-size:.78rem;color:#888;"></span>
+                <div class="d-flex gap-1" id="idPaginationBtns"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ALBUMS SECTION -->
+    <div class="section-page" id="section-albums">
+      <div class="page-header">
+        <span class="page-title"><i class="bi bi-collection"></i>Albums</span>
+        <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#createAlbumModal"><i class="bi bi-plus-lg me-1"></i>Tạo Album mới</button>
+      </div>
+      {% if albums %}
+        {% for album_id, album in albums.items() %}
+        <div class="album-card {% if active_album == album_id %}active-album{% endif %}" id="album-{{ album_id }}">
+          <div style="padding:14px 18px;background:rgba(255,255,255,.03);border-bottom:1px solid var(--border-color);display:flex;align-items:center;flex-wrap:wrap;gap:10px;">
+            <div class="flex-grow-1">
+              <div style="font-weight:600;font-size:.98rem;"><i class="bi bi-folder2-open me-2" style="color:var(--accent);"></i>{{ album.title if album.title else album_id }}</div>
+              {% if album.description %}<div style="font-size:.8rem;color:#777;margin-top:2px;">{{ album.description }}</div>{% endif %}
+            </div>
+            <span class="badge" style="background:rgba(255,94,0,.2);color:var(--accent);border-radius:20px;padding:2px 10px;font-size:.75rem;font-weight:600;">{{ album.posts|length if album.posts else 0 }} bài</span>
+            <button class="btn btn-sm btn-success" onclick="toggleAddPost('{{ album_id }}')"><i class="bi bi-plus-lg"></i> Thêm bài</button>
+            {% if role == 'owner' %}
+            <form action="/albums/{{ album_id }}/delete" method="post" class="d-inline" onsubmit="return confirm('Xóa album ?')">
+              <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash3"></i></button>
+            </form>
+            {% endif %}
+          </div>
+          <div id="add-post-panel-{{ album_id }}" style="display:none;padding:16px 18px;background:rgba(255,94,0,.05);border-bottom:1px solid var(--border-color);">
+            <form action="/albums/{{ album_id }}/posts" method="post" enctype="multipart/form-data" onsubmit="showSpinner(this)">
+              <div class="mb-2"><textarea name="caption" class="form-control" rows="3" placeholder="Caption / Nội dung bài viết..."></textarea></div>
+              <div class="mb-2 position-relative drop-zone" id="dz-{{ album_id }}" onclick="document.getElementById('fi-{{ album_id }}').click()"
+                   ondragover="event.preventDefault();this.classList.add('dragover')"
+                   ondragleave="this.classList.remove('dragover')"
+                   ondrop="handleDrop(event,'{{ album_id }}')">
+                <input type="file" name="images" id="fi-{{ album_id }}" multiple accept="image/*" style="display:none" onchange="previewImages(event,'{{ album_id }}')">
+                <i class="bi bi-cloud-arrow-up fs-3 d-block mb-1 text-muted"></i>
+                <span class="text-muted" style="font-size:.85rem;">Click hoặc kéo thả ảnh vào đây</span>
+              </div>
+              <div class="preview-grid" id="preview-{{ album_id }}"></div>
+              <div class="d-flex gap-2 mt-3">
+                <button type="submit" class="btn btn-accent btn-sm"><span class="spinner-border spinner-border-sm me-1 upload-spinner" role="status" style="display:none;"></span><i class="bi bi-upload me-1"></i>Đăng bài</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAddPost('{{ album_id }}')">Hủy</button>
+              </div>
+            </form>
+          </div>
+          <div class="p-3">
+            {% set posts = album.posts if album.posts else [] %}
+            {% if posts %}
+              {% for post in posts %}
+              <div class="mb-2" style="border:1px solid var(--border-color);border-radius:10px;padding:14px;background:rgba(255,255,255,.02);">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                  <div style="font-size:.9rem;color:#ccc;flex:1;margin-right:8px;white-space:pre-wrap;word-break:break-word;">
+                    {% if post.caption %}{{ post.caption }}{% else %}<span class="text-muted fst-italic" style="font-size:.8rem;">(Không có caption)</span>{% endif %}
+                  </div>
+                  {% if role == 'owner' %}
+                  <form action="/albums/{{ album_id }}/posts/{{ post.id }}/delete" method="post" onsubmit="return confirm('Xóa bài viết này?')">
+                    <button type="submit" class="btn btn-sm btn-outline-danger" style="padding:2px 8px;"><i class="bi bi-x-lg"></i></button>
+                  </form>
+                  {% endif %}
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                  {% for photo in post.photos %}<img src="{{ photo.url }}" class="photo-thumb" onclick="openLightbox('{{ photo.url }}')" alt="photo">{% endfor %}
+                </div>
+                <div class="mt-1" style="font-size:.72rem;color:#555;"><i class="bi bi-images me-1"></i>{{ post.photos|length }} ảnh{% if post.created_at %} &middot; <i class="bi bi-clock me-1"></i>{{ post.created_at[:10] }}{% endif %}</div>
+              </div>
               {% endfor %}
-            </div>
-            <div class="mt-1" style="font-size:.72rem; color:#555;">
-              <i class="bi bi-images me-1"></i>{{ post.photos|length }} ảnh
-              {% if post.created_at %}
-                &nbsp;·&nbsp;<i class="bi bi-clock me-1"></i>{{ post.created_at[:10] }}
-              {% endif %}
-            </div>
+            {% else %}<div class="empty-state py-3"><i class="bi bi-inbox"></i>Chưa có bài viết. Nhấn <strong>Thêm bài</strong>.</div>{% endif %}
           </div>
-          {% endfor %}
-        {% else %}
-          <div class="empty-state">
-            <i class="bi bi-inbox"></i>
-            Chưa có bài viết nào. Nhấn <strong>Thêm bài</strong> để đăng.
-          </div>
-        {% endif %}
-      </div>
-    </div>
-    {% endfor %}
-
-  {% else %}
-    <div class="album-card p-0">
-      <div class="empty-state py-5">
-        <i class="bi bi-folder-plus" style="font-size:3rem; color:var(--accent);"></i>
-        <p class="mt-2 mb-3">Chưa có album nào.</p>
-        <button class="btn btn-accent" data-bs-toggle="modal" data-bs-target="#createAlbumModal">
-          <i class="bi bi-plus-lg me-1"></i>Tạo Album đầu tiên
-        </button>
-      </div>
-    </div>
-  {% endif %}
-
-  {% if role == 'owner' %}
-  <!-- ========== QUẢN LÝ BOT SECTION ========== -->
-  <div class="section-header mt-5">
-    <span class="section-title"><i class="bi bi-robot me-2"></i>Quản lý Bot</span>
-    <div class="d-flex gap-2">
-      <button class="btn btn-sm btn-outline-info" onclick="loadBotHealth(this)">
-        <i class="bi bi-activity me-1"></i>Kiểm tra trạng thái
-      </button>
-      <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#addBotModal">
-        <i class="bi bi-plus-lg me-1"></i>Thêm Bot
-      </button>
-    </div>
-  </div>
-
-  <div class="album-card mb-4 p-0">
-    <div class="p-3">
-      {% if bots %}
-      <div class="table-responsive">
-        <table class="table table-dark table-borderless bot-table mb-0" id="botsTable">
-          <thead>
-            <tr>
-              <th>Tên Bot</th>
-              <th>Token (ẩn)</th>
-              <th>Admin ID</th>
-              <th>Trạng thái</th>
-              <th>Người đăng ký</th>
-              <th>Tin đã gửi</th>
-              <th style="width:60px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for bot in bots %}
-            <tr id="bot-row-{{ bot.id }}">
-              <td><i class="bi bi-robot me-2" style="color:var(--accent);"></i>{{ bot.name }}</td>
-              <td>
-                <span class="bot-token-mask">{{ bot.token[:4] }}••••••••••••</span>
-              </td>
-              <td>{{ bot.admin_id if bot.admin_id else '—' }}</td>
-              <td id="bot-status-{{ bot.id }}"><span class="status-checking">—</span></td>
-              <td id="bot-subs-{{ bot.id }}">—</td>
-              <td id="bot-msgs-{{ bot.id }}">—</td>
-              <td>
-                <button class="btn btn-sm btn-outline-danger"
-                        onclick="doDeleteBot('{{ bot.id }}', '{{ bot.name }}', this)"
-                        title="Xóa bot">
-                  <i class="bi bi-trash3"></i>
-                </button>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+        </div>
+        {% endfor %}
       {% else %}
-      <div class="empty-state py-4">
-        <i class="bi bi-robot" style="font-size:2rem; color:var(--accent);"></i>
-        <p class="mt-2 mb-0 text-light" style="font-size:.9rem;">Chưa có bot nào được thêm.<br>
-          <span style="font-size:.8rem; color:#aaa;">Bot mặc định (từ biến <code>TELEGRAM_BOT_TOKEN</code>) đang được sử dụng.</span>
-        </p>
+      <div class="album-card p-0">
+        <div class="empty-state py-5">
+          <i class="bi bi-folder-plus" style="font-size:3rem;color:var(--accent);"></i>
+          <p class="mt-2 mb-3">Chưa có album nào.</p>
+          <button class="btn btn-accent" data-bs-toggle="modal" data-bs-target="#createAlbumModal"><i class="bi bi-plus-lg me-1"></i>Tạo Album đầu tiên</button>
+        </div>
       </div>
       {% endif %}
     </div>
-    <div class="p-3 pt-0">
-      <div style="font-size:.78rem; color:#aaa;">
-        <i class="bi bi-info-circle me-1"></i>
-        Sau khi thêm hoặc xóa bot, vui lòng <strong>khởi động lại server</strong> để áp dụng thay đổi.
-      </div>
-    </div>
-  </div>
 
-  <!-- ========== QUẢN LÝ SLOGAN SECTION ========== -->
-  <div class="section-header mt-5">
-    <span class="section-title"><i class="bi bi-chat-quote me-2"></i>Quản lý Slogan (Khi Start)</span>
-    <div class="d-flex gap-2 align-items-center">
-      <div class="form-check form-switch mb-0 me-1">
-        <input class="form-check-input" type="checkbox" role="switch" id="sloganEnabled"
-               onchange="toggleSloganEnabled(this)">
-        <label class="form-check-label text-light" for="sloganEnabled" id="sloganEnabledLabel">Bật</label>
+    <!-- CONFIG SECTION -->
+    <div class="section-page" id="section-config">
+      <div class="page-header"><span class="page-title"><i class="bi bi-gear-fill"></i>Cấu hình Bot</span></div>
+      <ul class="nav config-tabs mb-4" style="border-bottom:1px solid var(--border-color);">
+        <li class="nav-item"><button class="nav-link active" id="tab-slogans-btn" onclick="showConfigTab('slogans')"><i class="bi bi-chat-quote me-1"></i>Slogan</button></li>
+        <li class="nav-item"><button class="nav-link" id="tab-flow-btn" onclick="showConfigTab('flow')"><i class="bi bi-diagram-3 me-1"></i>Kịch bản Bot</button></li>
+      </ul>
+      <!-- Slogans Tab -->
+      <div id="config-tab-slogans">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+          <div class="d-flex align-items-center gap-3">
+            <div class="form-check form-switch mb-0">
+              <input class="form-check-input" type="checkbox" role="switch" id="sloganEnabled" onchange="toggleSloganEnabled(this)">
+              <label class="form-check-label text-light" for="sloganEnabled" id="sloganEnabledLabel">Bật</label>
+            </div>
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-secondary" onclick="showAddSloganModal()"><i class="bi bi-plus-lg me-1"></i>Thêm Slogan</button>
+            <button class="btn btn-sm btn-accent" onclick="doSaveSlogans(this)"><i class="bi bi-floppy me-1"></i>Lưu</button>
+          </div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-body pb-1" style="border-bottom:1px solid var(--border-color);"><div style="font-size:.82rem;color:#bbb;"><i class="bi bi-info-circle me-1"></i>Các câu slogan lần lượt gửi sau <code>/start</code>, sau đó <strong>tự xóa</strong>.</div></div>
+          <div class="dash-card-body"><div id="sloganList"><div class="text-center py-4" style="color:#888;"><span class="spinner-border spinner-border-sm me-2" role="status"></span>Đang tải...</div></div></div>
+        </div>
       </div>
-      <button class="btn btn-sm btn-accent" onclick="showAddSloganModal()">
-        <i class="bi bi-plus-lg me-1"></i>Thêm Slogan
-      </button>
-    </div>
-  </div>
-
-  <div class="album-card mb-4 p-0">
-    <div class="p-3 pb-2" style="border-bottom:1px solid var(--border-color);">
-      <div style="font-size:.82rem; color:#bbb;">
-        <i class="bi bi-info-circle me-1"></i>
-        Các câu slogan sẽ lần lượt được gửi sau khi người dùng nhấn <code>/start</code>,
-        sau đó <strong>tự động xóa</strong> và hiển thị tin nhắn chính.
-        Mỗi slogan có thể cài <strong>thời gian chờ</strong> (giây) trước khi gửi câu tiếp theo.
-      </div>
-    </div>
-    <div class="p-3">
-      <div id="sloganList">
-        <div class="text-center py-4" style="color:#888;">
-          <span class="spinner-border spinner-border-sm me-2" role="status"></span>Đang tải...
+      <!-- Flow Tab -->
+      <div id="config-tab-flow" style="display:none;">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+          <span style="font-size:.82rem;color:#aaa;">Quản lý kịch bản tin nhắn tương tác</span>
+          <button class="btn btn-sm btn-accent" onclick="showAddNodeModal()"><i class="bi bi-plus-lg me-1"></i>Thêm Kịch bản</button>
+        </div>
+        <div class="dash-card">
+          <div class="dash-card-body pb-1" style="border-bottom:1px solid var(--border-color);"><div style="font-size:.82rem;color:#bbb;"><i class="bi bi-info-circle me-1"></i>Kịch bản <code>start</code> là tin nhắn đầu tiên khi người dùng gõ <code>/start</code>.</div></div>
+          <div class="dash-card-body"><div id="flowNodesList"><div class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2" role="status"></span>Đang tải...</div></div></div>
         </div>
       </div>
     </div>
-    <div class="p-3 pt-0 d-flex gap-2 justify-content-end">
-      <button class="btn btn-sm btn-accent" onclick="doSaveSlogans(this)">
-        <i class="bi bi-floppy me-1"></i>Lưu Slogan
-      </button>
-    </div>
-  </div>
 
-  <!-- ========== QUẢN LÝ KỊCH BẢN BOT SECTION ========== -->
-  <div class="section-header mt-5">
-    <span class="section-title"><i class="bi bi-diagram-3 me-2"></i>Quản lý Kịch bản Bot</span>
-    <button class="btn btn-sm btn-accent" onclick="showAddNodeModal()">
-      <i class="bi bi-plus-lg me-1"></i>Thêm Kịch bản
-    </button>
-  </div>
-
-  <div class="album-card mb-4 p-0">
-    <div class="p-3 pb-2" style="border-bottom:1px solid var(--border-color);">
-      <div style="font-size:.82rem; color:#bbb;">
-        <i class="bi bi-info-circle me-1"></i>
-        Mỗi <strong>Kịch bản</strong> là một tin nhắn bot có thể gửi.
-        Nút <span class="badge bg-primary" style="font-size:.7rem;">💬 Tin nhắn Khác</span> sẽ chuyển người dùng đến kịch bản tương ứng.
-        Kịch bản <code>start</code> là tin nhắn đầu tiên khi người dùng gõ <code>/start</code>.
-      </div>
-    </div>
-    <div class="p-3">
-      <div id="flowNodesList">
-        <div class="text-center py-4 text-muted">
-          <span class="spinner-border spinner-border-sm me-2" role="status"></span>Đang tải kịch bản...
+    <!-- SYSTEM SECTION -->
+    <div class="section-page" id="section-system">
+      <div class="page-header"><span class="page-title"><i class="bi bi-shield-fill"></i>Backup &amp; Hệ thống</span></div>
+      <div class="row g-3">
+        <div class="col-12 col-md-6">
+          <div class="dash-card">
+            <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-cloud-arrow-up me-2" style="color:var(--accent);"></i>Sao lưu dữ liệu</span></div>
+            <div class="dash-card-body">
+              <p style="font-size:.85rem;color:#aaa;">Sao lưu toàn bộ: Albums, IDs, Slogans, Cấu hình...</p>
+              <div class="d-flex flex-wrap gap-2 mb-3">
+                <a href="/backup/download" class="btn btn-accent btn-sm"><i class="bi bi-download me-1"></i>Tải Backup Ngay</a>
+                {% if role == 'owner' %}<button class="btn btn-sm btn-outline-info" id="btnBackupCloud" onclick="doBackup(this)"><i class="bi bi-cloud-arrow-up me-1"></i>Lưu lên Cloudinary</button>{% endif %}
+              </div>
+              <div style="font-size:.78rem;color:#666;padding:10px;background:rgba(255,255,255,.03);border-radius:8px;">
+                <i class="bi bi-clock-fill me-1" style="color:var(--accent);"></i><strong>Tự động:</strong> mỗi ngày lúc <strong>0:01 sáng (Giờ Việt Nam)</strong> — APScheduler
+              </div>
+            </div>
+          </div>
+        </div>
+        {% if role == 'owner' %}
+        <div class="col-12 col-md-6">
+          <div class="dash-card">
+            <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-cloud-arrow-down me-2" style="color:#4d9fff;"></i>Khôi phục dữ liệu</span></div>
+            <div class="dash-card-body">
+              <p style="font-size:.85rem;color:#aaa;">Khôi phục từ bản sao lưu gần nhất trên Cloudinary. <strong class="text-danger">Dữ liệu hiện tại sẽ bị ghi đè!</strong></p>
+              <button class="btn btn-sm btn-outline-danger" id="btnRestore" onclick="doRestore(this)"><i class="bi bi-cloud-arrow-down me-1"></i>Khôi phục</button>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+        <div class="col-12 col-md-6">
+          <div class="dash-card">
+            <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-clock-fill me-2" style="color:#ffc107;"></i>Cài đặt gửi tự động</span></div>
+            <div class="dash-card-body">
+              <p style="font-size:.85rem;color:#aaa;">Bot tự động gửi album mới nhất vào giờ bạn cài đặt (Giờ Việt Nam UTC+7).</p>
+              <div class="row g-2 mb-3">
+                <div class="col-6"><label class="form-label" style="font-size:.82rem;">Giờ (0&#8211;23)</label><input type="number" id="scheduleHour" class="form-control form-control-sm" min="0" max="23" value="{{ cfg.hour | default(8) }}"></div>
+                <div class="col-6"><label class="form-label" style="font-size:.82rem;">Phút (0&#8211;59)</label><input type="number" id="scheduleMinute" class="form-control form-control-sm" min="0" max="59" value="{{ cfg.minute | default(0) }}"></div>
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="doSaveSchedule(this)"><i class="bi bi-check-lg me-1"></i>Lưu cài đặt</button>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-md-6">
+          <div class="dash-card">
+            <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-megaphone-fill me-2" style="color:#00c853;"></i>Broadcast Subscribers</span></div>
+            <div class="dash-card-body">
+              <p style="font-size:.85rem;color:#aaa;">Gửi tới tất cả người đã bấm /start. ({{ subs|length }} người đăng ký)</p>
+              <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#broadcastModal"><i class="bi bi-send-fill me-1"></i>Gửi Thông Báo</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
+
+  </main>
+</div><!-- /layout -->
+
+<!-- Lightbox -->
+<div id="lightbox" onclick="closeLightbox()"><span class="close-lb" onclick="closeLightbox()">&times;</span><img id="lightbox-img" src="" alt="preview"></div>
+
+<!-- Toast container -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9500;" id="toastContainer"></div>
+
+<!-- Broadcast Subscribers Modal -->
+<div class="modal fade" id="broadcastModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-megaphone-fill me-2" style="color:#00c853;"></i>Gửi Thông Báo All &#128226;</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <label class="form-label fw-semibold">Nội dung <span class="text-danger">*</span></label>
+        <textarea id="broadcastMessage" class="form-control" rows="5" placeholder="Nhập nội dung..."></textarea>
+        <div class="text-muted mt-2" style="font-size:.8rem;"><i class="bi bi-info-circle me-1"></i>Gửi tới tất cả người đã bấm /start.</div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button><button type="button" class="btn btn-success" id="btnBroadcast" onclick="doBroadcast(this)"><i class="bi bi-send-fill me-1"></i>Gửi ngay</button></div>
+    </div>
   </div>
-  {% endif %}
+</div>
 
-</div><!-- /container -->
-
-<!-- ========== CREATE ALBUM MODAL ========== -->
+<!-- Create Album Modal -->
 <div class="modal fade" id="createAlbumModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <form action="/albums/create" method="post">
-        <div class="modal-header">
-          <h5 class="modal-title"><i class="bi bi-folder-plus me-2" style="color:var(--accent);"></i>Tạo Album mới</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-        </div>
+        <div class="modal-header"><h5 class="modal-title"><i class="bi bi-folder-plus me-2" style="color:var(--accent);"></i>Tạo Album mới</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Tên Album <span class="text-danger">*</span></label>
-            <input name="title" class="form-control" placeholder="VD: Album tháng 4" required autofocus>
-          </div>
-          <div class="mb-1">
-            <label class="form-label fw-semibold">Mô tả <span class="text-muted">(tuỳ chọn)</span></label>
-            <textarea name="description" class="form-control" rows="2"
-                      placeholder="Mô tả ngắn về album..."></textarea>
-          </div>
+          <div class="mb-3"><label class="form-label fw-semibold">Tên Album <span class="text-danger">*</span></label><input name="title" class="form-control" placeholder="VD: Album tháng 4" required autofocus></div>
+          <div class="mb-1"><label class="form-label fw-semibold">Mô tả <span class="text-muted">(tuỳ chọn)</span></label><textarea name="description" class="form-control" rows="2"></textarea></div>
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-          <button type="submit" class="btn btn-accent">
-            <i class="bi bi-check-lg me-1"></i>Tạo Album
-          </button>
-        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button><button type="submit" class="btn btn-accent"><i class="bi bi-check-lg me-1"></i>Tạo</button></div>
       </form>
     </div>
   </div>
 </div>
 
-<!-- ========== LIGHTBOX ========== -->
-<div id="lightbox" onclick="closeLightbox()">
-  <span class="close-lb" onclick="closeLightbox()">&times;</span>
-  <img id="lightbox-img" src="" alt="preview">
-</div>
-
-<!-- ========== BROADCAST MODAL ========== -->
-<div class="modal fade" id="broadcastModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-megaphone-fill me-2" style="color:#00c853;"></i>Gửi Thông Báo All📢</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="mb-2">
-          <label class="form-label fw-semibold">Nội dung thông báo <span class="text-danger">*</span></label>
-          <textarea id="broadcastMessage" class="form-control" rows="5"
-                    placeholder="Nhập nội dung muốn gửi tới tất cả người đăng ký..."></textarea>
-        </div>
-        <div class="text-muted" style="font-size:.8rem;"><i class="bi bi-info-circle me-1"></i>Tin nhắn sẽ được gửi tới tất cả người đã bấm /start bot.</div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-        <button type="button" class="btn btn-success" id="btnBroadcast" onclick="doBroadcast(this)">
-          <i class="bi bi-send-fill me-1"></i>Gửi ngay
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ========== SCHEDULE SETTINGS MODAL ========== -->
-<div class="modal fade" id="scheduleModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-clock-fill me-2" style="color:#4d9fff;"></i>Cài đặt giờ gửi tự động</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p class="text-muted" style="font-size:.875rem;">Bot sẽ tự động gửi album mới nhất tới tất cả người đăng ký vào giờ bạn cài đặt (giờ Việt Nam UTC+7).</p>
-        <div class="row g-3">
-          <div class="col-6">
-            <label class="form-label fw-semibold">Giờ (0–23)</label>
-            <input type="number" id="scheduleHour" class="form-control" min="0" max="23" value="{{ cfg.hour | default(8) }}" placeholder="VD: 8">
-          </div>
-          <div class="col-6">
-            <label class="form-label fw-semibold">Phút (0–59)</label>
-            <input type="number" id="scheduleMinute" class="form-control" min="0" max="59" value="{{ cfg.minute | default(0) }}" placeholder="VD: 0">
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-        <button type="button" class="btn btn-primary" id="btnSaveSchedule" onclick="doSaveSchedule(this)">
-          <i class="bi bi-check-lg me-1"></i>Lưu cài đặt
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ========== ADD BOT MODAL ========== -->
+<!-- Add Bot Modal -->
 <div class="modal fade" id="addBotModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-robot me-2" style="color:var(--accent);"></i>Thêm Bot mới</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
+      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-robot me-2" style="color:var(--accent);"></i>Thêm Bot mới</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Tên Bot <span class="text-danger">*</span></label>
-          <input id="botName" class="form-control" placeholder="VD: Bot VIP 2" required>
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Token <span class="text-danger">*</span></label>
-          <input id="botToken" class="form-control" placeholder="123456:ABCdef..." required>
-        </div>
-        <div class="mb-1">
-          <label class="form-label fw-semibold">Admin ID <span class="text-muted">(tuỳ chọn)</span></label>
-          <input id="botAdminId" type="number" class="form-control" placeholder="Telegram User ID của Admin">
-          <div class="form-text text-muted">Để trống nếu dùng chung Admin ID từ biến môi trường.</div>
-        </div>
+        <div class="mb-3"><label class="form-label fw-semibold">Tên Bot <span class="text-danger">*</span></label><input id="botName" class="form-control" placeholder="VD: Bot VIP 2" required></div>
+        <div class="mb-3"><label class="form-label fw-semibold">Token <span class="text-danger">*</span></label><input id="botToken" class="form-control" placeholder="123456:ABCdef..."></div>
+        <div class="mb-1"><label class="form-label fw-semibold">Admin ID <span class="text-muted">(tuỳ chọn)</span></label><input id="botAdminId" type="number" class="form-control" placeholder="Telegram User ID"></div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-        <button type="button" class="btn btn-accent" id="btnAddBot" onclick="doAddBot(this)">
-          <i class="bi bi-plus-lg me-1"></i>Thêm Bot
-        </button>
-      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button><button type="button" class="btn btn-accent" id="btnAddBot" onclick="doAddBot(this)"><i class="bi bi-plus-lg me-1"></i>Thêm</button></div>
     </div>
   </div>
 </div>
 
-<!-- ========== FLOW NODE EDIT MODAL ========== -->
+<!-- Flow Node Edit Modal -->
 <div class="modal fade" id="flowNodeModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
     <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">
-          <i class="bi bi-pencil-square me-2" style="color:var(--accent);"></i>
-          Chỉnh sửa: <code id="fnModalNodeId" class="text-warning ms-1"></code>
-        </h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
+      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-pencil-square me-2" style="color:var(--accent);"></i>Chỉnh sửa: <code id="fnModalNodeId" class="text-warning ms-1"></code></h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <input type="hidden" id="fnNodeId">
-        <div class="mb-3">
-          <label class="form-label fw-semibold">
-            <i class="bi bi-chat-left-text me-1" style="color:var(--accent);"></i>Nội dung tin nhắn
-          </label>
-          <textarea id="fnNodeText" class="form-control" rows="5"
-                    placeholder="Nhập nội dung tin nhắn bot sẽ hiển thị cho người dùng..."></textarea>
-          <div class="form-text text-muted">Hỗ trợ emoji và xuống dòng. Bot sẽ hiển thị đúng như bạn nhập.</div>
-        </div>
+        <div class="mb-3"><label class="form-label fw-semibold"><i class="bi bi-chat-left-text me-1" style="color:var(--accent);"></i>Nội dung tin nhắn</label><textarea id="fnNodeText" class="form-control" rows="5" placeholder="Nhập nội dung..."></textarea></div>
         <div class="mb-2">
-          <label class="form-label fw-semibold">
-            <i class="bi bi-grid-1x2 me-1" style="color:var(--accent);"></i>Nút bấm dưới tin nhắn
-          </label>
+          <label class="form-label fw-semibold"><i class="bi bi-grid-1x2 me-1" style="color:var(--accent);"></i>Nút bấm</label>
           <div id="fnBtnList" class="mb-2"></div>
-          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fnAddBtn()">
-            <i class="bi bi-plus-lg me-1"></i>Thêm nút bấm
-          </button>
-          <div class="mt-2 p-2 rounded" style="background:rgba(255,255,255,.03);font-size:.8rem;color:#999;">
-            <strong style="color:#ccc;">💡 Hướng dẫn:</strong><br>
-            &nbsp;🔗 <strong>Mở Link Web</strong> — khi nhấn sẽ mở URL trong trình duyệt<br>
-            &nbsp;💬 <strong>Mở Tin nhắn Khác</strong> — khi nhấn sẽ chuyển sang kịch bản khác ngay trong Telegram
-          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="fnAddBtn()"><i class="bi bi-plus-lg me-1"></i>Thêm nút</button>
         </div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-        <button type="button" class="btn btn-accent" id="btnSaveNode" onclick="doSaveNode(this)">
-          <i class="bi bi-floppy me-1"></i>Lưu Kịch bản
-        </button>
-      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button><button type="button" class="btn btn-accent" onclick="doSaveNode(this)"><i class="bi bi-floppy me-1"></i>Lưu</button></div>
     </div>
   </div>
 </div>
 
-<!-- ========== ADD NODE MODAL ========== -->
+<!-- Add Node Modal -->
 <div class="modal fade" id="addNodeModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-plus-square me-2" style="color:var(--accent);"></i>Thêm Kịch bản mới</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
+      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-plus-square me-2" style="color:var(--accent);"></i>Thêm Kịch bản mới</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
-        <div class="mb-2">
-          <label class="form-label fw-semibold">ID Kịch bản <span class="text-danger">*</span></label>
-          <input id="newNodeId" class="form-control font-monospace" placeholder="VD: bang_gia, khuyen_mai, menu_vip" required>
-          <div class="form-text text-muted">Chỉ dùng chữ thường, số và dấu gạch dưới <code>_</code>. Không dấu cách, không dấu tiếng Việt.</div>
-        </div>
-        <div class="mt-2 p-2 rounded" style="background:rgba(255,94,0,.07);font-size:.8rem;color:#ccc;">
-          <i class="bi bi-lightbulb me-1" style="color:var(--accent);"></i>
-          ID này sẽ được dùng để liên kết các nút bấm. Ví dụ: nút «Xem Bảng Giá» ở kịch bản <code>start</code> sẽ trỏ tới ID <code>bang_gia</code>.
-        </div>
+        <div class="mb-2"><label class="form-label fw-semibold">ID Kịch bản <span class="text-danger">*</span></label><input id="newNodeId" class="form-control font-monospace" placeholder="VD: bang_gia, khuyen_mai" required><div class="form-text text-muted">Chỉ dùng chữ thường, số và dấu _ hoặc -</div></div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-        <button type="button" class="btn btn-accent" onclick="doAddNode(this)">
-          <i class="bi bi-plus-lg me-1"></i>Tạo & Chỉnh sửa
-        </button>
-      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button><button type="button" class="btn btn-accent" onclick="doAddNode(this)"><i class="bi bi-plus-lg me-1"></i>Tạo &amp; Sửa</button></div>
     </div>
   </div>
 </div>
 
-<!-- ========== TOAST CONTAINER ========== -->
-<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9500;" id="toastContainer"></div>
-
-<!-- ========== ADD/EDIT SLOGAN MODAL ========== -->
+<!-- Slogan Modal -->
 <div class="modal fade" id="sloganModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="sloganModalTitle">
-          <i class="bi bi-chat-quote me-2" style="color:var(--accent);"></i>Thêm Slogan
-        </h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
+      <div class="modal-header"><h5 class="modal-title" id="sloganModalTitle"><i class="bi bi-chat-quote me-2" style="color:var(--accent);"></i>Thêm Slogan</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <input type="hidden" id="sloganEditIndex" value="-1">
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Nội dung Slogan <span class="text-danger">*</span></label>
-          <textarea id="sloganText" class="form-control" rows="3"
-                    placeholder="VD: 🚀 NƠI BÓNG TỐI BẮT ĐẦU... NƠI BẢN NĂNG THỨC TỈNH 🚀"></textarea>
-        </div>
-        <div class="mb-1">
-          <label class="form-label fw-semibold">Thời gian chờ sau khi hiển thị (giây)</label>
-          <input type="number" id="sloganDelay" class="form-control" min="0" max="30" step="0.5" value="1">
-          <div class="form-text" style="color:#aaa;">Thời gian (giây) trước khi gửi slogan tiếp theo (hoặc xóa tất cả).</div>
-        </div>
+        <div class="mb-3"><label class="form-label fw-semibold">Nội dung <span class="text-danger">*</span></label><textarea id="sloganText" class="form-control" rows="3" placeholder="VD: &#128640; NƠI BÓNG TỐI BẮT ĐẦU..."></textarea></div>
+        <div class="mb-1"><label class="form-label fw-semibold">Thời gian chờ (giây)</label><input type="number" id="sloganDelay" class="form-control" min="0" max="30" step="0.5" value="1"></div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-        <button type="button" class="btn btn-accent" onclick="doSaveSloganItem(this)">
-          <i class="bi bi-check-lg me-1"></i>Lưu
-        </button>
-      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button><button type="button" class="btn btn-accent" onclick="doSaveSloganItem(this)"><i class="bi bi-check-lg me-1"></i>Lưu</button></div>
     </div>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-  /* ---- toggle add-post panel ---- */
-  function toggleAddPost(albumId) {
-    const panel = document.getElementById('add-post-panel-' + albumId);
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+/* ====== SIDEBAR & NAVIGATION ====== */
+let _sidebarCollapsed = false;
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const main = document.getElementById('mainContent');
+  const overlay = document.getElementById('sidebarOverlay');
+  if (window.innerWidth <= 768) {
+    sidebar.classList.toggle('mobile-open');
+    overlay.classList.toggle('show');
+  } else {
+    _sidebarCollapsed = !_sidebarCollapsed;
+    sidebar.classList.toggle('collapsed', _sidebarCollapsed);
+    main.classList.toggle('expanded', _sidebarCollapsed);
   }
-
-  /* ---- image preview from <input type=file> ---- */
-  function previewImages(event, albumId) {
-    renderPreviews(event.target.files, albumId);
-  }
-
-  /* ---- drag & drop ---- */
-  function handleDrop(event, albumId) {
-    event.preventDefault();
-    document.getElementById('dz-' + albumId).classList.remove('dragover');
-    const input = document.getElementById('fi-' + albumId);
-    const dt = event.dataTransfer;
-    // Assign files to input (DataTransfer trick)
-    try {
-      const fileList = dt.files;
-      // Create a new DataTransfer to set files on the input
-      const transfer = new DataTransfer();
-      for (const f of fileList) transfer.items.add(f);
-      input.files = transfer.files;
-      renderPreviews(fileList, albumId);
-    } catch(e) {
-      console.warn('Drop assign failed', e);
-    }
-  }
-
-  function renderPreviews(files, albumId) {
-    const preview = document.getElementById('preview-' + albumId);
-    preview.innerHTML = '';
-    for (const file of files) {
-      if (!file.type.startsWith('image/')) continue;
-      const img = document.createElement('img');
-      img.src = URL.createObjectURL(file);
-      img.style.cssText = 'width:70px;height:70px;object-fit:cover;border-radius:6px;border:1px solid #2a2d35;';
-      preview.appendChild(img);
-    }
-  }
-
-  /* ---- spinner on form submit ---- */
-  function showSpinner(form) {
-    const spinner = form.querySelector('.upload-spinner');
-    if (spinner) spinner.style.display = 'inline-block';
-  }
-
-  /* ---- lightbox ---- */
-  function openLightbox(src) {
-    document.getElementById('lightbox-img').src = src;
-    document.getElementById('lightbox').classList.add('show');
-  }
-
-  function closeLightbox() {
-    document.getElementById('lightbox').classList.remove('show');
-  }
-
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') closeLightbox();
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('mobile-open');
+  document.getElementById('sidebarOverlay').classList.remove('show');
+}
+function showSection(name) {
+  document.querySelectorAll('.section-page').forEach(function(el) { el.classList.remove('active'); });
+  document.querySelectorAll('.nav-item').forEach(function(el) { el.classList.remove('active'); });
+  const section = document.getElementById('section-' + name);
+  if (section) section.classList.add('active');
+  const navItem = document.getElementById('nav-' + name);
+  if (navItem) navItem.classList.add('active');
+  if (name === 'config') { loadFlowData(); loadSlogans(); }
+  else if (name === 'ids') { loadIdList(1); refreshIdStats(); }
+  else if (name === 'bots') { loadBotHealth(null); }
+  closeSidebar();
+  window.location.hash = name;
+}
+function showConfigTab(tab) {
+  ['slogans','flow'].forEach(function(t) {
+    document.getElementById('config-tab-' + t).style.display = t === tab ? '' : 'none';
+    document.getElementById('tab-' + t + '-btn').classList.toggle('active', t === tab);
   });
-
-  /* ---- scroll to active album after redirect ---- */
-  window.addEventListener('DOMContentLoaded', function() {
-    const params = new URLSearchParams(window.location.search);
-    const albumId = params.get('album');
-    if (albumId) {
-      const el = document.getElementById('album-' + albumId);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        // Auto-open add-post panel if just came from creating a new album (0 posts)
-        const posts = el.querySelectorAll('.post-item');
-        if (posts.length === 0) toggleAddPost(albumId);
-      }
+}
+/* ====== CLOCK ====== */
+function updateClock() {
+  const el = document.getElementById('dashClock');
+  if (el) el.textContent = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+}
+setInterval(updateClock, 1000); updateClock();
+/* ====== TOAST ====== */
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function showToast(message, type) {
+  const container = document.getElementById('toastContainer');
+  const id = 'toast_' + Date.now();
+  const bgClass = type === 'success' ? 'bg-success' : 'bg-danger';
+  const icon = type === 'success' ? 'bi-check-circle-fill' : 'bi-x-circle-fill';
+  container.insertAdjacentHTML('beforeend','<div id="'+id+'" class="toast align-items-center text-white '+bgClass+' border-0" role="alert"><div class="d-flex"><div class="toast-body"><i class="bi '+icon+' me-2"></i>'+escapeHtml(message)+'</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div></div>');
+  const toastEl = document.getElementById(id);
+  const toast = new bootstrap.Toast(toastEl, { delay: 4500 });
+  toast.show();
+  toastEl.addEventListener('hidden.bs.toast', function() { toastEl.remove(); });
+}
+/* ====== ALBUM HELPERS ====== */
+function toggleAddPost(albumId) {
+  const panel = document.getElementById('add-post-panel-' + albumId);
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+function previewImages(event, albumId) { renderPreviews(event.target.files, albumId); }
+function handleDrop(event, albumId) {
+  event.preventDefault();
+  document.getElementById('dz-' + albumId).classList.remove('dragover');
+  try { const dt = new DataTransfer(); for (const f of event.dataTransfer.files) dt.items.add(f); document.getElementById('fi-' + albumId).files = dt.files; renderPreviews(event.dataTransfer.files, albumId); } catch(e) {}
+}
+function renderPreviews(files, albumId) {
+  const preview = document.getElementById('preview-' + albumId);
+  preview.innerHTML = '';
+  for (const file of files) { if (!file.type.startsWith('image/')) continue; const img = document.createElement('img'); img.src = URL.createObjectURL(file); img.style.cssText = 'width:70px;height:70px;object-fit:cover;border-radius:6px;border:1px solid #2a2d35;'; preview.appendChild(img); }
+}
+function showSpinner(form) { const s = form.querySelector('.upload-spinner'); if (s) s.style.display = 'inline-block'; }
+/* ====== LIGHTBOX ====== */
+function openLightbox(src) { document.getElementById('lightbox-img').src = src; document.getElementById('lightbox').classList.add('show'); }
+function closeLightbox() { document.getElementById('lightbox').classList.remove('show'); }
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeLightbox(); });
+/* ====== BOT MANAGEMENT ====== */
+async function loadBotHealth(btn) {
+  const origHtml = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang kiểm tra...'; }
+  try {
+    const res = await fetch('/bots/health'); if (!res.ok) throw new Error('HTTP ' + res.status);
+    const bots = await res.json();
+    bots.forEach(function(bot) {
+      const statusEl = document.getElementById('bot-status-' + bot.id);
+      const subsEl = document.getElementById('bot-subs-' + bot.id);
+      const msgsEl = document.getElementById('bot-msgs-' + bot.id);
+      if (statusEl) { const icons={LIVE:'&#128994;',BAN:'&#128308;',ERROR:'&#128992;'},cls={LIVE:'status-live',BAN:'status-ban',ERROR:'status-error'}; statusEl.innerHTML='<span class="'+( cls[bot.status]||'status-error')+'">'+( icons[bot.status]||'&#128992;')+' '+bot.status+'</span>'; }
+      if (subsEl) subsEl.textContent = bot.subs_count ?? '&#8212;';
+      if (msgsEl) msgsEl.textContent = bot.messages_sent ?? '&#8212;';
+    });
+    if (btn) showToast('&#9989; Đã cập nhật trạng thái bot!', 'success');
+  } catch(e) { if (btn) showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = origHtml; } }
+}
+async function doAddBot(btn) {
+  const name = document.getElementById('botName').value.trim(), token = document.getElementById('botToken').value.trim(), adminId = document.getElementById('botAdminId').value.trim();
+  if (!name || !token) { showToast('&#9888;&#65039; Tên và Token không được để trống', 'error'); return; }
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang thêm...';
+  try {
+    const form = new FormData(); form.append('name', name); form.append('token', token); if (adminId) form.append('admin_id', adminId);
+    const res = await fetch('/bots/add', { method: 'POST', body: form }); const data = await res.json();
+    if (data.ok) { showToast('&#9989; Đã thêm bot! Khởi động lại server.', 'success'); bootstrap.Modal.getInstance(document.getElementById('addBotModal')).hide(); setTimeout(function() { location.reload(); }, 1500); }
+    else { showToast('&#10060; ' + (data.error || '?'), 'error'); }
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
+async function doDeleteBot(botId, botName, btn) {
+  if (!confirm('Xóa bot «' + botName + '»?')) return;
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+  try {
+    const res = await fetch('/bots/' + botId + '/delete', { method: 'POST' }); const data = await res.json();
+    if (data.ok) { showToast('&#9989; Đã xóa bot!', 'success'); setTimeout(function() { location.reload(); }, 1500); }
+    else { showToast('&#10060; ' + (data.error || '?'), 'error'); btn.disabled = false; btn.innerHTML = origHtml; }
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); btn.disabled = false; btn.innerHTML = origHtml; }
+}
+/* ====== ID MANAGEMENT ====== */
+let _idFileSelected = null, _idCurrentPage = 1, _idBroadcastInterval = null;
+function handleIdFileSelect(event) {
+  const file = event.target.files[0]; if (!file) return;
+  _idFileSelected = file;
+  document.getElementById('idFileName').textContent = '&#128196; ' + file.name;
+  document.getElementById('idFileName').style.display = '';
+  document.getElementById('btnUploadIds').disabled = false;
+}
+function handleIdFileDrop(event) {
+  event.preventDefault(); document.getElementById('idDropZone').classList.remove('dragover');
+  const file = event.dataTransfer.files[0];
+  if (file) { _idFileSelected = file; document.getElementById('idFileName').textContent = '&#128196; ' + file.name; document.getElementById('idFileName').style.display = ''; document.getElementById('btnUploadIds').disabled = false; }
+}
+async function doUploadIds(btn) {
+  if (!_idFileSelected) { showToast('&#9888;&#65039; Chưa chọn file', 'error'); return; }
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang tải lên...';
+  try {
+    const form = new FormData(); form.append('file', _idFileSelected);
+    const res = await fetch('/ids/upload', { method: 'POST', body: form }); const data = await res.json();
+    if (data.ok) {
+      showToast('&#9989; Đã tải ' + data.inserted + ' ID mới (bỏ qua ' + data.skipped + ' trùng)!', 'success');
+      _idFileSelected = null; document.getElementById('idFileName').style.display = 'none';
+      loadIdList(1); refreshIdStats();
+    } else { showToast('&#10060; ' + (data.error || '?'), 'error'); }
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
+async function refreshIdStats() {
+  try {
+    const res = await fetch('/ids/stats'); const s = await res.json();
+    ['total','active','blocked','invalid'].forEach(function(k) { const el = document.getElementById('idStat-' + k); if (el) el.textContent = s[k] ?? 0; });
+  } catch(e) {}
+}
+async function loadIdList(page) {
+  _idCurrentPage = page || 1;
+  const statusFilter = document.getElementById('idStatusFilter') ? document.getElementById('idStatusFilter').value : '';
+  const url = '/ids?page=' + _idCurrentPage + '&per_page=50' + (statusFilter ? '&status=' + statusFilter : '');
+  const container = document.getElementById('idListContainer');
+  container.innerHTML = '<div class="text-center py-4"><span class="spinner-border spinner-border-sm me-2" role="status"></span>Đang tải...</div>';
+  try {
+    const res = await fetch(url); const data = await res.json();
+    if (!data.ok || !data.items || data.items.length === 0) {
+      container.innerHTML = '<div class="empty-state py-4"><i class="bi bi-people"></i><p>Chưa có ID nào.' + (statusFilter ? ' (bộ lọc: ' + statusFilter + ')' : '') + '</p></div>'; return;
     }
-    // Load flow data (only on owner pages where the section exists)
-    if (document.getElementById('flowNodesList')) {
-      loadFlowData();
+    const statusMap = { active: '<span class="status-badge status-active">&#9989; Active</span>', blocked: '<span class="status-badge status-blocked">&#128683; Blocked</span>', invalid: '<span class="status-badge status-invalid">&#10060; Invalid</span>', unknown: '<span class="status-badge status-unknown">&#9634; Unknown</span>' };
+    let html = '<div class="table-responsive"><table class="table table-dark table-borderless data-table mb-0"><thead><tr><th class="ps-3">User ID</th><th>Trạng thái</th><th>Cập nhật</th></tr></thead><tbody>';
+    data.items.forEach(function(item) {
+      const badge = statusMap[item.status] || item.status;
+      const updated = item.updated_at ? item.updated_at.substring(0,10) : '&#8212;';
+      html += '<tr><td class="ps-3 font-monospace" style="font-size:.82rem;">' + escapeHtml(item.user_id) + '</td><td>' + badge + '</td><td style="font-size:.78rem;color:#888;">' + updated + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+    const totalPages = Math.ceil(data.total / data.per_page);
+    document.getElementById('idPaginationInfo').textContent = 'Tổng: ' + data.total + ' · Trang ' + data.page + '/' + totalPages;
+    const btns = document.getElementById('idPaginationBtns'); btns.innerHTML = '';
+    if (totalPages > 1) {
+      if (page > 1) btns.insertAdjacentHTML('beforeend', '<button class="btn btn-sm btn-outline-secondary" onclick="loadIdList(' + (page-1) + ')">&#8249;</button>');
+      for (let p = Math.max(1,page-2); p <= Math.min(totalPages,page+2); p++) btns.insertAdjacentHTML('beforeend', '<button class="btn btn-sm ' + (p===page?'btn-accent':'btn-outline-secondary') + '" onclick="loadIdList(' + p + ')">' + p + '</button>');
+      if (page < totalPages) btns.insertAdjacentHTML('beforeend', '<button class="btn btn-sm btn-outline-secondary" onclick="loadIdList(' + (page+1) + ')">&#8250;</button>');
     }
-    // Load slogan data (only on owner pages where the section exists)
-    if (document.getElementById('sloganList')) {
-      loadSlogans();
-    }
+  } catch(e) { container.innerHTML = '<div class="empty-state py-4"><i class="bi bi-wifi-off"></i><p>Lỗi kết nối</p></div>'; }
+}
+async function doClearIds(statusFilter) {
+  if (!confirm(statusFilter ? 'Xóa tất cả ID «' + statusFilter + '»?' : 'Xóa TẤT CẢ IDs?')) return;
+  const form = new FormData(); if (statusFilter) form.append('status', statusFilter);
+  try {
+    const res = await fetch('/ids/clear', { method: 'POST', body: form }); const data = await res.json();
+    if (data.ok) { showToast('&#9989; Đã xóa!', 'success'); loadIdList(1); refreshIdStats(); }
+    else { showToast('&#10060; ' + (data.error || '?'), 'error'); }
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+}
+async function doIdBroadcast(btn) {
+  const message = document.getElementById('idBroadcastMessage').value.trim();
+  if (!message) { showToast('&#9888;&#65039; Nhập nội dung tin nhắn', 'error'); return; }
+  if (!confirm('Bắt đầu broadcast tới tất cả ID (unknown + active)?')) return;
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang khởi động...';
+  document.getElementById('broadcastProgress').style.display = '';
+  document.getElementById('bpBar').style.width = '0%'; document.getElementById('bpLabel').textContent = 'Đang khởi động...'; document.getElementById('bpPercent').textContent = '0%';
+  document.getElementById('bpActive').textContent = '0'; document.getElementById('bpBlocked').textContent = '0'; document.getElementById('bpInvalid').textContent = '0';
+  try {
+    const form = new FormData(); form.append('message', message);
+    const res = await fetch('/ids/broadcast', { method: 'POST', body: form }); const data = await res.json();
+    if (data.ok) {
+      showToast('&#9989; Broadcast bắt đầu! ' + data.total + ' ID...', 'success');
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang gửi...';
+      if (_idBroadcastInterval) clearInterval(_idBroadcastInterval);
+      _idBroadcastInterval = setInterval(async function() {
+        try {
+          const sr = await fetch('/ids/broadcast/status'); const s = await sr.json();
+          const pct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
+          document.getElementById('bpBar').style.width = pct + '%'; document.getElementById('bpPercent').textContent = pct + '%';
+          document.getElementById('bpLabel').textContent = s.running ? 'Đang gửi (' + s.done + '/' + s.total + ')...' : '&#9989; Hoàn thành!';
+          document.getElementById('bpActive').textContent = s.active; document.getElementById('bpBlocked').textContent = s.blocked; document.getElementById('bpInvalid').textContent = s.invalid;
+          if (!s.running) { clearInterval(_idBroadcastInterval); btn.disabled = false; btn.innerHTML = origHtml; showToast('&#9989; Hoàn tất! Active:' + s.active + ' Blocked:' + s.blocked + ' Invalid:' + s.invalid, 'success'); loadIdList(_idCurrentPage); refreshIdStats(); }
+        } catch(e) {}
+      }, 2000);
+    } else { showToast('&#10060; ' + (data.error || '?'), 'error'); btn.disabled = false; btn.innerHTML = origHtml; document.getElementById('broadcastProgress').style.display = 'none'; }
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); btn.disabled = false; btn.innerHTML = origHtml; document.getElementById('broadcastProgress').style.display = 'none'; }
+}
+/* ====== BACKUP & SYSTEM ====== */
+async function doBackup(btn) {
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang sao lưu...';
+  try { const res = await fetch('/backup/manual', { method: 'POST' }); const data = await res.json(); showToast(data.ok ? '&#9989; Sao lưu thành công!' : '&#10060; ' + (data.error||'?'), data.ok ? 'success' : 'error'); }
+  catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
+async function doRestore(btn) {
+  if (!confirm('Khôi phục từ Cloudinary? Dữ liệu hiện tại bị ghi đè!')) return;
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang khôi phục...';
+  try { const res = await fetch('/backup/restore', { method: 'POST' }); const data = await res.json(); if (data.ok) { showToast('&#9989; Khôi phục thành công! Trang sẽ làm mới...', 'success'); setTimeout(function() { location.reload(); }, 2000); } else { showToast('&#10060; ' + (data.error||'?'), 'error'); } }
+  catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
+async function doBroadcast(btn) {
+  const message = document.getElementById('broadcastMessage').value.trim();
+  if (!message) { showToast('&#9888;&#65039; Vui lòng nhập nội dung', 'error'); return; }
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang gửi...';
+  try {
+    const form = new FormData(); form.append('message', message);
+    const res = await fetch('/broadcast', { method: 'POST', body: form }); const data = await res.json();
+    if (data.ok) { showToast('&#9989; Đã gửi! Thành công:' + data.success + ', Thất bại:' + data.fail, 'success'); bootstrap.Modal.getInstance(document.getElementById('broadcastModal')).hide(); document.getElementById('broadcastMessage').value = ''; }
+    else { showToast('&#10060; ' + (data.error||'?'), 'error'); }
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
+async function doSaveSchedule(btn) {
+  const hour = parseInt(document.getElementById('scheduleHour').value, 10), minute = parseInt(document.getElementById('scheduleMinute').value, 10);
+  if (isNaN(hour)||isNaN(minute)||hour<0||hour>23||minute<0||minute>59) { showToast('&#9888;&#65039; Giờ/phút không hợp lệ', 'error'); return; }
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
+  try {
+    const form = new FormData(); form.append('hour', hour); form.append('minute', minute);
+    const res = await fetch('/settings/time', { method: 'POST', body: form }); const data = await res.json();
+    showToast(data.ok ? '&#9989; Đã cài ' + String(data.hour).padStart(2,'0') + ':' + String(data.minute).padStart(2,'0') + ' (Giờ VN)' : '&#10060; ' + (data.error||'?'), data.ok?'success':'error');
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
+/* ====== FLOW BUILDER ====== */
+let _flowData = {};
+async function loadFlowData() {
+  try { const res = await fetch('/messages'); if (!res.ok) return; _flowData = await res.json(); renderNodeList(); }
+  catch(e) { console.error('Failed to load flow:', e); }
+}
+function renderNodeList() {
+  const container = document.getElementById('flowNodesList'); if (!container) return;
+  const nodeIds = Object.keys(_flowData);
+  if (nodeIds.length === 0) { container.innerHTML = '<div class="empty-state py-3"><i class="bi bi-chat-dots"></i><p class="mt-2 mb-0">Chưa có kịch bản nào.</p></div>'; return; }
+  nodeIds.sort(function(a,b){ return a==='start'?-1:b==='start'?1:a.localeCompare(b); });
+  let html = '<div class="list-group list-group-flush">';
+  for (const nodeId of nodeIds) {
+    const node = _flowData[nodeId] || {}; const text = (node.text||'').replace(/\n/g,' ').substring(0,70); const btns = node.buttons||[]; const isStart = nodeId==='start';
+    let arrows = ''; for (const btn of btns) arrows += btn.type==='node' ? '<span class="badge bg-primary me-1" style="font-size:.68rem;">&#8594; '+escapeHtml(btn.value)+'</span>' : '<span class="badge bg-secondary me-1" style="font-size:.68rem;">&#128279; URL</span>';
+    html += '<div class="list-group-item py-3" style="background:transparent;border-color:var(--border-color);"><div class="d-flex align-items-start gap-3 flex-wrap"><div class="flex-grow-1" style="min-width:0;"><div class="d-flex align-items-center gap-2 mb-1 flex-wrap"><code style="color:var(--accent);font-size:.88rem;">'+escapeHtml(nodeId)+'</code>'+( isStart?'<span class="badge bg-warning text-dark" style="font-size:.65rem;">START</span>':'')+'<span class="text-muted" style="font-size:.75rem;"><i class="bi bi-grid me-1"></i>'+btns.length+' nút</span></div><div class="text-muted text-truncate" style="font-size:.82rem;max-width:100%;">'+( text?escapeHtml(text)+((node.text||'').length>70?'&#8230;':''): '<em>Chưa có nội dung</em>')+'</div>'+( arrows?'<div class="mt-1">'+arrows+'</div>':'' )+'</div><div class="d-flex gap-1 flex-shrink-0 mt-1"><button class="btn btn-sm btn-outline-primary" onclick="openEditNode(\''+ escapeHtml(nodeId)+'\')" title="Sửa"><i class="bi bi-pencil"></i></button>'+( !isStart?'<button class="btn btn-sm btn-outline-danger" onclick="doDeleteNode(\''+ escapeHtml(nodeId)+'\', this)" title="Xóa"><i class="bi bi-trash3"></i></button>':'')+'</div></div></div>';
+  }
+  html += '</div>'; container.innerHTML = html;
+}
+function openEditNode(nodeId) {
+  const node = _flowData[nodeId] || { text: '', buttons: [] };
+  document.getElementById('fnModalNodeId').textContent = nodeId;
+  document.getElementById('fnNodeId').value = nodeId;
+  document.getElementById('fnNodeText').value = node.text || '';
+  const container = document.getElementById('fnBtnList'); container.innerHTML = '';
+  (node.buttons||[]).forEach(function(btn) { fnAddBtn(btn.label, btn.type, btn.value); });
+  new bootstrap.Modal(document.getElementById('flowNodeModal')).show();
+}
+function fnAddBtn(label, type, value) {
+  const container = document.getElementById('fnBtnList');
+  const nodeIds = Object.keys(_flowData).sort(function(a,b){return a==='start'?-1:b==='start'?1:a.localeCompare(b);});
+  const isNode = (type==='node');
+  const nodeOptions = nodeIds.map(function(id){ return '<option value="'+escapeHtml(id)+'"'+( isNode&&value===id?' selected':'')+'>'+escapeHtml(id)+'</option>'; }).join('');
+  const div = document.createElement('div'); div.className = 'fn-btn-row mb-2 p-2 rounded'; div.style.cssText = 'background:rgba(255,255,255,.03);border:1px solid var(--border-color);';
+  div.innerHTML = '<div class="mb-1"><input class="form-control form-control-sm fn-btn-label" placeholder="Tên nút" value="'+escapeHtml(label||'')+'"></div><div class="d-flex gap-2 align-items-center flex-wrap"><select class="form-select form-select-sm fn-btn-type" onchange="fnToggleBtnType(this)" style="max-width:180px;flex-shrink:0;"><option value="url"'+(!isNode?' selected':'')+'>&#128279; Mở Link Web</option><option value="node"'+( isNode?' selected':'')+'>&#128172; Mở Tin nhắn Khác</option></select><input class="form-control form-control-sm fn-btn-url'+( isNode?' d-none':'')+'" style="flex:1;min-width:100px;" placeholder="https://..." value="'+escapeHtml(!isNode?(value||''): '')+'"><select class="form-select form-select-sm fn-btn-node'+(!isNode?' d-none':'')+'" style="flex:1;min-width:100px;">'+nodeOptions+'</select><button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="this.closest(\'.fn-btn-row\').remove()"><i class="bi bi-x-lg"></i></button></div>';
+  container.appendChild(div);
+}
+function fnToggleBtnType(select) {
+  const row = select.closest('.fn-btn-row'); const urlInput = row.querySelector('.fn-btn-url'); const nodeSelect = row.querySelector('.fn-btn-node');
+  if (select.value==='node') { urlInput.classList.add('d-none'); nodeSelect.classList.remove('d-none'); } else { urlInput.classList.remove('d-none'); nodeSelect.classList.add('d-none'); }
+}
+async function doSaveNode(btn) {
+  const nodeId = document.getElementById('fnNodeId').value, text = document.getElementById('fnNodeText').value;
+  const buttons = [];
+  document.querySelectorAll('#fnBtnList .fn-btn-row').forEach(function(row) {
+    const label = row.querySelector('.fn-btn-label').value.trim(), type = row.querySelector('.fn-btn-type').value;
+    const value = type==='node' ? row.querySelector('.fn-btn-node').value : row.querySelector('.fn-btn-url').value.trim();
+    if (label && value) buttons.push({ label: label, type: type, value: value });
   });
-
-  /* ---- Toast notifications ---- */
-  function escapeHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
+  try {
+    const res = await fetch('/messages/' + encodeURIComponent(nodeId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text, buttons: buttons }) });
+    const data = await res.json();
+    if (data.ok) { _flowData[nodeId] = { text: text, buttons: buttons }; renderNodeList(); bootstrap.Modal.getInstance(document.getElementById('flowNodeModal')).hide(); showToast('&#9989; Đã lưu kịch bản «' + nodeId + '»!', 'success'); }
+    else { showToast('&#10060; ' + (data.error||'?'), 'error'); }
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
+async function doDeleteNode(nodeId, btn) {
+  if (!confirm('Xóa kịch bản «' + nodeId + '»?')) return;
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+  try {
+    const res = await fetch('/messages/' + encodeURIComponent(nodeId) + '/delete', { method: 'POST' }); const data = await res.json();
+    if (data.ok) { delete _flowData[nodeId]; renderNodeList(); showToast('&#9989; Đã xóa!', 'success'); }
+    else { showToast('&#10060; ' + (data.error||'?'), 'error'); btn.disabled = false; btn.innerHTML = origHtml; }
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); btn.disabled = false; btn.innerHTML = origHtml; }
+}
+function showAddNodeModal() { document.getElementById('newNodeId').value = ''; new bootstrap.Modal(document.getElementById('addNodeModal')).show(); }
+async function doAddNode(btn) {
+  const nodeId = document.getElementById('newNodeId').value.trim().toLowerCase();
+  if (!nodeId) { showToast('&#9888;&#65039; Vui lòng nhập ID kịch bản', 'error'); return; }
+  if (!/^[a-z0-9_-]+$/.test(nodeId)) { showToast('&#9888;&#65039; ID chỉ dùng chữ thường, số và _', 'error'); return; }
+  if (_flowData[nodeId]) { showToast('&#9888;&#65039; Kịch bản «' + nodeId + '» đã tồn tại!', 'error'); return; }
+  _flowData[nodeId] = { text: '', buttons: [] }; renderNodeList();
+  bootstrap.Modal.getInstance(document.getElementById('addNodeModal')).hide();
+  setTimeout(function() { openEditNode(nodeId); }, 350);
+}
+/* ====== SLOGAN MANAGER ====== */
+let _slogans = { enabled: true, items: [] };
+async function loadSlogans() {
+  try { const res = await fetch('/slogans'); if (!res.ok) return; _slogans = await res.json(); document.getElementById('sloganEnabled').checked = !!_slogans.enabled; document.getElementById('sloganEnabledLabel').textContent = _slogans.enabled ? 'Bật' : 'Tắt'; renderSloganList(); }
+  catch(e) { console.error('Failed to load slogans:', e); }
+}
+function toggleSloganEnabled(checkbox) { _slogans.enabled = checkbox.checked; document.getElementById('sloganEnabledLabel').textContent = checkbox.checked ? 'Bật' : 'Tắt'; }
+function renderSloganList() {
+  const container = document.getElementById('sloganList'); if (!container) return;
+  if (!_slogans.items || _slogans.items.length === 0) { container.innerHTML = '<div class="empty-state py-3"><i class="bi bi-chat-quote"></i><p class="mt-2 mb-0">Chưa có slogan nào.</p></div>'; return; }
+  let html = '<div class="list-group list-group-flush">';
+  _slogans.items.forEach(function(item, idx) {
+    const text = (item.text||'').replace(/\n/g,' ').substring(0,80);
+    html += '<div class="list-group-item py-2" style="background:transparent;border-color:var(--border-color);"><div class="d-flex align-items-start gap-3"><span class="badge bg-secondary rounded-pill mt-1" style="min-width:26px;text-align:center;">'+( idx+1)+'</span><div class="flex-grow-1" style="min-width:0;"><div class="text-truncate text-light" style="font-size:.88rem;">'+escapeHtml(text)+(item.text.length>80?'&#8230;':'')+'</div><span class="text-muted" style="font-size:.75rem;"><i class="bi bi-clock me-1"></i>'+item.delay_after+'s</span></div><div class="d-flex gap-1 flex-shrink-0"><button class="btn btn-sm btn-outline-secondary" onclick="moveSloganUp('+idx+')" '+( idx===0?'disabled':'')+' title="Lên"><i class="bi bi-arrow-up"></i></button><button class="btn btn-sm btn-outline-secondary" onclick="moveSloganDown('+idx+')" '+( idx===_slogans.items.length-1?'disabled':'')+' title="Xuống"><i class="bi bi-arrow-down"></i></button><button class="btn btn-sm btn-outline-primary" onclick="openEditSlogan('+idx+')" title="Sửa"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-outline-danger" onclick="deleteSloganItem('+idx+')" title="Xóa"><i class="bi bi-trash3"></i></button></div></div></div>';
+  });
+  html += '</div>'; container.innerHTML = html;
+}
+function showAddSloganModal() { document.getElementById('sloganModalTitle').innerHTML = '<i class="bi bi-chat-quote me-2" style="color:var(--accent);"></i>Thêm Slogan'; document.getElementById('sloganEditIndex').value = '-1'; document.getElementById('sloganText').value = ''; document.getElementById('sloganDelay').value = '1'; new bootstrap.Modal(document.getElementById('sloganModal')).show(); }
+function openEditSlogan(idx) {
+  const item = _slogans.items[idx]; if (!item) return;
+  document.getElementById('sloganModalTitle').innerHTML = '<i class="bi bi-pencil-square me-2" style="color:var(--accent);"></i>Sửa Slogan #' + (idx+1);
+  document.getElementById('sloganEditIndex').value = idx; document.getElementById('sloganText').value = item.text||''; document.getElementById('sloganDelay').value = item.delay_after!=null?item.delay_after:1;
+  new bootstrap.Modal(document.getElementById('sloganModal')).show();
+}
+function doSaveSloganItem(btn) {
+  const text = document.getElementById('sloganText').value.trim();
+  if (!text) { showToast('&#9888;&#65039; Vui lòng nhập nội dung slogan', 'error'); return; }
+  const delay = parseFloat(document.getElementById('sloganDelay').value)||1, idx = parseInt(document.getElementById('sloganEditIndex').value, 10);
+  const item = { text: text, delay_after: Math.max(0, Math.min(30, delay)) };
+  if (idx >= 0 && idx < _slogans.items.length) { _slogans.items[idx] = item; } else { _slogans.items.push(item); }
+  renderSloganList(); bootstrap.Modal.getInstance(document.getElementById('sloganModal')).hide();
+  showToast('&#9989; Slogan cập nhật. Nhớ nhấn «Lưu» để áp dụng!', 'success');
+}
+function deleteSloganItem(idx) { if (!confirm('Xóa slogan #' + (idx+1) + '?')) return; _slogans.items.splice(idx,1); renderSloganList(); }
+function moveSloganUp(idx) { if (idx<=0) return; const tmp=_slogans.items[idx-1]; _slogans.items[idx-1]=_slogans.items[idx]; _slogans.items[idx]=tmp; renderSloganList(); }
+function moveSloganDown(idx) { if (idx>=_slogans.items.length-1) return; const tmp=_slogans.items[idx+1]; _slogans.items[idx+1]=_slogans.items[idx]; _slogans.items[idx]=tmp; renderSloganList(); }
+async function doSaveSlogans(btn) {
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
+  try { const res = await fetch('/slogans', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_slogans) }); const data = await res.json(); showToast(data.ok ? '&#9989; Đã lưu Slogan!' : '&#10060; ' + (data.error||'?'), data.ok?'success':'error'); }
+  catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
+/* ====== INIT ====== */
+window.addEventListener('DOMContentLoaded', function() {
+  const hash = window.location.hash.replace('#','')||'dashboard';
+  const validSections = ['dashboard','bots','ids','albums','config','system'];
+  showSection(validSections.includes(hash) ? hash : 'dashboard');
+  const activeAlbumId = '{{ active_album }}';
+  if (activeAlbumId) {
+    setTimeout(function() {
+      const el = document.getElementById('album-' + activeAlbumId);
+      if (el) { showSection('albums'); el.scrollIntoView({behavior:'smooth',block:'start'}); const posts = el.querySelectorAll('.post-item'); if (posts.length===0) toggleAddPost(activeAlbumId); }
+    }, 100);
   }
-
-  function showToast(message, type) {
-    const container = document.getElementById('toastContainer');
-    const id = 'toast_' + Date.now();
-    const bgClass = type === 'success' ? 'bg-success' : 'bg-danger';
-    const icon = type === 'success' ? 'bi-check-circle-fill' : 'bi-x-circle-fill';
-    container.insertAdjacentHTML('beforeend',
-      '<div id="' + id + '" class="toast align-items-center text-white ' + bgClass + ' border-0" role="alert">' +
-        '<div class="d-flex">' +
-          '<div class="toast-body"><i class="bi ' + icon + ' me-2"></i>' + escapeHtml(message) + '</div>' +
-          '<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>' +
-        '</div>' +
-      '</div>'
-    );
-    const toastEl = document.getElementById(id);
-    const toast = new bootstrap.Toast(toastEl, { delay: 4000 });
-    toast.show();
-    toastEl.addEventListener('hidden.bs.toast', function() { toastEl.remove(); });
-  }
-
-  /* ---- Manual backup ---- */
-  async function doBackup(btn) {
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang sao lưu...';
-    try {
-      const res = await fetch('/backup/manual', { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) {
-        showToast('✅ Sao lưu thành công!', 'success');
-      } else {
-        showToast('❌ Sao lưu thất bại: ' + (data.error || 'Lỗi không xác định'), 'error');
-      }
-    } catch (e) {
-      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
-    }
-  }
-
-  /* ---- Restore data ---- */
-  async function doRestore(btn) {
-    if (!confirm('Bạn có chắc muốn khôi phục dữ liệu từ bản sao lưu gần nhất?\nDữ liệu hiện tại sẽ bị ghi đè.')) return;
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang khôi phục...';
-    try {
-      const res = await fetch('/backup/restore', { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) {
-        showToast('✅ Khôi phục thành công! Trang sẽ tự làm mới...', 'success');
-        setTimeout(function() { location.reload(); }, 2000);
-      } else {
-        showToast('❌ Khôi phục thất bại: ' + (data.error || 'Lỗi không xác định'), 'error');
-      }
-    } catch (e) {
-      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
-    }
-  }
-
-  /* ---- Broadcast ---- */
-  async function doBroadcast(btn) {
-    const message = document.getElementById('broadcastMessage').value.trim();
-    if (!message) { showToast('⚠️ Vui lòng nhập nội dung thông báo', 'error'); return; }
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang gửi...';
-    try {
-      const form = new FormData();
-      form.append('message', message);
-      const res = await fetch('/broadcast', { method: 'POST', body: form });
-      const data = await res.json();
-      if (data.ok) {
-        showToast(`✅ Đã gửi! Thành công: ${data.success}, Thất bại: ${data.fail}`, 'success');
-        bootstrap.Modal.getInstance(document.getElementById('broadcastModal')).hide();
-        document.getElementById('broadcastMessage').value = '';
-      } else {
-        showToast('❌ Gửi thất bại: ' + (data.error || 'Lỗi không xác định'), 'error');
-      }
-    } catch (e) {
-      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
-    }
-  }
-
-  /* ---- Save schedule time ---- */
-  async function doSaveSchedule(btn) {
-    const hour = parseInt(document.getElementById('scheduleHour').value, 10);
-    const minute = parseInt(document.getElementById('scheduleMinute').value, 10);
-    if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-      showToast('⚠️ Giờ hoặc phút không hợp lệ', 'error'); return;
-    }
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
-    try {
-      const form = new FormData();
-      form.append('hour', hour);
-      form.append('minute', minute);
-      const res = await fetch('/settings/time', { method: 'POST', body: form });
-      const data = await res.json();
-      if (data.ok) {
-        showToast(`✅ Đã cài giờ gửi tự động: ${String(data.hour).padStart(2,'0')}:${String(data.minute).padStart(2,'0')} (Giờ VN)`, 'success');
-        bootstrap.Modal.getInstance(document.getElementById('scheduleModal')).hide();
-      } else {
-        showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
-      }
-    } catch (e) {
-      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
-    }
-  }
-
-  /* ---- Add Bot ---- */
-  async function doAddBot(btn) {
-    const name = document.getElementById('botName').value.trim();
-    const token = document.getElementById('botToken').value.trim();
-    const adminId = document.getElementById('botAdminId').value.trim();
-    if (!name || !token) { showToast('⚠️ Tên và Token không được để trống', 'error'); return; }
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang thêm...';
-    try {
-      const form = new FormData();
-      form.append('name', name);
-      form.append('token', token);
-      if (adminId) form.append('admin_id', adminId);
-      const res = await fetch('/bots/add', { method: 'POST', body: form });
-      const data = await res.json();
-      if (data.ok) {
-        showToast('✅ Đã thêm bot! Vui lòng khởi động lại server để áp dụng.', 'success');
-        bootstrap.Modal.getInstance(document.getElementById('addBotModal')).hide();
-        setTimeout(function() { location.reload(); }, 1500);
-      } else {
-        showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
-      }
-    } catch (e) {
-      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
-    }
-  }
-
-  /* ---- Delete Bot ---- */
-  async function doDeleteBot(botId, botName, btn) {
-    if (!confirm(`Xóa bot «${botName}»?\nBot sẽ ngừng hoạt động sau khi khởi động lại server.`)) return;
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
-    try {
-      const res = await fetch(`/bots/${botId}/delete`, { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) {
-        showToast('✅ Đã xóa bot! Vui lòng khởi động lại server để áp dụng.', 'success');
-        setTimeout(function() { location.reload(); }, 1500);
-      } else {
-        showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
-        btn.disabled = false;
-        btn.innerHTML = originalHtml;
-      }
-    } catch (e) {
-      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
-    }
-  }
-
-  /* ---- Load Bot Health Status ---- */
-  async function loadBotHealth(btn) {
-    const originalHtml = btn ? btn.innerHTML : '';
-    if (btn) {
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang kiểm tra...';
-    }
-    try {
-      const res = await fetch('/bots/health');
-      if (!res.ok) { throw new Error('HTTP ' + res.status); }
-      const bots = await res.json();
-      bots.forEach(function(bot) {
-        const statusEl = document.getElementById('bot-status-' + bot.id);
-        const subsEl = document.getElementById('bot-subs-' + bot.id);
-        const msgsEl = document.getElementById('bot-msgs-' + bot.id);
-        if (statusEl) {
-          const icons = { LIVE: '🟢', BAN: '🔴', ERROR: '🟠' };
-          const cls = { LIVE: 'status-live', BAN: 'status-ban', ERROR: 'status-error' };
-          statusEl.innerHTML = `<span class="${cls[bot.status] || 'status-error'}">${icons[bot.status] || '🟠'} ${bot.status}</span>`;
-        }
-        if (subsEl) subsEl.textContent = bot.subs_count ?? '—';
-        if (msgsEl) msgsEl.textContent = bot.messages_sent ?? '—';
-      });
-      if (btn) showToast('✅ Đã cập nhật trạng thái bot!', 'success');
-    } catch(e) {
-      showToast('❌ Lỗi khi kiểm tra trạng thái: ' + e.message, 'error');
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = originalHtml;
-      }
-    }
-  }
-
-  /* ---- Topbar mobile toggle ---- */
-  function toggleTopbar() {
-    const actions = document.getElementById('topbarActions');
-    actions.classList.toggle('show');
-  }
-
-  /* ========== CHATBOT FLOW BUILDER ========== */
-  let _flowData = {};
-
-  async function loadFlowData() {
-    try {
-      const res = await fetch('/messages');
-      if (!res.ok) return;
-      _flowData = await res.json();
-      renderNodeList();
-    } catch(e) {
-      console.error('Failed to load flow:', e);
-    }
-  }
-
-  function renderNodeList() {
-    const container = document.getElementById('flowNodesList');
-    if (!container) return;
-    const nodeIds = Object.keys(_flowData);
-    if (nodeIds.length === 0) {
-      container.innerHTML =
-        '<div class="empty-state py-3"><i class="bi bi-chat-dots"></i>' +
-        '<p class="mt-2 mb-0">Chưa có kịch bản nào. Hãy tạo kịch bản <code>start</code> đầu tiên!</p></div>';
-      return;
-    }
-    nodeIds.sort(function(a, b) {
-      if (a === 'start') return -1;
-      if (b === 'start') return 1;
-      return a.localeCompare(b);
-    });
-
-    let html = '<div class="list-group list-group-flush">';
-    for (const nodeId of nodeIds) {
-      const node = _flowData[nodeId] || {};
-      const text = (node.text || '').replace(/\n/g, ' ').substring(0, 70);
-      const btns = node.buttons || [];
-      const isStart = nodeId === 'start';
-
-      let arrows = '';
-      for (const btn of btns) {
-        if (btn.type === 'node') {
-          arrows += '<span class="badge bg-primary me-1" style="font-size:.68rem;">→ ' + escapeHtml(btn.value) + '</span>';
-        } else {
-          arrows += '<span class="badge bg-secondary me-1" style="font-size:.68rem;">🔗 URL</span>';
-        }
-      }
-
-      html +=
-        '<div class="list-group-item py-3" style="background:transparent;border-color:var(--border-color);">' +
-          '<div class="d-flex align-items-start gap-3 flex-wrap">' +
-            '<div class="flex-grow-1" style="min-width:0;">' +
-              '<div class="d-flex align-items-center gap-2 mb-1 flex-wrap">' +
-                '<code style="color:var(--accent);font-size:.88rem;">' + escapeHtml(nodeId) + '</code>' +
-                (isStart ? '<span class="badge bg-warning text-dark" style="font-size:.65rem;">START</span>' : '') +
-                '<span class="text-muted" style="font-size:.75rem;"><i class="bi bi-grid me-1"></i>' + btns.length + ' nút</span>' +
-              '</div>' +
-              '<div class="text-muted text-truncate" style="font-size:.82rem;max-width:100%;">' +
-                (text ? escapeHtml(text) + ((node.text||'').length > 70 ? '…' : '') : '<em>Chưa có nội dung</em>') +
-              '</div>' +
-              (arrows ? '<div class="mt-1">' + arrows + '</div>' : '') +
-            '</div>' +
-            '<div class="d-flex gap-1 flex-shrink-0 mt-1">' +
-              '<button class="btn btn-sm btn-outline-primary" onclick="openEditNode(\'' + escapeHtml(nodeId) + '\')" title="Chỉnh sửa">' +
-                '<i class="bi bi-pencil"></i>' +
-              '</button>' +
-              (!isStart
-                ? '<button class="btn btn-sm btn-outline-danger" onclick="doDeleteNode(\'' + escapeHtml(nodeId) + '\', this)" title="Xóa"><i class="bi bi-trash3"></i></button>'
-                : '') +
-            '</div>' +
-          '</div>' +
-        '</div>';
-    }
-    html += '</div>';
-    container.innerHTML = html;
-  }
-
-  function openEditNode(nodeId) {
-    const node = _flowData[nodeId] || { text: '', buttons: [] };
-    document.getElementById('fnModalNodeId').textContent = nodeId;
-    document.getElementById('fnNodeId').value = nodeId;
-    document.getElementById('fnNodeText').value = node.text || '';
-    const container = document.getElementById('fnBtnList');
-    container.innerHTML = '';
-    (node.buttons || []).forEach(function(btn) {
-      fnAddBtn(btn.label, btn.type, btn.value);
-    });
-    new bootstrap.Modal(document.getElementById('flowNodeModal')).show();
-  }
-
-  function fnAddBtn(label, type, value) {
-    const container = document.getElementById('fnBtnList');
-    const nodeIds = Object.keys(_flowData).sort(function(a,b){ return a==='start'?-1:b==='start'?1:a.localeCompare(b); });
-    const isNode = (type === 'node');
-
-    const nodeOptions = nodeIds.map(function(id) {
-      return '<option value="' + escapeHtml(id) + '"' + (isNode && value === id ? ' selected' : '') + '>' + escapeHtml(id) + '</option>';
-    }).join('');
-
-    const div = document.createElement('div');
-    div.className = 'fn-btn-row mb-2 p-2 rounded';
-    div.style.cssText = 'background:rgba(255,255,255,.03);border:1px solid var(--border-color);';
-    div.innerHTML =
-      '<div class="mb-1">' +
-        '<input class="form-control form-control-sm fn-btn-label" placeholder="Tên nút (VD: 🔥 Xem Menu, 💰 Bảng Giá)" value="' + escapeHtml(label || '') + '">' +
-      '</div>' +
-      '<div class="d-flex gap-2 align-items-center flex-wrap">' +
-        '<select class="form-select form-select-sm fn-btn-type" onchange="fnToggleBtnType(this)" style="max-width:180px;flex-shrink:0;">' +
-          '<option value="url"' + (!isNode ? ' selected' : '') + '>🔗 Mở Link Web</option>' +
-          '<option value="node"' + (isNode ? ' selected' : '') + '>💬 Mở Tin nhắn Khác</option>' +
-        '</select>' +
-        '<input class="form-control form-control-sm fn-btn-url' + (isNode ? ' d-none' : '') + '" style="flex:1;min-width:100px;" placeholder="https://t.me/..." value="' + escapeHtml(!isNode ? (value || '') : '') + '">' +
-        '<select class="form-select form-select-sm fn-btn-node' + (!isNode ? ' d-none' : '') + '" style="flex:1;min-width:100px;">' +
-          nodeOptions +
-        '</select>' +
-        '<button class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="this.closest(\'.fn-btn-row\').remove()" title="Xóa nút"><i class="bi bi-x-lg"></i></button>' +
-      '</div>';
-    container.appendChild(div);
-  }
-
-  function fnToggleBtnType(select) {
-    const row = select.closest('.fn-btn-row');
-    const urlInput = row.querySelector('.fn-btn-url');
-    const nodeSelect = row.querySelector('.fn-btn-node');
-    if (select.value === 'node') {
-      urlInput.classList.add('d-none');
-      nodeSelect.classList.remove('d-none');
-    } else {
-      urlInput.classList.remove('d-none');
-      nodeSelect.classList.add('d-none');
-    }
-  }
-
-  async function doSaveNode(btn) {
-    const nodeId = document.getElementById('fnNodeId').value;
-    const text = document.getElementById('fnNodeText').value;
-    const buttons = [];
-    document.querySelectorAll('#fnBtnList .fn-btn-row').forEach(function(row) {
-      const label = row.querySelector('.fn-btn-label').value.trim();
-      const type = row.querySelector('.fn-btn-type').value;
-      const value = type === 'node'
-        ? row.querySelector('.fn-btn-node').value
-        : row.querySelector('.fn-btn-url').value.trim();
-      if (label && value) buttons.push({ label: label, type: type, value: value });
-    });
-
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
-    try {
-      const res = await fetch('/messages/' + encodeURIComponent(nodeId), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: text, buttons: buttons })
-      });
-      const data = await res.json();
-      if (data.ok) {
-        _flowData[nodeId] = { text: text, buttons: buttons };
-        renderNodeList();
-        bootstrap.Modal.getInstance(document.getElementById('flowNodeModal')).hide();
-        showToast('✅ Đã lưu kịch bản «' + nodeId + '»! Bot cập nhật ngay lập tức.', 'success');
-      } else {
-        showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
-      }
-    } catch(e) {
-      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
-    }
-  }
-
-  async function doDeleteNode(nodeId, btn) {
-    if (!confirm('Xóa kịch bản «' + nodeId + '»?\nCác nút bấm trỏ đến kịch bản này sẽ không còn hoạt động.')) return;
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
-    try {
-      const res = await fetch('/messages/' + encodeURIComponent(nodeId) + '/delete', { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) {
-        delete _flowData[nodeId];
-        renderNodeList();
-        showToast('✅ Đã xóa kịch bản «' + nodeId + '»!', 'success');
-      } else {
-        showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
-        btn.disabled = false;
-        btn.innerHTML = originalHtml;
-      }
-    } catch(e) {
-      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
-    }
-  }
-
-  function showAddNodeModal() {
-    document.getElementById('newNodeId').value = '';
-    new bootstrap.Modal(document.getElementById('addNodeModal')).show();
-  }
-
-  async function doAddNode(btn) {
-    const nodeId = document.getElementById('newNodeId').value.trim().toLowerCase();
-    if (!nodeId) { showToast('⚠️ Vui lòng nhập ID kịch bản', 'error'); return; }
-    if (!/^[a-z0-9_]+$/.test(nodeId)) { showToast('⚠️ ID chỉ được dùng chữ thường, số và dấu _', 'error'); return; }
-    if (_flowData[nodeId]) { showToast('⚠️ Kịch bản «' + nodeId + '» đã tồn tại!', 'error'); return; }
-    _flowData[nodeId] = { text: '', buttons: [] };
-    renderNodeList();
-    bootstrap.Modal.getInstance(document.getElementById('addNodeModal')).hide();
-    setTimeout(function() { openEditNode(nodeId); }, 350);
-  }
-
-  /* ========== SLOGAN MANAGER ========== */
-  let _slogans = { enabled: true, items: [] };
-
-  async function loadSlogans() {
-    try {
-      const res = await fetch('/slogans');
-      if (!res.ok) return;
-      _slogans = await res.json();
-      document.getElementById('sloganEnabled').checked = !!_slogans.enabled;
-      document.getElementById('sloganEnabledLabel').textContent = _slogans.enabled ? 'Bật' : 'Tắt';
-      renderSloganList();
-    } catch(e) {
-      console.error('Failed to load slogans:', e);
-    }
-  }
-
-  function toggleSloganEnabled(checkbox) {
-    _slogans.enabled = checkbox.checked;
-    document.getElementById('sloganEnabledLabel').textContent = checkbox.checked ? 'Bật' : 'Tắt';
-  }
-
-  function renderSloganList() {
-    const container = document.getElementById('sloganList');
-    if (!container) return;
-    if (!_slogans.items || _slogans.items.length === 0) {
-      container.innerHTML =
-        '<div class="empty-state py-3"><i class="bi bi-chat-quote"></i>' +
-        '<p class="mt-2 mb-0 text-light">Chưa có slogan nào. Nhấn «Thêm Slogan» để bắt đầu.</p></div>';
-      return;
-    }
-    let html = '<div class="list-group list-group-flush">';
-    _slogans.items.forEach(function(item, idx) {
-      const text = (item.text || '').replace(/\n/g, ' ').substring(0, 80);
-      html +=
-        '<div class="list-group-item py-2" style="background:transparent;border-color:var(--border-color);">' +
-          '<div class="d-flex align-items-start gap-3">' +
-            '<span class="badge bg-secondary rounded-pill mt-1" style="min-width:26px;text-align:center;">' + (idx + 1) + '</span>' +
-            '<div class="flex-grow-1" style="min-width:0;">' +
-              '<div class="text-truncate text-light" style="font-size:.88rem;">' + escapeHtml(text) + (item.text.length > 80 ? '…' : '') + '</div>' +
-              '<span class="text-muted" style="font-size:.75rem;"><i class="bi bi-clock me-1"></i>' + item.delay_after + 's chờ</span>' +
-            '</div>' +
-            '<div class="d-flex gap-1 flex-shrink-0">' +
-              '<button class="btn btn-sm btn-outline-secondary" onclick="moveSloganUp(' + idx + ')" title="Lên" ' + (idx === 0 ? 'disabled' : '') + '><i class="bi bi-arrow-up"></i></button>' +
-              '<button class="btn btn-sm btn-outline-secondary" onclick="moveSloganDown(' + idx + ')" title="Xuống" ' + (idx === _slogans.items.length - 1 ? 'disabled' : '') + '><i class="bi bi-arrow-down"></i></button>' +
-              '<button class="btn btn-sm btn-outline-primary" onclick="openEditSlogan(' + idx + ')" title="Sửa"><i class="bi bi-pencil"></i></button>' +
-              '<button class="btn btn-sm btn-outline-danger" onclick="deleteSloganItem(' + idx + ')" title="Xóa"><i class="bi bi-trash3"></i></button>' +
-            '</div>' +
-          '</div>' +
-        '</div>';
-    });
-    html += '</div>';
-    container.innerHTML = html;
-  }
-
-  function showAddSloganModal() {
-    document.getElementById('sloganModalTitle').innerHTML = '<i class="bi bi-chat-quote me-2" style="color:var(--accent);"></i>Thêm Slogan';
-    document.getElementById('sloganEditIndex').value = '-1';
-    document.getElementById('sloganText').value = '';
-    document.getElementById('sloganDelay').value = '1';
-    new bootstrap.Modal(document.getElementById('sloganModal')).show();
-  }
-
-  function openEditSlogan(idx) {
-    const item = _slogans.items[idx];
-    if (!item) return;
-    document.getElementById('sloganModalTitle').innerHTML = '<i class="bi bi-pencil-square me-2" style="color:var(--accent);"></i>Sửa Slogan #' + (idx + 1);
-    document.getElementById('sloganEditIndex').value = idx;
-    document.getElementById('sloganText').value = item.text || '';
-    document.getElementById('sloganDelay').value = item.delay_after != null ? item.delay_after : 1;
-    new bootstrap.Modal(document.getElementById('sloganModal')).show();
-  }
-
-  function doSaveSloganItem(btn) {
-    const text = document.getElementById('sloganText').value.trim();
-    if (!text) { showToast('⚠️ Vui lòng nhập nội dung slogan', 'error'); return; }
-    const delay = parseFloat(document.getElementById('sloganDelay').value) || 1;
-    const idx = parseInt(document.getElementById('sloganEditIndex').value, 10);
-    const item = { text: text, delay_after: Math.max(0, Math.min(30, delay)) };
-    if (idx >= 0 && idx < _slogans.items.length) {
-      _slogans.items[idx] = item;
-    } else {
-      _slogans.items.push(item);
-    }
-    renderSloganList();
-    bootstrap.Modal.getInstance(document.getElementById('sloganModal')).hide();
-    showToast('✅ Slogan đã được cập nhật. Nhớ nhấn «Lưu Slogan» để áp dụng!', 'success');
-  }
-
-  function deleteSloganItem(idx) {
-    if (!confirm('Xóa slogan #' + (idx + 1) + '?')) return;
-    _slogans.items.splice(idx, 1);
-    renderSloganList();
-  }
-
-  function moveSloganUp(idx) {
-    if (idx <= 0) return;
-    const tmp = _slogans.items[idx - 1];
-    _slogans.items[idx - 1] = _slogans.items[idx];
-    _slogans.items[idx] = tmp;
-    renderSloganList();
-  }
-
-  function moveSloganDown(idx) {
-    if (idx >= _slogans.items.length - 1) return;
-    const tmp = _slogans.items[idx + 1];
-    _slogans.items[idx + 1] = _slogans.items[idx];
-    _slogans.items[idx] = tmp;
-    renderSloganList();
-  }
-
-  async function doSaveSlogans(btn) {
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
-    try {
-      const res = await fetch('/slogans', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(_slogans)
-      });
-      const data = await res.json();
-      if (data.ok) {
-        showToast('✅ Đã lưu cài đặt Slogan! Bot cập nhật ngay lập tức.', 'success');
-      } else {
-        showToast('❌ Lỗi: ' + (data.error || 'Lỗi không xác định'), 'error');
-      }
-    } catch(e) {
-      showToast('❌ Lỗi kết nối: ' + e.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
-    }
-  }
+});
 </script>
 </body>
 </html>
