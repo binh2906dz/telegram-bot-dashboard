@@ -480,7 +480,7 @@
                     {% endif %}
                   {% endfor %}
                 </div>
-                <div class="mt-1" style="font-size:.72rem;color:#555;"><i class="bi bi-images me-1"></i>{{ post.photos|length }} ảnh/video{% if post.created_at %} &middot; <i class="bi bi-clock me-1"></i>{{ post.created_at[:10] }}{% endif %}</div>
+                <div class="mt-1" style="font-size:.72rem;color:#555;"><i class="bi bi-collection me-1"></i>{{ post.photos|length }} ảnh/video{% if post.created_at %} &middot; <i class="bi bi-clock me-1"></i>{{ post.created_at[:10] }}{% endif %}</div>
               </div>
               {% endfor %}
             {% else %}<div class="empty-state py-3"><i class="bi bi-inbox"></i>Chưa có bài viết. Nhấn <strong>Thêm bài</strong>.</div>{% endif %}
@@ -620,6 +620,7 @@
     </div>
 
     <!-- CONFIG SECTION -->
+    <div class="section-page" id="section-config">
       <div class="page-header"><span class="page-title"><i class="bi bi-gear-fill"></i>Cấu hình Bot</span></div>
       <ul class="nav config-tabs mb-4" style="border-bottom:1px solid var(--border-color);">
         <li class="nav-item"><button class="nav-link active" id="tab-slogans-btn" onclick="showConfigTab('slogans')"><i class="bi bi-chat-quote me-1"></i>Slogan</button></li>

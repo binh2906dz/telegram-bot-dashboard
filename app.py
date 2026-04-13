@@ -288,6 +288,12 @@ def increment_messages_sent(bot_id: str, count: int):
     save_json(STATS_FILE, stats)
 
 
+_DEFAULT_ALBUM_END_NODE = {
+    "text": "Bạn đã xem xong album! 😊\nNhấn nút bên dưới để quay lại danh sách.",
+    "buttons": [{"label": "🔙 Quay lại danh sách Album", "type": "open_album_list", "value": "menu"}],
+}
+
+
 def get_messages_flow() -> dict:
     """Load messages.json in node-based flow format.
     Automatically migrates from the old flat {start_text, buttons[]} format."""
@@ -309,14 +315,11 @@ def get_messages_flow() -> dict:
         return flow
     if not isinstance(data, dict) or not data:
         return {"start": {"text": "Chào mừng bạn! 👋", "buttons": []},
-                "album_end": {"text": "Bạn đã xem xong album! 😊\nNhấn nút bên dưới để quay lại danh sách.", "buttons": [{"label": "🔙 Quay lại danh sách Album", "type": "open_album_list", "value": "menu"}]}}
+                "album_end": dict(_DEFAULT_ALBUM_END_NODE)}
     if "start" not in data:
         data["start"] = {"text": "Chào mừng bạn! 👋", "buttons": []}
     if "album_end" not in data:
-        data["album_end"] = {
-            "text": "Bạn đã xem xong album! 😊\nNhấn nút bên dưới để quay lại danh sách.",
-            "buttons": [{"label": "🔙 Quay lại danh sách Album", "type": "open_album_list", "value": "menu"}],
-        }
+        data["album_end"] = dict(_DEFAULT_ALBUM_END_NODE)
     return data
 
 
@@ -521,7 +524,10 @@ def add_post(album_id):
         return "Album not found", 404
     media_items = []
     # Accept both 'media' (new) and 'images' (legacy) field names
-    files = request.files.getlist("media") or request.files.getlist("images")
+    if "media" in request.files:
+        files = request.files.getlist("media")
+    else:
+        files = request.files.getlist("images")
     for f in files:
         if f and f.filename:
             try:
