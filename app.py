@@ -1,6 +1,7 @@
 import io
 import os
 import re
+import copy
 import glob
 import json
 import uuid
@@ -19,6 +20,14 @@ from flask import Flask, request, redirect, render_template, jsonify, Response, 
 import subprocess
 
 import httpx
+
+# Load .env file automatically when running outside of systemd (e.g. local dev).
+# In production systemd sets env vars via EnvironmentFile, so this is a no-op there.
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed; rely on systemd EnvironmentFile or pre-set env vars
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
@@ -42,21 +51,25 @@ OWNER_PASS = os.environ.get("OWNER_PASS", "admin123")
 MANAGER_USER = os.environ.get("MANAGER_USER", "quanly")
 MANAGER_PASS = os.environ.get("MANAGER_PASS", "quanly123")
 
-ALBUMS_FILE = "albums.json"
-SUBS_FILE = "subscribers.json"
-CONFIG_FILE = "config.json"
-BANNED_FILE = "banned.json"
-BOTS_FILE = "bots.json"
-MESSAGES_FILE = "messages.json"
-STATS_FILE = "stats.json"
-SLOGANS_FILE = "slogans.json"
-DB_FILE = "data.db"
+# Absolute directory of this file – used to build robust file paths that do not
+# depend on the process's current working directory.
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+ALBUMS_FILE = os.path.join(_APP_DIR, "albums.json")
+SUBS_FILE = os.path.join(_APP_DIR, "subscribers.json")
+CONFIG_FILE = os.path.join(_APP_DIR, "config.json")
+BANNED_FILE = os.path.join(_APP_DIR, "banned.json")
+BOTS_FILE = os.path.join(_APP_DIR, "bots.json")
+MESSAGES_FILE = os.path.join(_APP_DIR, "messages.json")
+STATS_FILE = os.path.join(_APP_DIR, "stats.json")
+SLOGANS_FILE = os.path.join(_APP_DIR, "slogans.json")
+DB_FILE = os.path.join(_APP_DIR, "data.db")
 
 # ===== LOCAL STORAGE CONFIG =====
-UPLOAD_BASE_DIR = os.path.join("static", "uploads")
+UPLOAD_BASE_DIR = os.path.join(_APP_DIR, "static", "uploads")
 UPLOAD_IMAGES_DIR = os.path.join(UPLOAD_BASE_DIR, "images")
 UPLOAD_VIDEOS_DIR = os.path.join(UPLOAD_BASE_DIR, "videos")
-BACKUP_DIR = os.path.join("static", "backups")
+BACKUP_DIR = os.path.join(_APP_DIR, "static", "backups")
 
 # Ensure upload directories exist at startup
 for _d in (UPLOAD_IMAGES_DIR, UPLOAD_VIDEOS_DIR, BACKUP_DIR):
@@ -71,12 +84,13 @@ def load_json(file, default):
         mtime = os.path.getmtime(file)
         entry = _cache.get(file)
         if entry and entry["mtime"] == mtime:
-            return entry["data"]
+            # Return a deep copy so callers cannot accidentally mutate the cache.
+            return copy.deepcopy(entry["data"])
         with open(file) as f:
             data = json.load(f)
         # Re-check mtime after reading so the cached value reflects the on-disk state
         _cache[file] = {"mtime": os.path.getmtime(file), "data": data}
-        return data
+        return copy.deepcopy(data)
     except Exception:
         return default
 
@@ -85,7 +99,7 @@ def save_json(file, data):
     with open(file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     try:
-        _cache[file] = {"mtime": os.path.getmtime(file), "data": data}
+        _cache[file] = {"mtime": os.path.getmtime(file), "data": copy.deepcopy(data)}
     except Exception:
         _cache.pop(file, None)
 
@@ -210,7 +224,7 @@ def subs_file(bot_id: str) -> str:
     """Return per-bot subscriber file path, falling back to global file."""
     if not bot_id or bot_id == "env_default":
         return SUBS_FILE
-    return f"subs_{bot_id}.json"
+    return os.path.join(_APP_DIR, f"subs_{bot_id}.json")
 
 
 def increment_bot_stat(bot_id: str, field: str, count: int = 1):
@@ -326,19 +340,20 @@ def _backup_files_to_zip(zf: zipfile.ZipFile):
     for fname in (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE, BOTS_FILE, MESSAGES_FILE, BANNED_FILE, SLOGANS_FILE):
         try:
             with open(fname, "rb") as f:
-                zf.writestr(fname, f.read())
+                # Store with just the basename so the zip is portable.
+                zf.writestr(os.path.basename(fname), f.read())
         except FileNotFoundError:
             pass
-    for path in glob.glob("subs_*.json"):
+    for path in glob.glob(os.path.join(_APP_DIR, "subs_*.json")):
         try:
             with open(path, "rb") as f:
-                zf.writestr(path, f.read())
+                zf.writestr(os.path.basename(path), f.read())
         except FileNotFoundError:
             pass
     # Include SQLite database
     if os.path.exists(DB_FILE):
         try:
-            zf.writestr(DB_FILE, backup_db_to_bytes())
+            zf.writestr(os.path.basename(DB_FILE), backup_db_to_bytes())
         except Exception as e:
             log.warning(f"Could not backup SQLite DB: {e}")
 
@@ -728,21 +743,29 @@ def backup_restore():
         return jsonify({"ok": False, "error": "Không tìm thấy bản sao lưu cục bộ"}), 404
 
     try:
-        allowed_static = {ALBUMS_FILE, SUBS_FILE, CONFIG_FILE, BOTS_FILE, MESSAGES_FILE, BANNED_FILE}
+        # Build a mapping from basename → absolute path for all known data files.
+        _static_files = (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE, BOTS_FILE, MESSAGES_FILE, BANNED_FILE)
+        allowed_basenames = {os.path.basename(p): p for p in _static_files}
+        db_basename = os.path.basename(DB_FILE)
+
         with zipfile.ZipFile(backup_zip_path, "r") as zf:
-            for fname in zf.namelist():
-                if fname == DB_FILE:
-                    db_data = zf.read(fname)
+            for entry in zf.namelist():
+                # Use only the basename to support both old (relative) and new (basename) zips.
+                fname = os.path.basename(entry)
+                if fname == db_basename:
+                    db_data = zf.read(entry)
                     with open(DB_FILE, "wb") as f:
                         f.write(db_data)
                     init_db()
                     continue
-                if fname not in allowed_static and not (
-                    fname.startswith("subs_") and fname.endswith(".json")
-                ):
+                if fname in allowed_basenames:
+                    dest = allowed_basenames[fname]
+                elif fname.startswith("subs_") and fname.endswith(".json"):
+                    dest = os.path.join(_APP_DIR, fname)
+                else:
                     continue
-                content = json.loads(zf.read(fname).decode("utf-8"))
-                save_json(fname, content)
+                content = json.loads(zf.read(entry).decode("utf-8"))
+                save_json(dest, content)
 
         return jsonify({"ok": True})
     except Exception as e:
@@ -1088,7 +1111,7 @@ def broadcast_all():
     # Also include all subscriber IDs (users who pressed /start) from subs_*.json and subscribers.json
     # Subscriber lists store integer IDs; convert to strings for consistent set operations.
     sub_ids: set = set()
-    for sub_path in [SUBS_FILE] + glob.glob("subs_*.json"):
+    for sub_path in [SUBS_FILE] + glob.glob(os.path.join(_APP_DIR, "subs_*.json")):
         for uid in load_json(sub_path, []):
             sub_ids.add(str(uid))
 
@@ -1715,7 +1738,10 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                         continue
 
                     if url.startswith("/static/uploads/"):
-                        f = open(url.lstrip("/"), "rb")
+                        # Use the app directory to build an absolute path so the file
+                        # can be opened regardless of the process's current working directory.
+                        abs_path = os.path.join(_APP_DIR, url.lstrip("/"))
+                        f = open(abs_path, "rb")
                         open_files.append(f)
                         media_src = f
                     else:
@@ -2093,6 +2119,28 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
 
     _bot_manager = _BotManager()
 
+    # Auto-start the bot manager background thread when Flask/Gunicorn loads the module.
+    # A non-blocking exclusive file lock ensures only ONE worker process starts the polling
+    # thread, even when Gunicorn is configured with multiple workers (-w 2+).
+    # The Werkzeug dev-server reloader guard prevents a double-start in debug mode.
+    if os.environ.get("WERKZEUG_RUN_MAIN") != "false":
+        try:
+            import fcntl as _fcntl
+
+            _bot_lock_path = os.path.join(tempfile.gettempdir(), "telegram_bot_manager.lock")
+            _bot_lock_fd = open(_bot_lock_path, "w")  # kept open to hold the lock
+            _fcntl.flock(_bot_lock_fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            _bot_manager.start_in_thread()
+            log.info("Bot manager started in background thread (worker PID %s)", os.getpid())
+        except (IOError, OSError):
+            log.info(
+                "Bot manager lock held by another worker (PID %s) – "
+                "bot polling thread not started in this worker",
+                os.getpid(),
+            )
+        except Exception as _bot_start_err:
+            log.error("Failed to auto-start bot manager: %s", _bot_start_err)
+
 else:
     log.warning("No bot token configured – bot disabled, Flask only")
 
@@ -2101,8 +2149,11 @@ def run_bot_thread():
     """Entry point called by run_bot.py — runs the dynamic BotManager loop.
 
     If no bot token is configured and bots.json is empty, this is a no-op.
-    Otherwise it starts a BotManager that dynamically polls bots.json and
-    manages Telegram bot polling instances.
+    Otherwise it acquires the exclusive bot-manager lock (blocking) and then
+    starts the BotManager loop.  This ensures that if Gunicorn's embedded bot
+    thread is already running (and holds the lock), run_bot_thread() waits
+    until that thread exits before taking over — providing a seamless handoff
+    rather than a conflicting dual-polling situation.
     """
     bots_cfg = load_json(BOTS_FILE, [])
     if not bots_cfg and not BOT_TOKEN:
@@ -2115,6 +2166,20 @@ def run_bot_thread():
         BotManagerCls = globals()["_BotManager"]
     except KeyError:
         log.warning("run_bot_thread: _BotManager not available – no bot token configured")
+        return
+
+    # Acquire the exclusive bot-manager lock (BLOCKING).  If Gunicorn's
+    # embedded bot thread currently holds the lock, we wait here until it
+    # releases (e.g. the Gunicorn worker dies), then start the bot ourselves.
+    try:
+        import fcntl as _fcntl
+        _bot_lock_path = os.path.join(tempfile.gettempdir(), "telegram_bot_manager.lock")
+        _bot_lock_fd = open(_bot_lock_path, "w")  # kept open to hold the lock for process lifetime
+        log.info("run_bot_thread: waiting for bot manager lock (PID %s)…", os.getpid())
+        _fcntl.flock(_bot_lock_fd, _fcntl.LOCK_EX)  # blocking – waits until the lock is free
+        log.info("run_bot_thread: acquired bot lock (PID %s), starting bot", os.getpid())
+    except Exception as _lock_err:
+        log.error("run_bot_thread: failed to acquire bot lock: %s", _lock_err)
         return
 
     loop = asyncio.new_event_loop()
