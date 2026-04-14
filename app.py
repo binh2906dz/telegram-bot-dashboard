@@ -2120,26 +2120,40 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
     _bot_manager = _BotManager()
 
     # Auto-start the bot manager background thread when Flask/Gunicorn loads the module.
-    # A non-blocking exclusive file lock ensures only ONE worker process starts the polling
-    # thread, even when Gunicorn is configured with multiple workers (-w 2+).
-    # The Werkzeug dev-server reloader guard prevents a double-start in debug mode.
-    if os.environ.get("WERKZEUG_RUN_MAIN") != "false":
-        try:
-            import fcntl as _fcntl
+    #
+    # Design notes:
+    # 1. Multi-worker safety: A non-blocking exclusive file lock (fcntl.flock) ensures
+    #    only ONE Gunicorn worker process starts the bot polling thread, even when
+    #    Gunicorn is launched with -w 2+ workers.
+    # 2. Werkzeug dev-server: When running flask with debug=True the reloader spawns a
+    #    child process with WERKZEUG_RUN_MAIN="true".  Both parent and child execute this
+    #    module-level code, but the file lock guarantees only whichever loads first
+    #    actually starts the bot — the other gets IOError and skips safely.
+    # 3. The lock file descriptor (_bot_lock_fd) is intentionally stored as a module-level
+    #    variable so it is NOT garbage-collected.  The lock is held for the entire process
+    #    lifetime; releasing it (by GC or close()) would free the lock and allow a second
+    #    process to start a competing bot instance.
+    _bot_lock_fd = None  # module-level reference to keep FD alive
+    try:
+        import fcntl as _fcntl
 
-            _bot_lock_path = os.path.join(tempfile.gettempdir(), "telegram_bot_manager.lock")
-            _bot_lock_fd = open(_bot_lock_path, "w")  # kept open to hold the lock
-            _fcntl.flock(_bot_lock_fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
-            _bot_manager.start_in_thread()
-            log.info("Bot manager started in background thread (worker PID %s)", os.getpid())
-        except (IOError, OSError):
-            log.info(
-                "Bot manager lock held by another worker (PID %s) – "
-                "bot polling thread not started in this worker",
-                os.getpid(),
-            )
-        except Exception as _bot_start_err:
-            log.error("Failed to auto-start bot manager: %s", _bot_start_err)
+        _bot_lock_path = os.path.join(tempfile.gettempdir(), "telegram_bot_manager.lock")
+        _bot_lock_fd = open(_bot_lock_path, "w")  # noqa: WPS515 – intentionally kept open
+        _fcntl.flock(_bot_lock_fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        _bot_manager.start_in_thread()
+        log.info("Bot manager started in background thread (worker PID %s)", os.getpid())
+    except (IOError, OSError):
+        log.info(
+            "Bot manager lock held by another worker (PID %s) – "
+            "bot polling thread not started in this worker",
+            os.getpid(),
+        )
+        if _bot_lock_fd is not None:
+            _bot_lock_fd.close()
+    except Exception as _bot_start_err:
+        log.error("Failed to auto-start bot manager: %s", _bot_start_err)
+        if _bot_lock_fd is not None:
+            _bot_lock_fd.close()
 
 else:
     log.warning("No bot token configured – bot disabled, Flask only")
@@ -2171,10 +2185,14 @@ def run_bot_thread():
     # Acquire the exclusive bot-manager lock (BLOCKING).  If Gunicorn's
     # embedded bot thread currently holds the lock, we wait here until it
     # releases (e.g. the Gunicorn worker dies), then start the bot ourselves.
+    #
+    # _bot_lock_fd is stored as a local (not closed) so the lock is held for the
+    # entire duration of run_bot_thread().  It is released automatically when
+    # this function returns and the local variable is garbage-collected.
     try:
         import fcntl as _fcntl
         _bot_lock_path = os.path.join(tempfile.gettempdir(), "telegram_bot_manager.lock")
-        _bot_lock_fd = open(_bot_lock_path, "w")  # kept open to hold the lock for process lifetime
+        _bot_lock_fd = open(_bot_lock_path, "w")  # noqa: WPS515 – held open for lock lifetime
         log.info("run_bot_thread: waiting for bot manager lock (PID %s)…", os.getpid())
         _fcntl.flock(_bot_lock_fd, _fcntl.LOCK_EX)  # blocking – waits until the lock is free
         log.info("run_bot_thread: acquired bot lock (PID %s), starting bot", os.getpid())
