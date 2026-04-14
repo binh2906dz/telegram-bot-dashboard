@@ -642,6 +642,7 @@
       <ul class="nav config-tabs mb-4" style="border-bottom:1px solid var(--border-color);">
         <li class="nav-item"><button class="nav-link active" id="tab-slogans-btn" onclick="showConfigTab('slogans')"><i class="bi bi-chat-quote me-1"></i>Slogan</button></li>
         <li class="nav-item"><button class="nav-link" id="tab-flow-btn" onclick="showConfigTab('flow')"><i class="bi bi-diagram-3 me-1"></i>Kịch bản Bot</button></li>
+        <li class="nav-item"><button class="nav-link" id="tab-miniapp-btn" onclick="showConfigTab('miniapp')"><i class="bi bi-phone me-1"></i>Mini App</button></li>
       </ul>
       <!-- Slogans Tab -->
       <div id="config-tab-slogans">
@@ -671,6 +672,23 @@
         <div class="dash-card">
           <div class="dash-card-body pb-1" style="border-bottom:1px solid var(--border-color);"><div style="font-size:.82rem;color:#bbb;"><i class="bi bi-info-circle me-1"></i>Kịch bản <code>start</code> là tin nhắn đầu tiên khi người dùng gõ <code>/start</code>.</div></div>
           <div class="dash-card-body"><div id="flowNodesList"><div class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2" role="status"></span>Đang tải...</div></div></div>
+        </div>
+      </div>
+      <!-- Mini App Tab -->
+      <div id="config-tab-miniapp" style="display:none;">
+        <div class="dash-card">
+          <div class="dash-card-header">
+            <span class="dash-card-title"><i class="bi bi-phone me-2" style="color:var(--accent);"></i>Cài đặt Mini App Bridge</span>
+          </div>
+          <div class="dash-card-body">
+            <p style="font-size:.85rem;color:#aaa;margin-bottom:14px;">
+              Khi liên kết album hết hạn (sau 24h), người dùng sẽ thấy thông báo này.
+              Nếu để trống sẽ dùng thông báo mặc định.
+            </p>
+            <label class="form-label" style="font-size:.82rem;">Thông báo hết hạn link</label>
+            <textarea id="expiredWarningMsg" class="form-control mb-3" rows="3" style="background:var(--input-bg,#1a1a1a);color:#eee;border:1px solid var(--border-color);border-radius:8px;resize:vertical;">{{ expired_warning_message }}</textarea>
+            <button class="btn btn-accent btn-sm" onclick="doSaveExpiredWarning(this)"><i class="bi bi-floppy me-1"></i>Lưu thông báo</button>
+          </div>
         </div>
       </div>
     </div>
@@ -964,7 +982,7 @@ function showSection(name) {
   window.location.hash = name;
 }
 function showConfigTab(tab) {
-  ['slogans','flow'].forEach(function(t) {
+  ['slogans','flow','miniapp'].forEach(function(t) {
     document.getElementById('config-tab-' + t).style.display = t === tab ? '' : 'none';
     document.getElementById('tab-' + t + '-btn').classList.toggle('active', t === tab);
   });
@@ -1488,6 +1506,21 @@ async function doSaveSchedule(btn) {
     const form = new FormData(); form.append('hour', hour); form.append('minute', minute);
     const res = await fetch('/settings/time', { method: 'POST', body: form }); const data = await res.json();
     showToast(data.ok ? '&#9989; Đã cài ' + String(data.hour).padStart(2,'0') + ':' + String(data.minute).padStart(2,'0') + ' (Giờ VN)' : '&#10060; ' + (data.error||'?'), data.ok?'success':'error');
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+}
+async function doSaveExpiredWarning(btn) {
+  const msg = (document.getElementById('expiredWarningMsg').value || '').trim();
+  if (!msg) { showToast('&#9888;&#65039; Nội dung không được để trống', 'error'); return; }
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
+  try {
+    const res = await fetch('/settings/expired_warning_message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg })
+    });
+    const data = await res.json();
+    showToast(data.ok ? '&#9989; Đã lưu thông báo hết hạn!' : '&#10060; ' + (data.error||'?'), data.ok?'success':'error');
   } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = origHtml; }
 }
