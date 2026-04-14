@@ -24,15 +24,38 @@ if [ ! -f "$APP_DIR/.env" ]; then
         exit 1
     fi
     read -p "👉 NHẬP TÊN MIỀN (ví dụ: example.com): " INPUT_DOMAIN
-    echo "TOKEN=$INPUT_TOKEN" > "$APP_DIR/.env"
+    # Write all recognised token variable names so app.py picks it up
+    # regardless of which name is checked first.
+    echo "TELEGRAM_BOT_TOKEN=$INPUT_TOKEN" > "$APP_DIR/.env"
+    echo "TOKEN=$INPUT_TOKEN" >> "$APP_DIR/.env"
+    echo "BOT_TOKEN=$INPUT_TOKEN" >> "$APP_DIR/.env"
     echo "APP_BASE_URL=https://$INPUT_DOMAIN" >> "$APP_DIR/.env"
     echo "DOMAIN=https://$INPUT_DOMAIN" >> "$APP_DIR/.env"
     chmod 600 "$APP_DIR/.env"
     echo "✅ Đã tạo .env"
 else
     echo "✅ File .env đã tồn tại"
-    grep -q "TOKEN=" "$APP_DIR/.env" && echo "   (Có ít nhất một dòng TOKEN)" || \
-        echo "⚠️  Không tìm thấy dòng TOKEN trong .env – kiểm tra lại!"
+    # Ensure all three token variable names are present so app.py always
+    # finds the token even if the file was created by an older script.
+    _EXISTING_TOKEN=""
+    for _VAR in TELEGRAM_BOT_TOKEN TOKEN BOT_TOKEN; do
+        # Use sed to extract everything after the first '=' so that tokens
+        # containing '=' (e.g. base64 values) are not truncated.
+        _EXISTING_TOKEN=$(grep -m1 "^${_VAR}=" "$APP_DIR/.env" | sed 's/^[^=]*=//')
+        [ -n "$_EXISTING_TOKEN" ] && break
+    done
+    if [ -n "$_EXISTING_TOKEN" ]; then
+        echo "   (Token tìm thấy)"
+        # Back-fill any missing variable names so all three are present.
+        grep -q "^TELEGRAM_BOT_TOKEN=" "$APP_DIR/.env" || \
+            echo "TELEGRAM_BOT_TOKEN=$_EXISTING_TOKEN" >> "$APP_DIR/.env"
+        grep -q "^TOKEN=" "$APP_DIR/.env" || \
+            echo "TOKEN=$_EXISTING_TOKEN" >> "$APP_DIR/.env"
+        grep -q "^BOT_TOKEN=" "$APP_DIR/.env" || \
+            echo "BOT_TOKEN=$_EXISTING_TOKEN" >> "$APP_DIR/.env"
+    else
+        echo "⚠️  Không tìm thấy token trong .env – kiểm tra lại!"
+    fi
 fi
 
 echo ""

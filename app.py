@@ -20,9 +20,12 @@ import subprocess
 
 import httpx
 
-# Load .env file automatically.  Try python-dotenv first; if not installed,
-# fall back to a minimal built-in parser so the .env file is always respected
-# regardless of whether systemd's EnvironmentFile directive is present.
+# Load .env file automatically.  Our own parser runs unconditionally so that
+# empty-string env vars set by a misconfigured systemd unit or a stale shell
+# session never silently swallow the real token from the .env file.
+# python-dotenv (when installed) is also called as an enhancement; because
+# our parser already filled in every non-empty value, the dotenv call is
+# effectively a no-op for those keys.
 #
 # IMPORTANT: always resolve the .env path relative to this source file so the
 # correct file is found regardless of the process working directory (systemd /
@@ -32,7 +35,16 @@ _DOTENV_PATH = os.path.join(_APP_DIR, ".env")
 
 
 def _load_dotenv_fallback(dotenv_path: str) -> None:
-    """Parse a .env file and inject variables into os.environ (skips variables already set in environment)."""
+    """Parse a .env file and inject variables into os.environ.
+
+    A variable is written to os.environ when it is either absent from the
+    environment OR currently set to an empty string.  This ensures that an
+    empty-string placeholder injected by a misconfigured systemd
+    ``Environment=`` directive (e.g. ``Environment="BOT_TOKEN="``) never
+    hides the real token stored in the .env file.  A non-empty value that
+    is already present in the environment is always preserved so that the
+    runtime environment (systemd / Docker) can still override .env values.
+    """
     if not os.path.isfile(dotenv_path):
         return
     try:
@@ -47,20 +59,28 @@ def _load_dotenv_fallback(dotenv_path: str) -> None:
                 # Strip a matched outer quote pair (e.g. "value" or 'value')
                 if len(_val) >= 2 and _val[0] == _val[-1] and _val[0] in ('"', "'"):
                     _val = _val[1:-1]
-                if _key and _key not in os.environ:
+                # Set if the key is absent OR the existing value is an empty string.
+                # Using explicit `== ''` (not `not os.environ.get()`) so that
+                # legitimate falsy-but-non-empty values such as '0' or 'false'
+                # are preserved while empty-string placeholders injected by a
+                # misconfigured systemd Environment= directive are overridden.
+                if _key and (_key not in os.environ or os.environ[_key] == "") and _val:
                     os.environ[_key] = _val
     except Exception as _exc:
         # Log at debug level – never crash on .env parse failure
         logging.getLogger("app").debug("_load_dotenv_fallback: failed to parse %s: %s", dotenv_path, _exc)
 
 
+# Always run our own reliable parser first so the empty-string fix is applied
+# unconditionally regardless of whether python-dotenv is installed.
+_load_dotenv_fallback(_DOTENV_PATH)
 try:
     from dotenv import load_dotenv as _load_dotenv
-    # Explicitly pass dotenv_path so the correct .env is loaded regardless of
-    # the process working directory (e.g. when started by systemd/Gunicorn).
+    # override=False: python-dotenv will not touch vars already set by our
+    # parser above (or by the real runtime environment).
     _load_dotenv(dotenv_path=_DOTENV_PATH, override=False)
 except ImportError:
-    _load_dotenv_fallback(_DOTENV_PATH)  # python-dotenv not installed – use built-in parser
+    pass  # python-dotenv not installed; our fallback above already handled it
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")

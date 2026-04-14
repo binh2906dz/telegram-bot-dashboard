@@ -82,9 +82,15 @@ else
     echo "======================================"
     if [ -z "$BOT_TOKEN" ]; then
         echo "⚠️  Cảnh báo: Không nhập Bot Token. Bạn có thể tạo file .env thủ công sau."
-        echo "TOKEN=" > "$APP_DIR/.env"
+        echo "TELEGRAM_BOT_TOKEN=" > "$APP_DIR/.env"
+        echo "TOKEN=" >> "$APP_DIR/.env"
+        echo "BOT_TOKEN=" >> "$APP_DIR/.env"
     else
-        echo "TOKEN=$BOT_TOKEN" > "$APP_DIR/.env"
+        # Write all recognised token variable names so app.py finds the token
+        # regardless of which name it checks first.
+        echo "TELEGRAM_BOT_TOKEN=$BOT_TOKEN" > "$APP_DIR/.env"
+        echo "TOKEN=$BOT_TOKEN" >> "$APP_DIR/.env"
+        echo "BOT_TOKEN=$BOT_TOKEN" >> "$APP_DIR/.env"
     fi
     echo "APP_BASE_URL=https://$DOMAIN" >> "$APP_DIR/.env"
     echo "DOMAIN=https://$DOMAIN" >> "$APP_DIR/.env"
