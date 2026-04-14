@@ -1731,10 +1731,11 @@ async def _async_run_broadcast_all(
         # 30s timeout accommodates multipart file uploads
         async with httpx.AsyncClient(timeout=30) as client:
             for uid in user_ids:
-                # Skip users already successfully delivered by another bot
-                async with stats_lock:
-                    if uid in delivered_uids:
-                        continue
+                # Skip users already successfully delivered by another bot.
+                # No lock needed for this read: asyncio is cooperative and
+                # delivered_uids is only mutated inside stats_lock further below.
+                if uid in delivered_uids:
+                    continue
 
                 now = asyncio.get_running_loop().time()
                 if retry_until > now:
