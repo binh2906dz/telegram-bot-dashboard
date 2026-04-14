@@ -263,6 +263,13 @@ def init_db():
                 user_id INTEGER PRIMARY KEY
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS album_tokens (
+                token TEXT PRIMARY KEY,
+                album_id TEXT NOT NULL,
+                expires_at DATETIME NOT NULL
+            )
+        ''')
         conn.commit()
     _migrate_json_to_db()
 
@@ -625,6 +632,104 @@ def db_remove_ban(user_id: int):
     with get_db() as conn:
         conn.execute("DELETE FROM banned_users WHERE user_id=?", (user_id,))
         conn.commit()
+
+
+_DEFAULT_EXPIRED_WARNING = (
+    "Liên kết đã hết hạn bảo mật (sau 24h). "
+    "Vui lòng quay lại Bot Telegram và gõ /start để lấy link truy cập mới!"
+)
+
+
+def db_get_expired_warning_message() -> str:
+    """Return the expired-token warning message stored in app_config."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key='expired_warning_message'"
+            ).fetchone()
+        if row:
+            return row["value"]
+    except Exception as exc:
+        log.error("db_get_expired_warning_message failed: %s", exc)
+    return _DEFAULT_EXPIRED_WARNING
+
+
+def db_save_expired_warning_message(msg: str):
+    """Persist the expired-token warning message in app_config."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES ('expired_warning_message', ?)",
+            (msg,),
+        )
+        conn.commit()
+
+
+def db_create_album_token(album_id: str) -> str:
+    """Generate a 24-hour access token for an album and store it in album_tokens."""
+    token = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO album_tokens (token, album_id, expires_at) VALUES (?, ?, ?)",
+            (token, album_id, expires_at),
+        )
+        conn.commit()
+    return token
+
+
+def db_validate_album_token(token: str, album_id: str) -> bool:
+    """Return True if the token is valid and not expired for the given album_id."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT expires_at FROM album_tokens WHERE token=? AND album_id=?",
+                (token, album_id),
+            ).fetchone()
+        if not row:
+            return False
+        expires_at = datetime.fromisoformat(row["expires_at"])
+        # Make timezone-aware if naive
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) < expires_at
+    except Exception as exc:
+        log.error("db_validate_album_token failed: %s", exc)
+        return False
+
+
+def db_cleanup_expired_tokens():
+    """Remove expired tokens from the album_tokens table."""
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "DELETE FROM album_tokens WHERE expires_at <= ?",
+                (datetime.now(timezone.utc).isoformat(),),
+            )
+            conn.commit()
+    except Exception as exc:
+        log.error("db_cleanup_expired_tokens failed: %s", exc)
+
+
+def _validate_telegram_init_data(init_data: str, bot_token: str) -> bool:
+    """Verify Telegram WebApp initData using HMAC-SHA256 as per official docs."""
+    import hmac as _hmac
+    import hashlib as _hashlib
+    from urllib.parse import parse_qsl as _parse_qsl
+
+    try:
+        params = dict(_parse_qsl(init_data, keep_blank_values=True))
+        received_hash = params.pop("hash", "")
+        if not received_hash:
+            return False
+        data_check_string = "\n".join(
+            f"{k}={v}" for k, v in sorted(params.items())
+        )
+        secret_key = _hmac.new(b"WebAppData", bot_token.encode(), _hashlib.sha256).digest()
+        computed_hash = _hmac.new(secret_key, data_check_string.encode(), _hashlib.sha256).hexdigest()
+        return _hmac.compare_digest(computed_hash, received_hash)
+    except Exception as exc:
+        log.error("_validate_telegram_init_data failed: %s", exc)
+        return False
 
 
 def db_export_as_json() -> dict:
@@ -1010,7 +1115,8 @@ def index():
                            role=session.get("role", ""), username=session.get("username", ""),
                            bots=bots, messages_cfg=messages_cfg, cfg=cfg, slogans=slogans,
                            id_stats=id_stats, page=page, total_pages=total_pages,
-                           total_albums=total_albums)
+                           total_albums=total_albums,
+                           expired_warning_message=db_get_expired_warning_message())
 
 
 # --- Album management ---
@@ -1261,6 +1367,87 @@ def backup_restore():
     except Exception as e:
         log.error(f"Restore failed: {e}")
         return jsonify({"ok": False, "error": "Khôi phục thất bại. Vui lòng thử lại."}), 500
+
+
+# ===== TELEGRAM MINI APP BRIDGE ROUTES =====
+
+@app.route("/miniapp/bridge/<album_id>")
+def miniapp_bridge(album_id):
+    """Lightweight bridge page: validates Telegram initData, generates a 24-hour
+    token and redirects the user to the external album view in their browser."""
+    albums = db_get_albums()
+    if album_id not in albums:
+        return "Album không tồn tại", 404
+    base_url = request.host_url.rstrip("/")
+    return render_template("miniapp_bridge.html", album_id=album_id, base_url=base_url)
+
+
+@app.route("/api/generate_token/<album_id>", methods=["POST"])
+def api_generate_token(album_id):
+    """Validate Telegram WebApp initData and return a 24-hour access token."""
+    albums = db_get_albums()
+    if album_id not in albums:
+        return jsonify({"ok": False, "error": "Album không tồn tại"}), 404
+
+    data = request.get_json(silent=True) or {}
+    init_data = data.get("initData", "")
+
+    # Validate initData against the bot token
+    token_env = BOT_TOKEN
+    if not token_env:
+        # Try to find any configured bot token
+        bots = db_get_bots()
+        for b in bots:
+            t = (b.get("token") or "").strip()
+            if t:
+                token_env = t
+                break
+
+    if token_env and init_data:
+        if not _validate_telegram_init_data(init_data, token_env):
+            return jsonify({"ok": False, "error": "initData không hợp lệ"}), 403
+    elif not init_data:
+        # No initData provided – reject
+        return jsonify({"ok": False, "error": "Thiếu initData"}), 400
+
+    # Clean up stale tokens periodically
+    db_cleanup_expired_tokens()
+
+    access_token = db_create_album_token(album_id)
+    return jsonify({"ok": True, "token": access_token})
+
+
+@app.route("/view/album/<album_id>")
+def view_album(album_id):
+    """External (Chrome) album view protected by a 24-hour token."""
+    token = request.args.get("token", "")
+    if not token or not db_validate_album_token(token, album_id):
+        warning_msg = db_get_expired_warning_message()
+        return render_template("expired.html", message=warning_msg), 403
+
+    albums = db_get_albums()
+    album = albums.get(album_id)
+    if not album:
+        return "Album không tồn tại", 404
+
+    base_url = request.host_url.rstrip("/")
+    return render_template("album_view.html", album=album, album_id=album_id, base_url=base_url)
+
+
+@app.route("/settings/expired_warning_message", methods=["POST"])
+@login_required
+def settings_expired_warning_message():
+    """Save the expired-token warning message (admin-only)."""
+    try:
+        data = request.get_json(silent=True) or {}
+        msg = data.get("message", "").strip()
+        if not msg:
+            return jsonify({"ok": False, "error": "Nội dung không được để trống"}), 400
+        db_save_expired_warning_message(msg)
+        return jsonify({"ok": True})
+    except Exception as exc:
+        log.error("settings_expired_warning_message failed: %s", exc)
+        return jsonify({"ok": False, "error": "Lỗi server"}), 500
 
 
 async def _async_run_ids_broadcast(
@@ -2458,7 +2645,7 @@ def ids_broadcast():
 # ===== BOT HANDLERS =====
 
 if BOT_TOKEN or db_get_bots():
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo, WebAppInfo
     from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
     # ---- Flow keyboard builder ----
@@ -2488,10 +2675,15 @@ if BOT_TOKEN or db_get_bots():
 
         albums = db_get_albums()
         log.info("menu handler: loaded albums: %s", list(albums.keys()))
+        _base_url = os.environ.get("APP_BASE_URL", os.environ.get("DOMAIN", "")).rstrip("/")
         buttons = []
         for key, val in sorted(albums.items()):
             title = val.get("title", key) if isinstance(val, dict) else key
-            buttons.append([InlineKeyboardButton(f"🔥 {title}", callback_data=key)])
+            if _base_url:
+                bridge_url = f"{_base_url}/miniapp/bridge/{key}"
+                buttons.append([InlineKeyboardButton(f"🔥 {title}", web_app=WebAppInfo(url=bridge_url))])
+            else:
+                buttons.append([InlineKeyboardButton(f"🔥 {title}", callback_data=key)])
         buttons.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="back")])
 
         await query.edit_message_text("CHỌN COMBO LlNK HOT🔥", reply_markup=InlineKeyboardMarkup(buttons))

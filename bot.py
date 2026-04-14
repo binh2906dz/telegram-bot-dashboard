@@ -1,11 +1,20 @@
 import json, os, asyncio, datetime, sqlite3
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, WebAppInfo
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.error import Forbidden, TelegramError
 
 TOKEN = os.getenv("TOKEN", "")
 _admin_str = os.getenv("ADMIN_ID", "")
 ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
+
+# Base URL for Mini App bridge links.  Falls back through several common env
+# var names so the deployment environment can use whichever it prefers.
+WEBHOOK_URL = (
+    os.getenv("APP_BASE_URL")
+    or os.getenv("DOMAIN")
+    or os.getenv("WEBHOOK_URL")
+    or ""
+).rstrip("/")
 
 # Resolve the DB file relative to this script's directory so bot.py can be
 # run from any working directory and still find the shared SQLite database.
@@ -153,7 +162,14 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for key in sorted(albums.keys()):
         date = key.replace("album_", "").replace("_", "-")
-        buttons.append([InlineKeyboardButton(f"Link🔥 {date[8:10]}-{date[5:7]}", callback_data=key)])
+        label = f"Link🔥 {date[8:10]}-{date[5:7]}"
+        if WEBHOOK_URL:
+            # Use a WebApp button so Telegram opens the Mini App bridge
+            bridge_url = f"{WEBHOOK_URL}/miniapp/bridge/{key}"
+            buttons.append([InlineKeyboardButton(label, web_app=WebAppInfo(url=bridge_url))])
+        else:
+            # Fallback: standard callback when WEBHOOK_URL is not configured
+            buttons.append([InlineKeyboardButton(label, callback_data=key)])
 
     buttons.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="back")])
 

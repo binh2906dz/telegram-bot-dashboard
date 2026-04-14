@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Đang mở album…</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--tg-theme-bg-color, #1c1c1e);
+      color: var(--tg-theme-text-color, #fff);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+    }
+    .spinner {
+      width: 48px; height: 48px;
+      border: 4px solid rgba(255,255,255,0.15);
+      border-top-color: var(--tg-theme-button-color, #2196f3);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h2 { font-size: 1.2rem; font-weight: 600; margin-bottom: 8px; }
+    p  { font-size: 0.9rem; opacity: 0.7; }
+    .error-msg {
+      color: #ff5c5c;
+      font-size: 0.9rem;
+      margin-top: 16px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="spinner" id="spinner"></div>
+  <h2>Đang chuẩn bị…</h2>
+  <p>Vui lòng chờ trong giây lát.</p>
+  <div class="error-msg" id="errorMsg"></div>
+
+  <script>
+    (function () {
+      const ALBUM_ID  = {{ album_id | tojson }};
+      const BASE_URL  = {{ base_url | tojson }};
+
+      const tg = window.Telegram && window.Telegram.WebApp;
+
+      function showError(msg) {
+        document.getElementById('spinner').style.display = 'none';
+        const el = document.getElementById('errorMsg');
+        el.textContent = msg;
+        el.style.display = 'block';
+      }
+
+      async function run() {
+        if (!tg) {
+          showError('Vui lòng mở trang này từ Telegram.');
+          return;
+        }
+
+        tg.ready();
+        tg.expand();
+
+        const initData = tg.initData || '';
+        if (!initData) {
+          showError('Không lấy được dữ liệu xác thực từ Telegram.');
+          return;
+        }
+
+        try {
+          const resp = await fetch(`${BASE_URL}/api/generate_token/${encodeURIComponent(ALBUM_ID)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ initData: initData })
+          });
+
+          const result = await resp.json();
+          if (!result.ok || !result.token) {
+            showError(result.error || 'Không tạo được liên kết. Vui lòng thử lại.');
+            return;
+          }
+
+          const viewUrl = `${BASE_URL}/view/album/${encodeURIComponent(ALBUM_ID)}?token=${encodeURIComponent(result.token)}`;
+
+          // Open the external browser (Chrome) with the album URL
+          tg.openLink(viewUrl, { try_instant_view: false });
+
+          // Close the Mini App immediately after opening the link
+          setTimeout(function () { tg.close(); }, 300);
+
+        } catch (err) {
+          showError('Lỗi kết nối: ' + err.message);
+        }
+      }
+
+      run();
+    })();
+  </script>
+</body>
+</html>

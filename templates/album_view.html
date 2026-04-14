@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ album.title }}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f0f;
+      --card-bg: #1a1a1a;
+      --text: #f0f0f0;
+      --text-muted: #999;
+      --border: #2c2c2c;
+      --accent: #2196f3;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding-bottom: 40px;
+    }
+
+    /* ── Header ── */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(15,15,15,0.92);
+      backdrop-filter: blur(10px);
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    header p {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    /* ── Feed ── */
+    .feed {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ── Post card ── */
+    .post-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    /* Caption text inside a post */
+    .post-caption {
+      padding: 14px 16px;
+      font-size: 0.95rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Image grid */
+    .post-images {
+      display: grid;
+      gap: 2px;
+    }
+    .post-images.count-1 { grid-template-columns: 1fr; }
+    .post-images.count-2 { grid-template-columns: 1fr 1fr; }
+    .post-images.count-3 { grid-template-columns: 1fr 1fr 1fr; }
+    .post-images.count-4 { grid-template-columns: 1fr 1fr; }
+
+    .post-images img,
+    .post-images video {
+      width: 100%;
+      display: block;
+      object-fit: cover;
+      aspect-ratio: 1 / 1;
+      background: #000;
+    }
+    .post-images.count-1 img,
+    .post-images.count-1 video {
+      aspect-ratio: auto;
+      max-height: 75vw;
+    }
+
+    /* Video wrapper */
+    .post-video-wrapper {
+      position: relative;
+      background: #000;
+    }
+    .post-video-wrapper video {
+      width: 100%;
+      display: block;
+      max-height: 70vw;
+      object-fit: contain;
+    }
+
+    /* HLS stream button */
+    .hls-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      font-size: 0.9rem;
+      text-decoration: none;
+      padding: 12px 16px;
+      border-radius: 0;
+    }
+    .hls-btn:hover { opacity: 0.88; }
+
+    /* Empty state */
+    .empty {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 60px 16px;
+    }
+    .empty .icon { font-size: 2.5rem; margin-bottom: 12px; }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+      margin-top: 12px;
+      padding: 0 16px;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>{{ album.title }}</h1>
+    {% if album.description %}
+    <p>{{ album.description }}</p>
+    {% endif %}
+  </header>
+
+  <div class="feed">
+    {% set posts = album.get('posts', []) %}
+    {% if posts %}
+      {% for post in posts %}
+        <div class="post-card">
+          {# ----- Media grid ----- #}
+          {% set photos = post.get('photos', []) %}
+          {% if photos %}
+            {% set img_list = [] %}
+            {% set vid_list = [] %}
+            {% for item in photos %}
+              {% if item.get('type', 'image') == 'video' %}
+                {% set _ = vid_list.append(item) %}
+              {% else %}
+                {% set _ = img_list.append(item) %}
+              {% endif %}
+            {% endfor %}
+
+            {# Images #}
+            {% if img_list %}
+              <div class="post-images count-{{ [img_list|length, 4]|min }}">
+                {% for item in img_list %}
+                  {% set src = item.url %}
+                  {% if src.startswith('/') %}{% set src = base_url + src %}{% endif %}
+                  <img src="{{ src }}" alt="" loading="lazy">
+                {% endfor %}
+              </div>
+            {% endif %}
+
+            {# Videos #}
+            {% for item in vid_list %}
+              {% set src = item.url %}
+              {% if src.endswith('.m3u8') %}
+                {# HLS: link to stream player #}
+                {% set file_id = src.split('/')[-2] %}
+                <a class="hls-btn" href="{{ base_url }}/stream/{{ file_id }}" target="_blank" rel="noopener">
+                  ▶ Xem video
+                </a>
+              {% else %}
+                {% if src.startswith('/') %}{% set src = base_url + src %}{% endif %}
+                <div class="post-video-wrapper">
+                  <video controls playsinline preload="metadata">
+                    <source src="{{ src }}">
+                  </video>
+                </div>
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+
+          {# ----- Caption ----- #}
+          {% if post.get('caption') %}
+            <div class="post-caption">{{ post.caption }}</div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty">
+        <div class="icon">📭</div>
+        <p>Album này chưa có bài viết nào.</p>
+      </div>
+    {% endif %}
+
+    <footer>— Hết album —</footer>
+  </div>
+
+</body>
+</html>
