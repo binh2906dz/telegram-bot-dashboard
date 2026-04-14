@@ -112,15 +112,26 @@ def load_json(file, default):
         with open(file, encoding="utf-8") as f:
             return json.load(f)
     except Exception as exc:
-        log.warning("load_json(%s) failed – returning default. Error: %s", file, exc)
+        log.error("load_json(%s) failed – returning default. Error: %s", file, exc)
         return default
 
 
 def save_json(file, data):
+    tmp_path = None
     try:
-        with open(file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        dir_name = os.path.dirname(os.path.abspath(file))
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=dir_name, delete=False, suffix=".tmp") as tmp:
+            json.dump(data, tmp, indent=2, ensure_ascii=False)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp_path = tmp.name
+        os.replace(tmp_path, file)
     except Exception as exc:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
         log.error("save_json(%s) failed. Error: %s", file, exc)
         raise
 
@@ -1711,6 +1722,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         await query.answer()
 
         albums = load_json(ALBUMS_FILE, {})
+        log.info("menu handler: loaded albums: %s", list(albums.keys()))
         buttons = []
         for key, val in sorted(albums.items()):
             title = val.get("title", key) if isinstance(val, dict) else key
