@@ -74,7 +74,7 @@
         }
 
         try {
-          const resp = await fetch(BASE_URL + '/api/generate_token/' + encodeURIComponent(ALBUM_ID), {
+          const resp = await fetch(`${BASE_URL}/api/generate_token/${encodeURIComponent(ALBUM_ID)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ initData: initData })
@@ -86,8 +86,7 @@
             return;
           }
 
-          const viewUrl = BASE_URL + '/view/album/' + encodeURIComponent(ALBUM_ID)
-                        + '?token=' + encodeURIComponent(result.token);
+          const viewUrl = `${BASE_URL}/view/album/${encodeURIComponent(ALBUM_ID)}?token=${encodeURIComponent(result.token)}`;
 
           // Open the external browser (Chrome) with the album URL
           tg.openLink(viewUrl, { try_instant_view: false });
