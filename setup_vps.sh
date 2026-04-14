@@ -27,7 +27,9 @@ apt-get install -y nginx python3-pip python3-venv ffmpeg git ufw
 
 # Kiểm tra nginx đã cài thành công chưa
 if ! command -v nginx &>/dev/null; then
-    echo "❌ LỖI: nginx không cài được. Vui lòng kiểm tra kết nối mạng và thử lại."
+    echo "❌ LỖI: nginx không cài được."
+    echo "   Nguyên nhân có thể: lỗi kết nối mạng, hết dung lượng đĩa, hoặc kho apt bị lỗi."
+    echo "   Thử chạy thủ công: apt-get install -y nginx"
     exit 1
 fi
 echo "✅ nginx đã được cài đặt: $(nginx -v 2>&1)"
@@ -73,8 +75,6 @@ echo "✅ Môi trường Python đã sẵn sàng"
 echo ""
 if [ -f "$APP_DIR/.env" ]; then
     echo "[4/6] File .env đã tồn tại — bỏ qua bước nhập Bot Token."
-    echo "  Nội dung hiện tại:"
-    grep -v "TOKEN" "$APP_DIR/.env" || true
 else
     echo "[4/6] Chưa có file .env. Vui lòng nhập Bot Token của bạn."
     echo "======================================"
@@ -87,6 +87,8 @@ else
         echo "BOT_TOKEN=$BOT_TOKEN" > "$APP_DIR/.env"
     fi
     echo "DOMAIN=https://$DOMAIN" >> "$APP_DIR/.env"
+    # Bảo vệ file .env khỏi người dùng khác (chứa thông tin nhạy cảm)
+    chmod 600 "$APP_DIR/.env"
     echo "✅ File .env đã được tạo"
 fi
 
@@ -115,6 +117,7 @@ server {
     }
 
     # Phục vụ file video HLS trực tiếp (tăng hiệu suất)
+    # Access-Control-Allow-Origin * cần thiết để Telegram Mini App phát HLS từ domain khác
     location /static/uploads/ {
         alias $APP_DIR/static/uploads/;
         add_header Access-Control-Allow-Origin *;
@@ -182,6 +185,7 @@ fi
 # ------------------------------------------------------------------
 echo ""
 echo "🔓 Mở các cổng tường lửa (UFW)..."
+# Các lệnh allow PHẢI chạy trước --force enable để không bị mất SSH
 ufw allow 22/tcp   comment 'SSH'
 ufw allow 80/tcp   comment 'HTTP'
 ufw allow 443/tcp  comment 'HTTPS'
