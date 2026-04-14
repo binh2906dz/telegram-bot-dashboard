@@ -357,4 +357,13 @@ def run_bot():
 
     app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
 
-    app.run_polling()
+    if WEBHOOK_URL and TOKEN:
+        webhook_url = f"{WEBHOOK_URL}/webhook/{TOKEN}"
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=8443,
+            webhook_url=webhook_url,
+            drop_pending_updates=True,
+        )
+    else:
+        app.run_polling()
