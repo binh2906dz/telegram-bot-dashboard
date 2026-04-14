@@ -105,12 +105,30 @@ if not BOT_TOKEN and os.path.isfile(_DOTENV_PATH):
 _admin_str = os.environ.get("ADMIN_CHAT_ID", os.environ.get("ADMIN_ID", ""))
 ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
+WEBHOOK_URL = (
+    # Precedence: WEBHOOK_URL (explicit override) → BASE_URL / APP_BASE_URL / DOMAIN
+    # (common deployment aliases) → built-in production domain.
+    # Set WEBHOOK_URL (or any alias) in your .env file to point to your server.
+    os.environ.get("WEBHOOK_URL")
+    or os.environ.get("BASE_URL")
+    or os.environ.get("APP_BASE_URL")
+    or os.environ.get("DOMAIN")
+    or "https://ngeyhsvge683874.online"
+).rstrip("/")
+
+# Maximum seconds to wait for PTB to process a single incoming webhook update
+# before returning a response to Telegram.
+WEBHOOK_UPDATE_TIMEOUT = 10
+
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
 _secret_key = os.environ.get("SECRET_KEY", "")
 if not _secret_key:
-    _secret_key = "change-me-in-production-secret-key"
-    log.warning("SECRET_KEY not set – using insecure default. Set SECRET_KEY env var in production!")
+    _secret_key = os.urandom(24)
+    log.warning(
+        "SECRET_KEY not set – using a random key (sessions will not persist across restarts). "
+        "Set SECRET_KEY env var in production!"
+    )
 app.secret_key = _secret_key
 
 # ===== AUTH CONFIG =====
@@ -185,7 +203,7 @@ def get_db() -> sqlite3.Connection:
     Each call creates a fresh connection bound to the calling thread, so no
     cross-thread sharing occurs.
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=20)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
@@ -809,6 +827,10 @@ class _BotManagerStub:
         pass
     def start_in_thread(self):
         pass
+    def get_app_by_token(self, token: str):
+        return None
+    def get_loop(self):
+        return None
 
 
 # Will be replaced with a real _BotManager instance once the bot block runs
@@ -1367,6 +1389,41 @@ def backup_restore():
     except Exception as e:
         log.error(f"Restore failed: {e}")
         return jsonify({"ok": False, "error": "Khôi phục thất bại. Vui lòng thử lại."}), 500
+
+
+# ===== TELEGRAM WEBHOOK ROUTE =====
+
+@app.route("/webhook/<path:token_path>", methods=["POST"])
+def telegram_webhook(token_path):
+    """Receive Telegram update POSTs and feed them to the matching PTB application.
+
+    Telegram is configured (via set_webhook) to POST updates to
+    ``/webhook/<bot_token>``.  The token in the URL path acts as an implicit
+    secret so only Telegram (which knows the token) can trigger this endpoint.
+    """
+    ptb_app = _bot_manager.get_app_by_token(token_path)
+    if ptb_app is None:
+        log.warning("telegram_webhook: no running bot found for token (length=%d)", len(token_path))
+        return "Not found", 404
+
+    update_data = request.get_json(force=True, silent=True)
+    if not update_data:
+        return "Bad request", 400
+
+    bot_loop = _bot_manager.get_loop()
+    if bot_loop is None or bot_loop.is_closed():
+        log.warning("telegram_webhook: bot manager loop is not available")
+        return "Service unavailable", 503
+
+    try:
+        from telegram import Update as _TGUpdate
+        update = _TGUpdate.de_json(update_data, ptb_app.bot)
+        fut = asyncio.run_coroutine_threadsafe(ptb_app.process_update(update), bot_loop)
+        fut.result(timeout=WEBHOOK_UPDATE_TIMEOUT)
+    except Exception as exc:
+        log.error("telegram_webhook process_update error: %s", exc, exc_info=True)
+
+    return "OK", 200
 
 
 # ===== TELEGRAM MINI APP BRIDGE ROUTES =====
@@ -3030,6 +3087,17 @@ if BOT_TOKEN or db_get_bots():
             if self._loop and self._reload_event and not self._loop.is_closed():
                 self._loop.call_soon_threadsafe(self._reload_event.set)
 
+        def get_app_by_token(self, token: str):
+            """Return the running PTB Application whose bot token matches, or None."""
+            for ptb in self._running_apps.values():
+                if ptb.bot.token == token:
+                    return ptb
+            return None
+
+        def get_loop(self):
+            """Return the event loop used by the BotManager thread, or None."""
+            return self._loop
+
         async def _reload(self):
             """Sync running PTB apps with the current bots DB table."""
             log.info("BotManager._reload() called – reading bots from DB")
@@ -3061,10 +3129,10 @@ if BOT_TOKEN or db_get_bots():
             for bot_id in list(running_ids - current_ids):
                 ptb = self._running_apps.pop(bot_id)
                 try:
-                    await ptb.updater.stop()
+                    await ptb.bot.delete_webhook(drop_pending_updates=True)
                     await ptb.stop()
                     await ptb.shutdown()
-                    log.info("Bot %s stopped and removed", bot_id)
+                    log.info("Bot %s stopped and webhook deleted", bot_id)
                 except Exception as exc:
                     log.warning("Error stopping bot %s: %s", bot_id, exc)
 
@@ -3093,13 +3161,15 @@ if BOT_TOKEN or db_get_bots():
                     await ptb.initialize()
                     log.info("BotManager._reload() – calling start() for bot %s", bot_id)
                     await ptb.start()
-                    log.info("BotManager._reload() – calling start_polling() for bot %s", bot_id)
-                    await ptb.updater.start_polling(
+                    webhook_endpoint = f"{WEBHOOK_URL}/webhook/{token}"
+                    log.info("BotManager._reload() – registering webhook for bot %s: %s", bot_id, webhook_endpoint)
+                    await ptb.bot.set_webhook(
+                        url=webhook_endpoint,
                         allowed_updates=["message", "callback_query"],
                         drop_pending_updates=True,
                     )
                     self._running_apps[bot_id] = ptb
-                    log.info("✅ Bot %s (%s) started polling", bot_id, cfg_entry.get("name", "?"))
+                    log.info("✅ Bot %s (%s) webhook registered at %s", bot_id, cfg_entry.get("name", "?"), webhook_endpoint)
                 except Exception as exc:
                     log.error(
                         "Failed to start bot %s (%s): %s",
