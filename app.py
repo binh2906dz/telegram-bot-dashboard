@@ -21,19 +21,51 @@ import subprocess
 
 import httpx
 
-# Load .env file automatically when running outside of systemd (e.g. local dev).
-# In production systemd sets env vars via EnvironmentFile, so this is a no-op there.
+# Load .env file automatically.  Try python-dotenv first; if not installed,
+# fall back to a minimal built-in parser so the .env file is always respected
+# regardless of whether systemd's EnvironmentFile directive is present.
+def _load_dotenv_fallback(dotenv_path: str | None = None) -> None:
+    """Parse a .env file and inject variables into os.environ (skips variables already set in environment)."""
+    if dotenv_path is None:
+        dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.isfile(dotenv_path):
+        return
+    try:
+        with open(dotenv_path, encoding="utf-8") as _fh:
+            for _line in _fh:
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _key, _, _val = _line.partition("=")
+                _key = _key.strip()
+                _val = _val.strip()
+                # Strip a matched outer quote pair (e.g. "value" or 'value')
+                if len(_val) >= 2 and _val[0] == _val[-1] and _val[0] in ('"', "'"):
+                    _val = _val[1:-1]
+                if _key and _key not in os.environ:
+                    os.environ[_key] = _val
+    except Exception as _exc:
+        # Log at debug level – never crash on .env parse failure
+        logging.getLogger("app").debug("_load_dotenv_fallback: failed to parse %s: %s", dotenv_path, _exc)
+
 try:
     from dotenv import load_dotenv as _load_dotenv
-    _load_dotenv()
+    _load_dotenv(override=False)
 except ImportError:
-    pass  # python-dotenv not installed; rely on systemd EnvironmentFile or pre-set env vars
+    _load_dotenv_fallback()  # python-dotenv not installed – use built-in parser
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", os.environ.get("TOKEN", os.environ.get("BOT_TOKEN", "")))
+log.info(
+    "BOT_TOKEN detection: TELEGRAM_BOT_TOKEN=%s TOKEN=%s BOT_TOKEN=%s → resolved=%s",
+    "set" if os.environ.get("TELEGRAM_BOT_TOKEN") else "unset",
+    "set" if os.environ.get("TOKEN") else "unset",
+    "set" if os.environ.get("BOT_TOKEN") else "unset",
+    "set" if BOT_TOKEN else "EMPTY",
+)
 _admin_str = os.environ.get("ADMIN_CHAT_ID", os.environ.get("ADMIN_ID", ""))
 ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
@@ -2050,15 +2082,30 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
 
         async def _reload(self):
             """Sync running PTB apps with the current bots.json on disk."""
+            log.info("BotManager._reload() called – reading %s", BOTS_FILE)
             bots_cfg = load_json(BOTS_FILE, [])
+            log.info("BotManager._reload() – bots.json contains %d entry/entries", len(bots_cfg))
             if not bots_cfg and BOT_TOKEN:
+                log.info(
+                    "BotManager._reload() – bots.json is empty; falling back to "
+                    "BOT_TOKEN env var (token length=%d)", len(BOT_TOKEN)
+                )
                 bots_cfg = [{"id": "env_default", "name": "Default Bot",
                               "token": BOT_TOKEN, "admin_id": ADMIN_ID}]
+            elif not bots_cfg and not BOT_TOKEN:
+                log.warning(
+                    "BotManager._reload() – bots.json is empty AND BOT_TOKEN is unset; "
+                    "no bots to start. Set TOKEN/BOT_TOKEN in .env or add a bot via the web UI."
+                )
 
             current_ids = {
                 b.get("id") for b in bots_cfg if (b.get("token") or "").strip()
             }
             running_ids = set(self._running_apps.keys())
+            log.info(
+                "BotManager._reload() – current_ids=%s running_ids=%s",
+                current_ids, running_ids,
+            )
 
             # Stop apps for bots that have been removed
             for bot_id in list(running_ids - current_ids):
@@ -2075,14 +2122,28 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
             for cfg_entry in bots_cfg:
                 bot_id = cfg_entry.get("id", "env_default")
                 token = (cfg_entry.get("token") or "").strip()
-                if not token or bot_id in self._running_apps:
+                if not token:
+                    log.warning(
+                        "BotManager._reload() – skipping bot id=%s (name=%s): token is empty",
+                        bot_id, cfg_entry.get("name", "?"),
+                    )
                     continue
+                if bot_id in self._running_apps:
+                    log.debug("BotManager._reload() – bot %s already running, skipping", bot_id)
+                    continue
+                log.info(
+                    "BotManager._reload() – starting bot id=%s name=%s (token length=%d)",
+                    bot_id, cfg_entry.get("name", "?"), len(token),
+                )
                 try:
                     _aid_raw = cfg_entry.get("admin_id")
                     _aid = int(_aid_raw) if _aid_raw and str(_aid_raw).isdigit() else ADMIN_ID
                     ptb = _build_ptb_app(token, _aid, bot_id)
+                    log.info("BotManager._reload() – calling initialize() for bot %s", bot_id)
                     await ptb.initialize()
+                    log.info("BotManager._reload() – calling start() for bot %s", bot_id)
                     await ptb.start()
+                    log.info("BotManager._reload() – calling start_polling() for bot %s", bot_id)
                     await ptb.updater.start_polling(
                         allowed_updates=["message", "callback_query"],
                         drop_pending_updates=True,
@@ -2090,7 +2151,11 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                     self._running_apps[bot_id] = ptb
                     log.info("✅ Bot %s (%s) started polling", bot_id, cfg_entry.get("name", "?"))
                 except Exception as exc:
-                    log.error("Failed to start bot %s: %s", bot_id, exc)
+                    log.error(
+                        "Failed to start bot %s (%s): %s",
+                        bot_id, cfg_entry.get("name", "?"), exc,
+                        exc_info=True,
+                    )
 
         async def _manage(self):
             """Main async management loop: reload on signal or every 30 s."""
@@ -2107,14 +2172,18 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         def start_in_thread(self):
             """Run the management loop in a dedicated daemon thread."""
             def _run():
+                log.info("BotManager thread started (PID %s)", os.getpid())
                 self._loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(self._loop)
                 try:
                     self._loop.run_until_complete(self._manage())
                 except Exception as exc:
-                    log.error("BotManager loop error: %s", exc)
+                    log.error("BotManager loop error: %s", exc, exc_info=True)
+                finally:
+                    log.warning("BotManager thread exiting (PID %s)", os.getpid())
             t = threading.Thread(target=_run, daemon=True, name="bot-manager")
             t.start()
+            log.info("BotManager daemon thread launched (thread id=%s)", t.ident)
             return t
 
     _bot_manager = _BotManager()
@@ -2138,8 +2207,10 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         import fcntl as _fcntl
 
         _bot_lock_path = os.path.join(tempfile.gettempdir(), "telegram_bot_manager.lock")
+        log.info("Bot manager: attempting to acquire lock at %s (worker PID %s)", _bot_lock_path, os.getpid())
         _bot_lock_fd = open(_bot_lock_path, "w")  # noqa: WPS515 – intentionally kept open
         _fcntl.flock(_bot_lock_fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        log.info("Bot manager: lock acquired – starting background thread (worker PID %s)", os.getpid())
         _bot_manager.start_in_thread()
         log.info("Bot manager started in background thread (worker PID %s)", os.getpid())
     except (IOError, OSError):
@@ -2151,12 +2222,17 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         if _bot_lock_fd is not None:
             _bot_lock_fd.close()
     except Exception as _bot_start_err:
-        log.error("Failed to auto-start bot manager: %s", _bot_start_err)
+        log.error("Failed to auto-start bot manager: %s", _bot_start_err, exc_info=True)
         if _bot_lock_fd is not None:
             _bot_lock_fd.close()
 
 else:
-    log.warning("No bot token configured – bot disabled, Flask only")
+    log.warning(
+        "No bot token configured – bot disabled, Flask only. "
+        "To enable the bot: add TOKEN=<your-token> to the .env file, "
+        "or add a bot via the web admin panel (which writes bots.json). "
+        "Current env keys checked: TELEGRAM_BOT_TOKEN, TOKEN, BOT_TOKEN."
+    )
 
 
 def run_bot_thread():
