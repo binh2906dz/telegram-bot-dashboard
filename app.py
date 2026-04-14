@@ -1482,7 +1482,7 @@ async def _async_run_broadcast_all(
             return
         retry_until = 0.0  # event-loop time after which this bot's 429 cooldown ends
 
-        # 30 s timeout accommodates multipart file uploads
+        # 30s timeout accommodates multipart file uploads
         async with httpx.AsyncClient(timeout=30) as client:
             for uid in user_ids:
                 now = asyncio.get_running_loop().time()
@@ -1568,7 +1568,7 @@ async def _async_run_broadcast_all(
                     prev = uid_best[uid]
                     if (
                         bot_result == "active"
-                        or (bot_result == "blocked" and prev not in ("active",))
+                        or (bot_result == "blocked" and prev != "active")
                         or prev is None
                     ):
                         uid_best[uid] = bot_result
@@ -1577,7 +1577,7 @@ async def _async_run_broadcast_all(
                     all_bots_tried = uid_bot_count[uid] >= num_bots
 
                     if all_bots_tried:
-                        final_status = uid_best[uid] or "invalid"
+                        final_status = uid_best[uid] if uid_best[uid] is not None else "invalid"
                         if final_status == "active":
                             total_success += 1
                         else:
