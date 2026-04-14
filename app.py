@@ -1307,6 +1307,7 @@ async def _async_run_ids_broadcast(
             return
         retry_until = 0.0  # Event-loop clock time after which this bot's 429 cooldown ends
 
+        # 30s timeout accommodates multipart file uploads which are larger than plain JSON sends
         async with httpx.AsyncClient(timeout=30) as client:
             for uid in user_ids:
                 # Wait out any active 429 cooldown for this bot
@@ -1478,6 +1479,7 @@ async def _async_run_broadcast_all(
             return
         retry_until = 0.0  # Event-loop clock time after which this bot's 429 cooldown ends
 
+        # 30s timeout accommodates multipart file uploads which are larger than plain JSON sends
         async with httpx.AsyncClient(timeout=30) as client:
             for uid in uid_slice:
                 now = asyncio.get_running_loop().time()
@@ -1645,11 +1647,7 @@ def broadcast():
         media_bytes = media_file.read()
         media_filename = media_file.filename
         if media_type == "none":
-            ext = media_filename.rsplit(".", 1)[-1].lower() if "." in media_filename else ""
-            if ext in ("mp4", "mov", "avi", "mkv", "webm"):
-                media_type = "video"
-            elif ext in ("jpg", "jpeg", "png", "gif", "webp"):
-                media_type = "image"
+            media_type = _infer_media_type_from_filename(media_filename)
 
     if not message and media_type == "none":
         return jsonify({"ok": False, "error": "Vui lòng nhập nội dung tin nhắn hoặc chọn media"}), 400
@@ -1757,11 +1755,7 @@ def broadcast_all():
         media_bytes = media_file.read()
         media_filename = media_file.filename
         if media_type == "none":
-            ext = media_filename.rsplit(".", 1)[-1].lower() if "." in media_filename else ""
-            if ext in ("mp4", "mov", "avi", "mkv", "webm"):
-                media_type = "video"
-            elif ext in ("jpg", "jpeg", "png", "gif", "webp"):
-                media_type = "image"
+            media_type = _infer_media_type_from_filename(media_filename)
 
     if not message and media_type == "none":
         return jsonify({"ok": False, "error": "Vui lòng nhập nội dung tin nhắn hoặc chọn media"}), 400
@@ -1998,6 +1992,26 @@ def _build_inline_keyboard(buttons: list) -> dict | None:
     return {"inline_keyboard": inline_keyboard} if inline_keyboard else None
 
 
+def _parse_chat_id(uid: str):
+    """Convert a user-id string to an int when possible (required by Telegram API)."""
+    uid_str = str(uid)
+    if uid_str.isdigit() or (uid_str.startswith("-") and uid_str[1:].isdigit()):
+        return int(uid_str)
+    return uid
+
+
+def _infer_media_type_from_filename(filename: str) -> str:
+    """Return 'image', 'video', or 'none' based on the file extension."""
+    if not filename:
+        return "none"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext in ("mp4", "mov", "avi", "mkv", "webm"):
+        return "video"
+    if ext in ("jpg", "jpeg", "png", "gif", "webp"):
+        return "image"
+    return "none"
+
+
 def _build_telegram_payload(uid: str, message: str, media_type: str, media_url: str, buttons: list) -> tuple:
     """Build (endpoint_suffix, payload_dict) for a Telegram API call with optional media and buttons.
 
@@ -2005,9 +2019,8 @@ def _build_telegram_payload(uid: str, message: str, media_type: str, media_url: 
     using ``json=payload``.  Do NOT pre-serialise it to a JSON string here.
     """
     reply_markup = _build_inline_keyboard(buttons) if buttons else None
+    chat_id = _parse_chat_id(uid)
 
-    chat_id_str = str(uid)
-    chat_id = int(chat_id_str) if (chat_id_str.startswith("-") and chat_id_str[1:].isdigit()) or chat_id_str.isdigit() else uid
     if media_type == "image" and media_url:
         payload: dict = {"chat_id": chat_id, "photo": media_url}
         if message:
@@ -2042,9 +2055,7 @@ def _build_multipart_payload(
     """
     import json as _json
 
-    chat_id_str = str(uid)
-    chat_id = int(chat_id_str) if (chat_id_str.startswith("-") and chat_id_str[1:].isdigit()) or chat_id_str.isdigit() else uid
-
+    chat_id = _parse_chat_id(uid)
     form_data: dict = {"chat_id": str(chat_id)}
     if message:
         form_data["caption"] = message
@@ -2369,11 +2380,7 @@ def ids_broadcast():
         media_bytes = media_file.read()
         media_filename = media_file.filename
         if media_type == "none":
-            ext = media_filename.rsplit(".", 1)[-1].lower() if "." in media_filename else ""
-            if ext in ("mp4", "mov", "avi", "mkv", "webm"):
-                media_type = "video"
-            elif ext in ("jpg", "jpeg", "png", "gif", "webp"):
-                media_type = "image"
+            media_type = _infer_media_type_from_filename(media_filename)
 
     if not message and media_type == "none":
         return jsonify({"ok": False, "error": "Tin nhắn không được để trống"}), 400
