@@ -1438,16 +1438,17 @@ async def _async_run_broadcast_all(
     media_type: str, media_url: str, buttons: list, camp_id,
     media_bytes: bytes = None, media_filename: str = None,
 ) -> None:
-    """Async broadcast to active IDs with workload distributed across all bots.
+    """Async broadcast to all user IDs using every configured bot.
 
-    User IDs are split among bots via interleaved slicing so that N bots each
-    handle ~1/N of the audience, achieving N × ~25 msg/sec total throughput.
+    Every active bot attempts every user ID.  A user is counted as a success
+    the moment *any* bot delivers the message, so users who started only one
+    specific bot will still receive the broadcast even in multi-bot setups.
+
     Per-bot 429 handling pauses only the affected bot; others continue.
 
-    Supports optional file upload (media_bytes/media_filename).  When a file is
-    provided, the first successful send uploads it via multipart and caches the
-    returned file_id; all subsequent sends reuse that file_id via JSON to avoid
-    redundant uploads.
+    Supports optional file upload (media_bytes/media_filename).  The first
+    successful multipart upload caches the returned Telegram file_id so all
+    subsequent sends reuse it without re-uploading.
     """
     active_bots = [b for b in bots if (b.get("token") or "").strip()]
     num_bots = len(active_bots)
@@ -1460,43 +1461,43 @@ async def _async_run_broadcast_all(
         b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0}
         for b in bots
     }
-    # Interleaved slicing: bot 0 → [0, N, 2N, …], bot 1 → [1, N+1, 2N+1, …], etc.
-    bot_uid_slices = [user_ids[i::num_bots] for i in range(num_bots)]
+
+    # Per-uid tracking: best delivery status across all bots + how many bots tried
+    uid_best: dict = {uid: None for uid in user_ids}   # None → undetermined
+    uid_bot_count: dict = {uid: 0 for uid in user_ids}  # bots that have tried this uid
 
     total_success = 0
     total_fail = 0
     done_count = 0
     stats_lock = asyncio.Lock()
-    # Shared mutable cache for the Telegram file_id obtained from the first
-    # successful multipart upload so subsequent sends reuse it efficiently.
+    # Shared file_id cache – first successful multipart upload populates it;
+    # subsequent sends reuse the file_id to avoid redundant uploads.
     file_id_cache: dict = {"id": None}
 
-    async def bot_worker(bot: dict, uid_slice: list) -> None:
+    async def bot_worker(bot: dict) -> None:
         nonlocal total_success, total_fail, done_count
         token = (bot.get("token") or "").strip()
         bot_id = bot.get("id", "")
         if not token:
             return
-        retry_until = 0.0  # Event-loop clock time after which this bot's 429 cooldown ends
+        retry_until = 0.0  # event-loop time after which this bot's 429 cooldown ends
 
-        # 30s timeout accommodates multipart file uploads which are larger than plain JSON sends
+        # 30 s timeout accommodates multipart file uploads
         async with httpx.AsyncClient(timeout=30) as client:
-            for uid in uid_slice:
+            for uid in user_ids:
                 now = asyncio.get_running_loop().time()
                 if retry_until > now:
                     await asyncio.sleep(retry_until - now)
 
-                # Determine request parameters based on media source
+                # Build request parameters
                 use_multipart = False
                 if media_bytes:
                     cached_fid = file_id_cache["id"]
                     if cached_fid:
-                        # Reuse the already-uploaded file_id as a URL parameter
                         endpoint, payload = _build_telegram_payload(uid, message, media_type, cached_fid, buttons)
                         send_files = None
                         send_data = None
                     else:
-                        # First upload – use multipart
                         endpoint, send_files, send_data = _build_multipart_payload(
                             uid, message, media_type, media_bytes, media_filename, buttons
                         )
@@ -1507,89 +1508,94 @@ async def _async_run_broadcast_all(
                     send_files = None
                     send_data = None
 
-                if payload is None and not use_multipart:
-                    async with stats_lock:
-                        bot_res[bot_id]["fail"] += 1
-                        total_fail += 1
-                        done_count += 1
-                        snap = (done_count, total_success, total_fail, {k: dict(v) for k, v in bot_res.items()})
-                    with _broadcast_all_lock:
-                        _broadcast_all_status["done"] = snap[0]
-                        _broadcast_all_status["success"] = snap[1]
-                        _broadcast_all_status["fail"] = snap[2]
-                        _broadcast_all_status["bot_results"] = snap[3]
-                    await asyncio.sleep(0.04)
-                    continue
-
-                api_url = f"https://api.telegram.org/bot{token}/{endpoint}"
-                uid_success = False
-                while True:
-                    try:
-                        if use_multipart:
-                            resp = await client.post(api_url, files=send_files, data=send_data)
-                        else:
-                            resp = await client.post(api_url, json=payload)
-                        if resp.status_code == 429:
-                            try:
-                                retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
-                            except Exception as e:
-                                log.warning("Failed to parse retry_after from 429 response: %s", e)
-                                retry_after = 5
-                            log.warning("Bot %s 429 – sleeping %ss", bot_id, retry_after)
-                            retry_until = asyncio.get_running_loop().time() + retry_after
-                            await asyncio.sleep(retry_after)
-                            continue
-                        if resp.status_code == 200 and resp.json().get("ok"):
-                            uid_success = True
-                            # Cache the file_id returned by a multipart upload
-                            if use_multipart and not file_id_cache["id"]:
+                bot_result = "invalid"
+                if payload is not None or use_multipart:
+                    api_url = f"https://api.telegram.org/bot{token}/{endpoint}"
+                    while True:
+                        try:
+                            if use_multipart:
+                                resp = await client.post(api_url, files=send_files, data=send_data)
+                            else:
+                                resp = await client.post(api_url, json=payload)
+                            if resp.status_code == 429:
                                 try:
-                                    result = resp.json().get("result", {})
-                                    fid = None
-                                    if media_type == "image":
-                                        photos = result.get("photo", [])
-                                        if photos:
-                                            fid = photos[-1]["file_id"]
-                                    elif media_type == "video":
-                                        fid = result.get("video", {}).get("file_id")
-                                    if fid:
-                                        file_id_cache["id"] = fid
-                                except Exception as fe:
-                                    log.warning("Could not extract file_id from response: %s", fe)
-                        elif resp.status_code == 403:
-                            # User has blocked the bot – update the database
-                            _mark_user_blocked(uid)
-                        else:
-                            log.warning(
-                                "Telegram API error for uid %s via bot %s: status=%s body=%s",
-                                uid, bot_id, resp.status_code, resp.text[:200],
-                            )
-                        break
-                    except Exception as e:
-                        log.warning("Failed to send message to %s via bot %s: %s", uid, bot_id, e)
-                        break
+                                    retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
+                                except Exception:
+                                    retry_after = 5
+                                log.warning("Bot %s 429 – sleeping %ss", bot_id, retry_after)
+                                retry_until = asyncio.get_running_loop().time() + retry_after
+                                await asyncio.sleep(retry_after)
+                                continue
+                            if resp.status_code == 200 and resp.json().get("ok"):
+                                bot_result = "active"
+                                if use_multipart and not file_id_cache["id"]:
+                                    try:
+                                        result = resp.json().get("result", {})
+                                        fid = None
+                                        if media_type == "image":
+                                            photos = result.get("photo", [])
+                                            if photos:
+                                                fid = photos[-1]["file_id"]
+                                        elif media_type == "video":
+                                            fid = result.get("video", {}).get("file_id")
+                                        if fid:
+                                            file_id_cache["id"] = fid
+                                    except Exception as fe:
+                                        log.warning("Could not extract file_id: %s", fe)
+                            elif resp.status_code == 403:
+                                bot_result = "blocked"
+                                _mark_user_blocked(uid)
+                            else:
+                                log.warning(
+                                    "Telegram error uid=%s bot=%s status=%s body=%s",
+                                    uid, bot_id, resp.status_code, resp.text[:200],
+                                )
+                                bot_result = "invalid"
+                            break
+                        except Exception as e:
+                            log.warning("Send failed uid=%s bot=%s: %s", uid, bot_id, e)
+                            bot_result = "invalid"
+                            break
 
+                # Update per-bot counters and merge per-uid best status
                 async with stats_lock:
-                    if uid_success:
+                    if bot_result == "active":
                         bot_res[bot_id]["success"] += 1
-                        total_success += 1
                     else:
                         bot_res[bot_id]["fail"] += 1
-                        total_fail += 1
-                    done_count += 1
+
+                    # active > blocked > invalid
+                    prev = uid_best[uid]
+                    if (
+                        bot_result == "active"
+                        or (bot_result == "blocked" and prev not in ("active",))
+                        or prev is None
+                    ):
+                        uid_best[uid] = bot_result
+
+                    uid_bot_count[uid] += 1
+                    all_bots_tried = uid_bot_count[uid] >= num_bots
+
+                    if all_bots_tried:
+                        final_status = uid_best[uid] or "invalid"
+                        if final_status == "active":
+                            total_success += 1
+                        else:
+                            total_fail += 1
+                        done_count += 1
+
                     snap = (done_count, total_success, total_fail, {k: dict(v) for k, v in bot_res.items()})
+
                 with _broadcast_all_lock:
                     _broadcast_all_status["done"] = snap[0]
                     _broadcast_all_status["success"] = snap[1]
                     _broadcast_all_status["fail"] = snap[2]
                     _broadcast_all_status["bot_results"] = snap[3]
 
-                # Proactive rate limit: 25 msg/sec per bot (1 request per 0.04s)
+                # Proactive rate limit: ~25 msg/sec per bot
                 await asyncio.sleep(0.04)
 
-    await asyncio.gather(
-        *[bot_worker(bot, uid_slice) for bot, uid_slice in zip(active_bots, bot_uid_slices)]
-    )
+    await asyncio.gather(*[bot_worker(bot) for bot in active_bots])
 
     with _broadcast_all_lock:
         _broadcast_all_status["running"] = False
@@ -1703,15 +1709,21 @@ def broadcast():
     except Exception as e:
         log.warning("broadcast_logs insert failed: %s", e)
 
-    t = threading.Thread(
-        target=lambda: asyncio.run(
-            _async_run_broadcast_all(
-                bots_list, user_ids, message, media_type, media_url, buttons, campaign_id,
-                media_bytes=media_bytes, media_filename=media_filename,
+    def _broadcast_thread():
+        try:
+            asyncio.run(
+                _async_run_broadcast_all(
+                    bots_list, user_ids, message, media_type, media_url, buttons, campaign_id,
+                    media_bytes=media_bytes, media_filename=media_filename,
+                )
             )
-        ),
-        daemon=True,
-    )
+        except Exception as exc:
+            log.error("broadcast thread crashed: %s", exc)
+        finally:
+            with _broadcast_all_lock:
+                _broadcast_all_status["running"] = False
+
+    t = threading.Thread(target=_broadcast_thread, daemon=True)
     t.start()
     return jsonify({"ok": True, "total": len(user_ids), "bots_count": len(bots_list), "message": "Broadcast đã bắt đầu"})
 
@@ -1815,15 +1827,21 @@ def broadcast_all():
     except Exception as e:
         log.warning("broadcast_logs insert failed: %s", e)
 
-    t = threading.Thread(
-        target=lambda: asyncio.run(
-            _async_run_broadcast_all(
-                bots_list, user_ids, message, media_type, media_url, buttons, campaign_id,
-                media_bytes=media_bytes, media_filename=media_filename,
+    def _broadcast_all_thread():
+        try:
+            asyncio.run(
+                _async_run_broadcast_all(
+                    bots_list, user_ids, message, media_type, media_url, buttons, campaign_id,
+                    media_bytes=media_bytes, media_filename=media_filename,
+                )
             )
-        ),
-        daemon=True,
-    )
+        except Exception as exc:
+            log.error("broadcast_all thread crashed: %s", exc)
+        finally:
+            with _broadcast_all_lock:
+                _broadcast_all_status["running"] = False
+
+    t = threading.Thread(target=_broadcast_all_thread, daemon=True)
     t.start()
     return jsonify({"ok": True, "total": len(user_ids), "bots_count": len(bots_list), "message": "Broadcast All đã bắt đầu"})
 
@@ -2418,15 +2436,21 @@ def ids_broadcast():
             "bot_results": bot_results_init,
         })
 
-    t = threading.Thread(
-        target=lambda: asyncio.run(
-            _async_run_ids_broadcast(
-                bots_list, message, user_ids, media_type, media_url, buttons,
-                media_bytes=media_bytes, media_filename=media_filename,
+    def _ids_broadcast_thread():
+        try:
+            asyncio.run(
+                _async_run_ids_broadcast(
+                    bots_list, message, user_ids, media_type, media_url, buttons,
+                    media_bytes=media_bytes, media_filename=media_filename,
+                )
             )
-        ),
-        daemon=True,
-    )
+        except Exception as exc:
+            log.error("ids_broadcast thread crashed: %s", exc)
+        finally:
+            with _broadcast_lock:
+                _broadcast_status["running"] = False
+
+    t = threading.Thread(target=_ids_broadcast_thread, daemon=True)
     t.start()
     return jsonify({"ok": True, "total": len(user_ids), "bots_count": len(bots_list), "message": "Broadcast đã bắt đầu"})
 
