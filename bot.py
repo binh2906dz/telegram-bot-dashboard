@@ -1,4 +1,4 @@
-import json, os, asyncio, datetime
+import json, os, asyncio, datetime, sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -6,25 +6,82 @@ TOKEN = os.getenv("TOKEN", "")
 _admin_str = os.getenv("ADMIN_ID", "")
 ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
-def load_json(file, default):
-    try:
-        with open(file) as f:
-            return json.load(f)
-    except:
-        return default
+# Resolve the DB file relative to this script's directory so bot.py can be
+# run from any working directory and still find the shared SQLite database.
+_BOT_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(_BOT_DIR, "data.db")
 
-def save_json(file, data):
-    with open(file, "w") as f:
-        json.dump(data, f, indent=2)
+
+def _get_db():
+    """Return a thread-safe SQLite connection to the shared data.db."""
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
+
+
+def _db_get_albums() -> dict:
+    try:
+        conn = _get_db()
+        rows = conn.execute("SELECT id, data_json FROM albums").fetchall()
+        conn.close()
+        return {row["id"]: json.loads(row["data_json"]) for row in rows}
+    except Exception:
+        return {}
+
+
+def _db_get_config() -> dict:
+    try:
+        conn = _get_db()
+        row = conn.execute("SELECT value FROM app_config WHERE key='config'").fetchone()
+        conn.close()
+        if row:
+            return json.loads(row["value"])
+        return {"hour": 0, "minute": 0}
+    except Exception:
+        return {"hour": 0, "minute": 0}
+
+
+def _db_save_config(cfg: dict):
+    conn = _get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO app_config (key, value) VALUES ('config', ?)",
+        (json.dumps(cfg, ensure_ascii=False),),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _db_get_subscribers() -> list:
+    try:
+        conn = _get_db()
+        rows = conn.execute(
+            "SELECT user_id FROM subscribers WHERE bot_id='global'"
+        ).fetchall()
+        conn.close()
+        return [row["user_id"] for row in rows]
+    except Exception:
+        return []
+
+
+def _db_add_subscriber(user_id: int):
+    try:
+        conn = _get_db()
+        conn.execute(
+            "INSERT OR IGNORE INTO subscribers (bot_id, user_id) VALUES ('global', ?)",
+            (user_id,),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
 
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_chat.id
-
-    subs = load_json("subscribers.json", [])
-    if user_id not in subs:
-        subs.append(user_id)
-        save_json("subscribers.json", subs)
+    _db_add_subscriber(user_id)
 
     m1 = await update.message.reply_text("🚀 NƠI BÓNG TỐI BẮT ĐẦU... NƠI BẢN NĂNG THỨC TỈNH 🚀")
     await asyncio.sleep(1)
@@ -47,7 +104,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    albums = load_json("albums.json", {})
+    albums = _db_get_albums()
     buttons = []
 
     for key in sorted(albums.keys()):
@@ -64,8 +121,13 @@ async def send_album(chat_id, bot, album):
     for i, p in enumerate(album["photos"]):
         url = p["url"]
         if url.startswith("/static/uploads/"):
-            file_path = url.lstrip("/")
-            with open(file_path, "rb") as fh:
+            abs_path = os.path.join(_BOT_DIR, url.lstrip("/"))
+            # Guard against path traversal: ensure the resolved path stays within _BOT_DIR
+            real_path = os.path.realpath(abs_path)
+            real_base = os.path.realpath(_BOT_DIR)
+            if not real_path.startswith(real_base + os.sep):
+                raise ValueError(f"Path traversal attempt detected: {url}")
+            with open(real_path, "rb") as fh:
                 photo_data = fh.read()
         else:
             photo_data = url
@@ -88,7 +150,7 @@ async def album_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    albums = load_json("albums.json", {})
+    albums = _db_get_albums()
     album = albums.get(query.data)
 
     chat_id = query.message.chat.id
@@ -108,7 +170,7 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         h_utc = (h - 7) % 24
 
-        save_json("config.json", {"hour": h_utc, "minute": m})
+        _db_save_config({"hour": h_utc, "minute": m})
 
         await update.message.reply_text(f"Đã set giờ: {h}:{m} (VN)")
     except:
@@ -120,19 +182,19 @@ last_sent = None
 async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
     global last_sent
     now = datetime.datetime.now(datetime.timezone.utc)
-    cfg = load_json("config.json", {"hour": 0, "minute": 0})
+    cfg = _db_get_config()
 
     if now.hour == cfg["hour"] and now.minute == cfg["minute"]:
         key = f"{now.hour}:{now.minute}"
         if last_sent != key:
             last_sent = key
 
-            albums = load_json("albums.json", {})
+            albums = _db_get_albums()
             if not albums:
                 return
 
             latest = sorted(albums.keys())[-1]
-            subs = load_json("subscribers.json", [])
+            subs = _db_get_subscribers()
 
             success, fail = 0, 0
 
