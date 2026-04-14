@@ -1717,6 +1717,8 @@ async def _async_run_broadcast_all(
     # Shared file_id cache – first successful multipart upload populates it;
     # subsequent sends reuse the file_id to avoid redundant uploads.
     file_id_cache: dict = {"id": None}
+    # Deduplication: once any bot successfully delivers to a uid, other bots skip it
+    delivered_uids: set = set()
 
     async def bot_worker(bot: dict) -> None:
         nonlocal total_success, total_fail, done_count
@@ -1729,6 +1731,11 @@ async def _async_run_broadcast_all(
         # 30s timeout accommodates multipart file uploads
         async with httpx.AsyncClient(timeout=30) as client:
             for uid in user_ids:
+                # Skip users already successfully delivered by another bot
+                async with stats_lock:
+                    if uid in delivered_uids:
+                        continue
+
                 now = asyncio.get_running_loop().time()
                 if retry_until > now:
                     await asyncio.sleep(retry_until - now)
@@ -1805,6 +1812,8 @@ async def _async_run_broadcast_all(
                 async with stats_lock:
                     if bot_result == "active":
                         bot_res[bot_id]["success"] += 1
+                        # Mark as delivered so other bots skip this uid
+                        delivered_uids.add(uid)
                     else:
                         bot_res[bot_id]["fail"] += 1
 
@@ -2933,8 +2942,28 @@ if BOT_TOKEN or db_get_bots():
             )
 
         async def track_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            """Count incoming text messages (user replies) for analytics."""
+            """Handle incoming text: count for analytics and auto-reply with Mini App link when text matches an album title."""
             increment_bot_stat(bot_cfg_id, "replies_count")
+
+            _base_url = os.environ.get("APP_BASE_URL", os.environ.get("DOMAIN", "")).rstrip("/")
+            if not _base_url:
+                return
+
+            user_text = (update.message.text or "").strip().lower()
+            if not user_text:
+                return
+
+            albums = db_get_albums()
+            for album_id, album_data in albums.items():
+                title = (album_data.get("title", "") if isinstance(album_data, dict) else "").lower()
+                if title and (user_text in title or title in user_text):
+                    bridge_url = f"{_base_url}/miniapp/bridge/{album_id}"
+                    keyboard = [[InlineKeyboardButton("🔥 Xem ngay", web_app=WebAppInfo(url=bridge_url))]]
+                    await update.message.reply_text(
+                        f"🔥 {album_data.get('title', album_id)}",
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                    )
+                    return
 
         async def track_interaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Track callback query interactions before delegating to real handlers."""
