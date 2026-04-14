@@ -142,14 +142,18 @@ systemctl reload nginx
 echo "✅ Nginx đã được cấu hình và reload thành công"
 
 # ------------------------------------------------------------------
-# BƯỚC 6 — Tạo systemd service cho Gunicorn
+# BƯỚC 6 — Tạo systemd service cho Gunicorn (Web + Bot tích hợp)
 # ------------------------------------------------------------------
 echo ""
 echo "[6/6] Cấu hình dịch vụ hệ thống (systemd) cho Gunicorn và Bot..."
 
+# Gunicorn chạy cả Web lẫn Bot Telegram trong cùng một tiến trình.
+# Bot Telegram được khởi động tự động trong một luồng nền khi Gunicorn tải app.py
+# (sử dụng file lock để đảm bảo chỉ một worker chạy bot polling).
+# Dùng -w 1 để đơn giản hóa; tăng lên 2 nếu cần thêm throughput cho web.
 cat > /etc/systemd/system/$SERVICE_NAME.service <<EOF
 [Unit]
-Description=Telegram Bot Dashboard (Gunicorn)
+Description=Telegram Bot Dashboard (Gunicorn + Bot)
 After=network.target
 
 [Service]
@@ -157,28 +161,9 @@ User=root
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
 Environment="PATH=$APP_DIR/venv/bin"
-ExecStart=$APP_DIR/venv/bin/gunicorn -w 2 -b 127.0.0.1:$GUNICORN_PORT --timeout 120 app:app
+ExecStart=$APP_DIR/venv/bin/gunicorn -w 1 -b 127.0.0.1:$GUNICORN_PORT --timeout 120 app:app
 Restart=always
 RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Service riêng cho tiến trình Bot Telegram (run_bot.py)
-cat > /etc/systemd/system/${SERVICE_NAME}-worker.service <<EOF
-[Unit]
-Description=Telegram Bot Worker (python-telegram-bot polling)
-After=network.target ${SERVICE_NAME}.service
-
-[Service]
-User=root
-WorkingDirectory=$APP_DIR
-EnvironmentFile=$APP_DIR/.env
-Environment="PATH=$APP_DIR/venv/bin"
-ExecStart=$APP_DIR/venv/bin/python run_bot.py
-Restart=always
-RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
@@ -187,26 +172,17 @@ EOF
 systemctl daemon-reload
 systemctl enable $SERVICE_NAME
 systemctl restart $SERVICE_NAME
-systemctl enable ${SERVICE_NAME}-worker
-systemctl restart ${SERVICE_NAME}-worker
 
 # Chờ 3 giây để service khởi động
 sleep 3
 
 # Kiểm tra trạng thái service
 if systemctl is-active --quiet $SERVICE_NAME; then
-    echo "✅ Dịch vụ $SERVICE_NAME (Gunicorn) đang chạy thành công"
+    echo "✅ Dịch vụ $SERVICE_NAME (Gunicorn + Bot) đang chạy thành công"
 else
     echo "❌ Dịch vụ $SERVICE_NAME KHÔNG chạy được. Xem log bên dưới:"
     journalctl -u $SERVICE_NAME --no-pager -n 30
     exit 1
-fi
-
-if systemctl is-active --quiet ${SERVICE_NAME}-worker; then
-    echo "✅ Dịch vụ ${SERVICE_NAME}-worker (Bot Telegram) đang chạy thành công"
-else
-    echo "⚠️  Dịch vụ ${SERVICE_NAME}-worker chưa sẵn sàng (có thể đang khởi động). Xem log:"
-    journalctl -u ${SERVICE_NAME}-worker --no-pager -n 10
 fi
 
 # ------------------------------------------------------------------
@@ -228,12 +204,11 @@ echo ""
 echo "=================================================================="
 echo "🎉 HOÀN TẤT! HỆ THỐNG WEB CỦA BẠN ĐÃ ONLINE!"
 echo "------------------------------------------------------------------"
-echo "  Tên miền  : https://$DOMAIN"
-echo "  Trạng thái Gunicorn : $(systemctl is-active $SERVICE_NAME)"
-echo "  Trạng thái Bot      : $(systemctl is-active ${SERVICE_NAME}-worker)"
-echo "  Trạng thái Nginx    : $(systemctl is-active nginx)"
+echo "  Tên miền         : https://$DOMAIN"
+echo "  Trạng thái Web   : $(systemctl is-active $SERVICE_NAME)"
+echo "  Trạng thái Nginx : $(systemctl is-active nginx)"
+echo "  (Bot Telegram chạy tự động trong luồng nền của Gunicorn)"
 echo "------------------------------------------------------------------"
-echo "  Xem log Web   : journalctl -u $SERVICE_NAME -f"
-echo "  Xem log Bot   : journalctl -u ${SERVICE_NAME}-worker -f"
-echo "  Khởi động lại : systemctl restart $SERVICE_NAME ${SERVICE_NAME}-worker"
+echo "  Xem log          : journalctl -u $SERVICE_NAME -f"
+echo "  Khởi động lại    : systemctl restart $SERVICE_NAME"
 echo "=================================================================="
