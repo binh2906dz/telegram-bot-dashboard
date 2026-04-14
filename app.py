@@ -23,10 +23,16 @@ import httpx
 # Load .env file automatically.  Try python-dotenv first; if not installed,
 # fall back to a minimal built-in parser so the .env file is always respected
 # regardless of whether systemd's EnvironmentFile directive is present.
-def _load_dotenv_fallback(dotenv_path: str | None = None) -> None:
+#
+# IMPORTANT: always resolve the .env path relative to this source file so the
+# correct file is found regardless of the process working directory (systemd /
+# Gunicorn may start with a different cwd).
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+_DOTENV_PATH = os.path.join(_APP_DIR, ".env")
+
+
+def _load_dotenv_fallback(dotenv_path: str) -> None:
     """Parse a .env file and inject variables into os.environ (skips variables already set in environment)."""
-    if dotenv_path is None:
-        dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if not os.path.isfile(dotenv_path):
         return
     try:
@@ -47,15 +53,20 @@ def _load_dotenv_fallback(dotenv_path: str | None = None) -> None:
         # Log at debug level – never crash on .env parse failure
         logging.getLogger("app").debug("_load_dotenv_fallback: failed to parse %s: %s", dotenv_path, _exc)
 
+
 try:
     from dotenv import load_dotenv as _load_dotenv
-    _load_dotenv(override=False)
+    # Explicitly pass dotenv_path so the correct .env is loaded regardless of
+    # the process working directory (e.g. when started by systemd/Gunicorn).
+    _load_dotenv(dotenv_path=_DOTENV_PATH, override=False)
 except ImportError:
-    _load_dotenv_fallback()  # python-dotenv not installed – use built-in parser
+    _load_dotenv_fallback(_DOTENV_PATH)  # python-dotenv not installed – use built-in parser
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+log.info(".env path: %s (exists=%s)", _DOTENV_PATH, os.path.isfile(_DOTENV_PATH))
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", os.environ.get("TOKEN", os.environ.get("BOT_TOKEN", "")))
 log.info(
@@ -65,6 +76,12 @@ log.info(
     "set" if os.environ.get("BOT_TOKEN") else "unset",
     "set" if BOT_TOKEN else "EMPTY",
 )
+if not BOT_TOKEN and os.path.isfile(_DOTENV_PATH):
+    log.warning(
+        "Token is still empty even though .env exists at %s – check that the file contains "
+        "TELEGRAM_BOT_TOKEN, TOKEN, or BOT_TOKEN and that it is readable by the service user.",
+        _DOTENV_PATH,
+    )
 _admin_str = os.environ.get("ADMIN_CHAT_ID", os.environ.get("ADMIN_ID", ""))
 ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
