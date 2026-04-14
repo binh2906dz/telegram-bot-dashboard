@@ -356,7 +356,9 @@
                 </select>
               </div>
               <div id="idBroadcastMediaUrlRow" class="mb-2" style="display:none;">
-                <input type="url" id="idBroadcastMediaUrl" class="form-control form-control-sm" placeholder="URL ảnh/video (Cloudinary, direct link)...">
+                <input type="file" id="idBroadcastMediaFile" class="form-control form-control-sm mb-1" accept="image/*,video/*" placeholder="Tải lên file ảnh/video...">
+                <input type="url" id="idBroadcastMediaUrl" class="form-control form-control-sm" placeholder="Hoặc nhập URL ảnh/video...">
+                <div class="form-text text-muted" style="font-size:.72rem;">Tải lên file sẽ được ưu tiên hơn URL.</div>
               </div>
               <div class="mb-2">
                 <div id="idBroadcastBtnList" class="mb-1"></div>
@@ -786,9 +788,11 @@
           </select>
         </div>
         <div id="bcMediaUrlRow" class="mb-3" style="display:none;">
-          <label class="form-label fw-semibold"><i class="bi bi-link-45deg me-1" style="color:#4d9fff;"></i>URL Media <span class="text-danger">*</span></label>
+          <label class="form-label fw-semibold"><i class="bi bi-upload me-1" style="color:#4d9fff;"></i>Tải lên tệp <span class="badge bg-primary ms-1" style="font-size:.7rem;">Ưu tiên</span></label>
+          <input type="file" id="bcMediaFile" class="form-control mb-2" accept="image/*,video/*">
+          <label class="form-label fw-semibold"><i class="bi bi-link-45deg me-1" style="color:#4d9fff;"></i>Hoặc nhập URL</label>
           <input type="url" id="bcMediaUrl" class="form-control" placeholder="https://... (Cloudinary, direct URL)">
-          <div class="form-text text-muted">Nhập đường dẫn trực tiếp tới ảnh hoặc video.</div>
+          <div class="form-text text-muted">Tải lên file sẽ được ưu tiên hơn URL. Hỗ trợ ảnh và video.</div>
         </div>
         <div class="mb-2">
           <label class="form-label fw-semibold"><i class="bi bi-grid-1x2 me-1" style="color:var(--accent);"></i>Nút bấm Inline <span class="text-muted">(tuỳ chọn)</span></label>
@@ -824,9 +828,11 @@
           </select>
         </div>
         <div id="baMediaUrlRow" class="mb-3" style="display:none;">
-          <label class="form-label fw-semibold"><i class="bi bi-link-45deg me-1" style="color:#4d9fff;"></i>URL Media <span class="text-danger">*</span></label>
+          <label class="form-label fw-semibold"><i class="bi bi-upload me-1" style="color:#4d9fff;"></i>Tải lên tệp <span class="badge bg-primary ms-1" style="font-size:.7rem;">Ưu tiên</span></label>
+          <input type="file" id="baMediaFile" class="form-control mb-2" accept="image/*,video/*">
+          <label class="form-label fw-semibold"><i class="bi bi-link-45deg me-1" style="color:#4d9fff;"></i>Hoặc nhập URL</label>
           <input type="url" id="baMediaUrl" class="form-control" placeholder="https://... (Cloudinary, direct URL)">
-          <div class="form-text text-muted">Nhập đường dẫn trực tiếp tới ảnh hoặc video (hỗ trợ Cloudinary URL).</div>
+          <div class="form-text text-muted">Tải lên file sẽ được ưu tiên hơn URL. Hỗ trợ ảnh (JPG, PNG, GIF, WebP) và video (MP4, MOV…).</div>
         </div>
         <div class="mb-2">
           <label class="form-label fw-semibold"><i class="bi bi-grid-1x2 me-1" style="color:var(--accent);"></i>Nút bấm Inline <span class="text-muted">(tuỳ chọn)</span></label>
@@ -1253,8 +1259,10 @@ async function doIdBroadcast(btn) {
   const message = document.getElementById('idBroadcastMessage').value.trim();
   const mediaType = document.getElementById('idBroadcastMediaType').value;
   const mediaUrl = (document.getElementById('idBroadcastMediaUrl').value || '').trim();
+  const mediaFileInput = document.getElementById('idBroadcastMediaFile');
+  const mediaFile = mediaFileInput && mediaFileInput.files.length > 0 ? mediaFileInput.files[0] : null;
   if (!message && mediaType === 'none') { showToast('&#9888;&#65039; Nhập nội dung tin nhắn', 'error'); return; }
-  if (mediaType !== 'none' && !mediaUrl) { showToast('&#9888;&#65039; Nhập URL media', 'error'); return; }
+  if (mediaType !== 'none' && !mediaUrl && !mediaFile) { showToast('&#9888;&#65039; Nhập URL media hoặc tải lên tệp', 'error'); return; }
   // Collect inline buttons
   const buttons = [];
   document.querySelectorAll('#idBroadcastBtnList .ib-btn-row').forEach(function(row) {
@@ -1274,7 +1282,8 @@ async function doIdBroadcast(btn) {
   try {
     const form = new FormData();
     form.append('message', message); form.append('media_type', mediaType);
-    form.append('media_url', mediaUrl); form.append('buttons_json', JSON.stringify(buttons));
+    if (mediaFile) { form.append('media_file', mediaFile); } else { form.append('media_url', mediaUrl); }
+    form.append('buttons_json', JSON.stringify(buttons));
     const res = await fetch('/ids/broadcast', { method: 'POST', body: form }); const data = await res.json();
     if (data.ok) {
       showToast('&#9989; Broadcast bắt đầu! ' + data.total + ' ID · ' + (data.bots_count||1) + ' bot...', 'success');
@@ -1344,8 +1353,10 @@ async function doBroadcast(btn) {
   const message = document.getElementById('broadcastMessage').value.trim();
   const mediaType = document.getElementById('bcMediaType').value;
   const mediaUrl = document.getElementById('bcMediaUrl').value.trim();
+  const mediaFileInput = document.getElementById('bcMediaFile');
+  const mediaFile = mediaFileInput && mediaFileInput.files.length > 0 ? mediaFileInput.files[0] : null;
   if (!message && mediaType === 'none') { showToast('&#9888;&#65039; Vui lòng nhập nội dung hoặc chọn media', 'error'); return; }
-  if (mediaType !== 'none' && !mediaUrl) { showToast('&#9888;&#65039; Vui lòng nhập URL media', 'error'); return; }
+  if (mediaType !== 'none' && !mediaUrl && !mediaFile) { showToast('&#9888;&#65039; Vui lòng nhập URL media hoặc tải lên tệp', 'error'); return; }
   // Collect buttons
   const buttons = [];
   document.querySelectorAll('#bcBtnList .ba-btn-row').forEach(function(row) {
@@ -1364,7 +1375,8 @@ async function doBroadcast(btn) {
   try {
     const form = new FormData();
     form.append('message', message); form.append('media_type', mediaType);
-    form.append('media_url', mediaUrl); form.append('buttons_json', JSON.stringify(buttons));
+    if (mediaFile) { form.append('media_file', mediaFile); } else { form.append('media_url', mediaUrl); }
+    form.append('buttons_json', JSON.stringify(buttons));
     const res = await fetch('/broadcast', { method: 'POST', body: form }); const data = await res.json();
     if (data.ok) {
       showToast('&#9989; Broadcast bắt đầu! ' + data.total + ' người · ' + (data.bots_count||1) + ' bot...', 'success');
@@ -1420,8 +1432,10 @@ async function doBroadcastAll(btn) {
   const message = document.getElementById('baMessage').value.trim();
   const mediaType = document.getElementById('baMediaType').value;
   const mediaUrl = document.getElementById('baMediaUrl').value.trim();
+  const mediaFileInput = document.getElementById('baMediaFile');
+  const mediaFile = mediaFileInput && mediaFileInput.files.length > 0 ? mediaFileInput.files[0] : null;
   if (!message && mediaType === 'none') { showToast('&#9888;&#65039; Nhập nội dung hoặc chọn media', 'error'); return; }
-  if (mediaType !== 'none' && !mediaUrl) { showToast('&#9888;&#65039; Nhập URL media', 'error'); return; }
+  if (mediaType !== 'none' && !mediaUrl && !mediaFile) { showToast('&#9888;&#65039; Nhập URL media hoặc tải lên tệp', 'error'); return; }
   // Collect buttons
   const buttons = [];
   document.querySelectorAll('#baBtnList .ba-btn-row').forEach(function(row) {
@@ -1442,7 +1456,8 @@ async function doBroadcastAll(btn) {
   try {
     const form = new FormData();
     form.append('message', message); form.append('media_type', mediaType);
-    form.append('media_url', mediaUrl); form.append('buttons_json', JSON.stringify(buttons));
+    if (mediaFile) { form.append('media_file', mediaFile); } else { form.append('media_url', mediaUrl); }
+    form.append('buttons_json', JSON.stringify(buttons));
     const res = await fetch('/broadcast/all', { method: 'POST', body: form }); const data = await res.json();
     if (data.ok) {
       showToast('&#9989; Broadcast All bắt đầu! ' + data.total + ' IDs · ' + (data.bots_count||1) + ' bot...', 'success');
