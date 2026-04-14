@@ -1,7 +1,6 @@
 import io
 import os
 import re
-import copy
 import glob
 import json
 import uuid
@@ -108,32 +107,22 @@ for _d in (UPLOAD_IMAGES_DIR, UPLOAD_VIDEOS_DIR, BACKUP_DIR):
     os.makedirs(_d, exist_ok=True)
 
 
-_cache: dict = {}  # {file: {"mtime": float, "data": ...}}
-
-
 def load_json(file, default):
     try:
-        mtime = os.path.getmtime(file)
-        entry = _cache.get(file)
-        if entry and entry["mtime"] == mtime:
-            # Return a deep copy so callers cannot accidentally mutate the cache.
-            return copy.deepcopy(entry["data"])
-        with open(file) as f:
-            data = json.load(f)
-        # Re-check mtime after reading so the cached value reflects the on-disk state
-        _cache[file] = {"mtime": os.path.getmtime(file), "data": data}
-        return copy.deepcopy(data)
-    except Exception:
+        with open(file, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        log.warning("load_json(%s) failed – returning default. Error: %s", file, exc)
         return default
 
 
 def save_json(file, data):
-    with open(file, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
     try:
-        _cache[file] = {"mtime": os.path.getmtime(file), "data": copy.deepcopy(data)}
-    except Exception:
-        _cache.pop(file, None)
+        with open(file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as exc:
+        log.error("save_json(%s) failed. Error: %s", file, exc)
+        raise
 
 
 # ===== SQLITE DATABASE (for ID management, future Turso migration) =====
