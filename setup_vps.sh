@@ -82,10 +82,11 @@ else
     echo "======================================"
     if [ -z "$BOT_TOKEN" ]; then
         echo "⚠️  Cảnh báo: Không nhập Bot Token. Bạn có thể tạo file .env thủ công sau."
-        echo "BOT_TOKEN=" > "$APP_DIR/.env"
+        echo "TOKEN=" > "$APP_DIR/.env"
     else
-        echo "BOT_TOKEN=$BOT_TOKEN" > "$APP_DIR/.env"
+        echo "TOKEN=$BOT_TOKEN" > "$APP_DIR/.env"
     fi
+    echo "APP_BASE_URL=https://$DOMAIN" >> "$APP_DIR/.env"
     echo "DOMAIN=https://$DOMAIN" >> "$APP_DIR/.env"
     # Bảo vệ file .env khỏi người dùng khác (chứa thông tin nhạy cảm)
     chmod 600 "$APP_DIR/.env"
@@ -144,7 +145,7 @@ echo "✅ Nginx đã được cấu hình và reload thành công"
 # BƯỚC 6 — Tạo systemd service cho Gunicorn
 # ------------------------------------------------------------------
 echo ""
-echo "[6/6] Cấu hình dịch vụ hệ thống (systemd) cho Gunicorn..."
+echo "[6/6] Cấu hình dịch vụ hệ thống (systemd) cho Gunicorn và Bot..."
 
 cat > /etc/systemd/system/$SERVICE_NAME.service <<EOF
 [Unit]
@@ -164,20 +165,48 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+# Service riêng cho tiến trình Bot Telegram (run_bot.py)
+cat > /etc/systemd/system/${SERVICE_NAME}-worker.service <<EOF
+[Unit]
+Description=Telegram Bot Worker (python-telegram-bot polling)
+After=network.target ${SERVICE_NAME}.service
+
+[Service]
+User=root
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$APP_DIR/.env
+Environment="PATH=$APP_DIR/venv/bin"
+ExecStart=$APP_DIR/venv/bin/python run_bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
 systemctl enable $SERVICE_NAME
 systemctl restart $SERVICE_NAME
+systemctl enable ${SERVICE_NAME}-worker
+systemctl restart ${SERVICE_NAME}-worker
 
 # Chờ 3 giây để service khởi động
 sleep 3
 
 # Kiểm tra trạng thái service
 if systemctl is-active --quiet $SERVICE_NAME; then
-    echo "✅ Dịch vụ $SERVICE_NAME đang chạy thành công"
+    echo "✅ Dịch vụ $SERVICE_NAME (Gunicorn) đang chạy thành công"
 else
     echo "❌ Dịch vụ $SERVICE_NAME KHÔNG chạy được. Xem log bên dưới:"
     journalctl -u $SERVICE_NAME --no-pager -n 30
     exit 1
+fi
+
+if systemctl is-active --quiet ${SERVICE_NAME}-worker; then
+    echo "✅ Dịch vụ ${SERVICE_NAME}-worker (Bot Telegram) đang chạy thành công"
+else
+    echo "⚠️  Dịch vụ ${SERVICE_NAME}-worker chưa sẵn sàng (có thể đang khởi động). Xem log:"
+    journalctl -u ${SERVICE_NAME}-worker --no-pager -n 10
 fi
 
 # ------------------------------------------------------------------
@@ -201,8 +230,10 @@ echo "🎉 HOÀN TẤT! HỆ THỐNG WEB CỦA BẠN ĐÃ ONLINE!"
 echo "------------------------------------------------------------------"
 echo "  Tên miền  : https://$DOMAIN"
 echo "  Trạng thái Gunicorn : $(systemctl is-active $SERVICE_NAME)"
+echo "  Trạng thái Bot      : $(systemctl is-active ${SERVICE_NAME}-worker)"
 echo "  Trạng thái Nginx    : $(systemctl is-active nginx)"
 echo "------------------------------------------------------------------"
-echo "  Xem log dịch vụ  : journalctl -u $SERVICE_NAME -f"
-echo "  Khởi động lại    : systemctl restart $SERVICE_NAME"
+echo "  Xem log Web   : journalctl -u $SERVICE_NAME -f"
+echo "  Xem log Bot   : journalctl -u ${SERVICE_NAME}-worker -f"
+echo "  Khởi động lại : systemctl restart $SERVICE_NAME ${SERVICE_NAME}-worker"
 echo "=================================================================="

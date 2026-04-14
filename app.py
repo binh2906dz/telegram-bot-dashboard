@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", os.environ.get("TOKEN", ""))
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", os.environ.get("TOKEN", os.environ.get("BOT_TOKEN", "")))
 _admin_str = os.environ.get("ADMIN_CHAT_ID", os.environ.get("ADMIN_ID", ""))
 ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
@@ -1682,7 +1682,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         stream them through the built-in player page instead of downloading a
         raw video file.
         """
-        base_url = os.environ.get("APP_BASE_URL", "").rstrip("/")
+        base_url = os.environ.get("APP_BASE_URL", os.environ.get("DOMAIN", "")).rstrip("/")
 
         if "posts" in album:
             groups = [(post.get("photos", []), post.get("caption", "")) for post in album["posts"]]
@@ -1702,7 +1702,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                     if item_type == "video" and url.endswith("/index.m3u8"):
                         # URL pattern: /static/uploads/videos/<file_id>/index.m3u8
                         if not base_url:
-                            log.warning("APP_BASE_URL not set – cannot create HLS stream button; skipping video")
+                            log.warning("APP_BASE_URL (or DOMAIN) not set – cannot create HLS stream button; skipping video")
                             continue
                         parts = url.rstrip("/").split("/")
                         if len(parts) < 2:
