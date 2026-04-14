@@ -230,7 +230,41 @@ def init_db():
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        # --- New tables replacing JSON files ---
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS albums (
+                id TEXT PRIMARY KEY,
+                data_json TEXT NOT NULL DEFAULT '{}'
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS bots_config (
+                id TEXT PRIMARY KEY,
+                data_json TEXT NOT NULL DEFAULT '{}',
+                sort_order INTEGER DEFAULT 0
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS app_config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT ''
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS subscribers (
+                bot_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (bot_id, user_id)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS banned_users (
+                user_id INTEGER PRIMARY KEY
+            )
+        ''')
         conn.commit()
+    _migrate_json_to_db()
 
 
 def backup_db_to_bytes() -> bytes:
@@ -250,6 +284,397 @@ def backup_db_to_bytes() -> bytes:
             os.unlink(tmp_path)
         except Exception:
             pass
+
+
+def _migrate_json_to_db():
+    """One-time migration: import data from JSON files into SQLite tables.
+
+    Each section only runs when the corresponding table is empty, so it is
+    safe to call on every startup — subsequent calls are effectively no-ops.
+    """
+    try:
+        with get_db() as conn:
+            # ---- albums ----
+            count = conn.execute("SELECT COUNT(*) FROM albums").fetchone()[0]
+            if count == 0 and os.path.isfile(ALBUMS_FILE):
+                try:
+                    data = load_json(ALBUMS_FILE, {})
+                    for album_id, album_data in data.items():
+                        conn.execute(
+                            "INSERT OR IGNORE INTO albums (id, data_json) VALUES (?, ?)",
+                            (album_id, json.dumps(album_data, ensure_ascii=False)),
+                        )
+                    log.info("_migrate_json_to_db: migrated %d albums from %s", len(data), ALBUMS_FILE)
+                except Exception as exc:
+                    log.warning("_migrate_json_to_db: albums migration failed: %s", exc)
+
+            # ---- bots_config ----
+            count = conn.execute("SELECT COUNT(*) FROM bots_config").fetchone()[0]
+            if count == 0 and os.path.isfile(BOTS_FILE):
+                try:
+                    data = load_json(BOTS_FILE, [])
+                    for i, bot in enumerate(data):
+                        conn.execute(
+                            "INSERT OR IGNORE INTO bots_config (id, data_json, sort_order) VALUES (?, ?, ?)",
+                            (bot.get("id", str(i)), json.dumps(bot, ensure_ascii=False), i),
+                        )
+                    log.info("_migrate_json_to_db: migrated %d bots from %s", len(data), BOTS_FILE)
+                except Exception as exc:
+                    log.warning("_migrate_json_to_db: bots migration failed: %s", exc)
+
+            # ---- app_config (schedule config) ----
+            row = conn.execute("SELECT 1 FROM app_config WHERE key='config'").fetchone()
+            if row is None and os.path.isfile(CONFIG_FILE):
+                try:
+                    data = load_json(CONFIG_FILE, {"hour": 0, "minute": 0})
+                    conn.execute(
+                        "INSERT OR IGNORE INTO app_config (key, value) VALUES ('config', ?)",
+                        (json.dumps(data, ensure_ascii=False),),
+                    )
+                    log.info("_migrate_json_to_db: migrated config from %s", CONFIG_FILE)
+                except Exception as exc:
+                    log.warning("_migrate_json_to_db: config migration failed: %s", exc)
+
+            # ---- messages flow ----
+            row = conn.execute("SELECT 1 FROM app_config WHERE key='messages_flow'").fetchone()
+            if row is None and os.path.isfile(MESSAGES_FILE):
+                try:
+                    data = load_json(MESSAGES_FILE, {})
+                    if data:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO app_config (key, value) VALUES ('messages_flow', ?)",
+                            (json.dumps(data, ensure_ascii=False),),
+                        )
+                        log.info("_migrate_json_to_db: migrated messages flow from %s", MESSAGES_FILE)
+                except Exception as exc:
+                    log.warning("_migrate_json_to_db: messages migration failed: %s", exc)
+
+            # ---- slogans ----
+            row = conn.execute("SELECT 1 FROM app_config WHERE key='slogans'").fetchone()
+            if row is None and os.path.isfile(SLOGANS_FILE):
+                try:
+                    data = load_json(SLOGANS_FILE, {"enabled": True, "items": []})
+                    conn.execute(
+                        "INSERT OR IGNORE INTO app_config (key, value) VALUES ('slogans', ?)",
+                        (json.dumps(data, ensure_ascii=False),),
+                    )
+                    log.info("_migrate_json_to_db: migrated slogans from %s", SLOGANS_FILE)
+                except Exception as exc:
+                    log.warning("_migrate_json_to_db: slogans migration failed: %s", exc)
+
+            # ---- subscribers (global + per-bot) ----
+            count = conn.execute("SELECT COUNT(*) FROM subscribers").fetchone()[0]
+            if count == 0:
+                # Global subscribers.json → bot_id='global'
+                if os.path.isfile(SUBS_FILE):
+                    try:
+                        subs = load_json(SUBS_FILE, [])
+                        for uid in subs:
+                            conn.execute(
+                                "INSERT OR IGNORE INTO subscribers (bot_id, user_id) VALUES ('global', ?)",
+                                (int(uid),),
+                            )
+                        log.info("_migrate_json_to_db: migrated %d global subscribers", len(subs))
+                    except Exception as exc:
+                        log.warning("_migrate_json_to_db: global subscribers migration failed: %s", exc)
+                # Per-bot subs_*.json
+                for path in glob.glob(os.path.join(_APP_DIR, "subs_*.json")):
+                    bot_id = os.path.basename(path).removeprefix("subs_").removesuffix(".json")
+                    try:
+                        subs = load_json(path, [])
+                        for uid in subs:
+                            conn.execute(
+                                "INSERT OR IGNORE INTO subscribers (bot_id, user_id) VALUES (?, ?)",
+                                (bot_id, int(uid)),
+                            )
+                        log.info("_migrate_json_to_db: migrated %d subscribers for bot %s", len(subs), bot_id)
+                    except Exception as exc:
+                        log.warning("_migrate_json_to_db: subs migration for %s failed: %s", bot_id, exc)
+
+            # ---- banned users ----
+            count = conn.execute("SELECT COUNT(*) FROM banned_users").fetchone()[0]
+            if count == 0 and os.path.isfile(BANNED_FILE):
+                try:
+                    banned = load_json(BANNED_FILE, [])
+                    for uid in banned:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO banned_users (user_id) VALUES (?)",
+                            (int(uid),),
+                        )
+                    log.info("_migrate_json_to_db: migrated %d banned users from %s", len(banned), BANNED_FILE)
+                except Exception as exc:
+                    log.warning("_migrate_json_to_db: banned migration failed: %s", exc)
+
+            conn.commit()
+    except Exception as exc:
+        log.error("_migrate_json_to_db: unexpected error: %s", exc, exc_info=True)
+
+
+# ===== DB HELPER FUNCTIONS (replacing JSON file read/write) =====
+
+def db_get_albums() -> dict:
+    """Load all albums from SQLite. Returns dict keyed by album_id."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute("SELECT id, data_json FROM albums").fetchall()
+        return {row["id"]: json.loads(row["data_json"]) for row in rows}
+    except Exception as exc:
+        log.error("db_get_albums failed: %s", exc)
+        return {}
+
+
+def db_save_album(album_id: str, album_data: dict):
+    """Insert or replace a single album in SQLite."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO albums (id, data_json) VALUES (?, ?)",
+            (album_id, json.dumps(album_data, ensure_ascii=False)),
+        )
+        conn.commit()
+
+
+def db_delete_album(album_id: str):
+    """Delete an album from SQLite."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM albums WHERE id=?", (album_id,))
+        conn.commit()
+
+
+def db_get_bots() -> list:
+    """Load bots config list from SQLite."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT data_json FROM bots_config ORDER BY sort_order"
+            ).fetchall()
+        return [json.loads(row["data_json"]) for row in rows]
+    except Exception as exc:
+        log.error("db_get_bots failed: %s", exc)
+        return []
+
+
+def db_save_bots(bots: list):
+    """Replace the entire bots config list atomically."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM bots_config")
+        for i, bot in enumerate(bots):
+            conn.execute(
+                "INSERT INTO bots_config (id, data_json, sort_order) VALUES (?, ?, ?)",
+                (bot.get("id", str(i)), json.dumps(bot, ensure_ascii=False), i),
+            )
+        conn.commit()
+
+
+def db_get_config() -> dict:
+    """Load schedule config {hour, minute} from SQLite."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key='config'"
+            ).fetchone()
+        if row:
+            return json.loads(row["value"])
+        return {"hour": 0, "minute": 0}
+    except Exception as exc:
+        log.error("db_get_config failed: %s", exc)
+        return {"hour": 0, "minute": 0}
+
+
+def db_save_config(cfg: dict):
+    """Save schedule config to SQLite."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES ('config', ?)",
+            (json.dumps(cfg, ensure_ascii=False),),
+        )
+        conn.commit()
+
+
+def db_get_messages_flow_raw() -> dict:
+    """Load raw messages flow dict from SQLite (no migration/defaults applied)."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key='messages_flow'"
+            ).fetchone()
+        if row:
+            return json.loads(row["value"])
+        return {}
+    except Exception as exc:
+        log.error("db_get_messages_flow_raw failed: %s", exc)
+        return {}
+
+
+def db_save_messages_flow(flow: dict):
+    """Save messages flow to SQLite."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES ('messages_flow', ?)",
+            (json.dumps(flow, ensure_ascii=False),),
+        )
+        conn.commit()
+
+
+def db_get_subscribers(bot_id: str) -> list:
+    """Load subscriber user_id list for a given bot_id from SQLite."""
+    db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT user_id FROM subscribers WHERE bot_id=?", (db_key,)
+            ).fetchall()
+        return [row["user_id"] for row in rows]
+    except Exception as exc:
+        log.error("db_get_subscribers(%s) failed: %s", bot_id, exc)
+        return []
+
+
+def db_add_subscriber(bot_id: str, user_id: int):
+    """Add a subscriber to SQLite (idempotent)."""
+    db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO subscribers (bot_id, user_id) VALUES (?, ?)",
+            (db_key, user_id),
+        )
+        conn.commit()
+
+
+def db_remove_subscriber(bot_id: str, user_id: int):
+    """Remove a subscriber from SQLite."""
+    db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM subscribers WHERE bot_id=? AND user_id=?",
+            (db_key, user_id),
+        )
+        conn.commit()
+
+
+def db_save_subscribers(bot_id: str, subs: list):
+    """Atomically replace the subscriber list for a bot."""
+    db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
+    with get_db() as conn:
+        conn.execute("DELETE FROM subscribers WHERE bot_id=?", (db_key,))
+        for uid in subs:
+            conn.execute(
+                "INSERT INTO subscribers (bot_id, user_id) VALUES (?, ?)",
+                (db_key, int(uid)),
+            )
+        conn.commit()
+
+
+def db_get_all_subscriber_ids() -> set:
+    """Return the set of all subscriber user_ids (as strings) across all bots."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute("SELECT DISTINCT user_id FROM subscribers").fetchall()
+        return {str(row["user_id"]) for row in rows}
+    except Exception as exc:
+        log.error("db_get_all_subscriber_ids failed: %s", exc)
+        return set()
+
+
+def db_get_slogans() -> dict:
+    """Load slogans config from SQLite."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key='slogans'"
+            ).fetchone()
+        if row:
+            return json.loads(row["value"])
+        return {"enabled": True, "items": []}
+    except Exception as exc:
+        log.error("db_get_slogans failed: %s", exc)
+        return {"enabled": True, "items": []}
+
+
+def db_save_slogans(data: dict):
+    """Save slogans config to SQLite."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES ('slogans', ?)",
+            (json.dumps(data, ensure_ascii=False),),
+        )
+        conn.commit()
+
+
+def db_get_banned() -> list:
+    """Load banned user_id list from SQLite."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute("SELECT user_id FROM banned_users").fetchall()
+        return [row["user_id"] for row in rows]
+    except Exception as exc:
+        log.error("db_get_banned failed: %s", exc)
+        return []
+
+
+def db_add_ban(user_id: int):
+    """Add a user to the ban list (idempotent)."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO banned_users (user_id) VALUES (?)", (user_id,)
+        )
+        conn.commit()
+
+
+def db_remove_ban(user_id: int):
+    """Remove a user from the ban list."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM banned_users WHERE user_id=?", (user_id,))
+        conn.commit()
+
+
+def db_export_as_json() -> dict:
+    """Export all DB-stored data as a dict mapping filename → JSON bytes.
+    Used by the backup function to produce human-readable JSON exports."""
+    result = {}
+    try:
+        albums = db_get_albums()
+        result["albums.json"] = json.dumps(albums, indent=2, ensure_ascii=False).encode("utf-8")
+    except Exception:
+        pass
+    try:
+        bots = db_get_bots()
+        result["bots.json"] = json.dumps(bots, indent=2, ensure_ascii=False).encode("utf-8")
+    except Exception:
+        pass
+    try:
+        cfg = db_get_config()
+        result["config.json"] = json.dumps(cfg, indent=2, ensure_ascii=False).encode("utf-8")
+    except Exception:
+        pass
+    try:
+        flow = db_get_messages_flow_raw()
+        result["messages.json"] = json.dumps(flow, indent=2, ensure_ascii=False).encode("utf-8")
+    except Exception:
+        pass
+    try:
+        slogans = db_get_slogans()
+        result["slogans.json"] = json.dumps(slogans, indent=2, ensure_ascii=False).encode("utf-8")
+    except Exception:
+        pass
+    try:
+        # Group subscribers by bot_id
+        with get_db() as conn:
+            rows = conn.execute("SELECT bot_id, user_id FROM subscribers ORDER BY bot_id").fetchall()
+        subs_by_bot: dict = {}
+        for row in rows:
+            subs_by_bot.setdefault(row["bot_id"], []).append(row["user_id"])
+        global_subs = subs_by_bot.pop("global", [])
+        result["subscribers.json"] = json.dumps(global_subs, indent=2, ensure_ascii=False).encode("utf-8")
+        for bid, subs in subs_by_bot.items():
+            result[f"subs_{bid}.json"] = json.dumps(subs, indent=2, ensure_ascii=False).encode("utf-8")
+    except Exception:
+        pass
+    try:
+        banned = db_get_banned()
+        result["banned.json"] = json.dumps(banned, indent=2, ensure_ascii=False).encode("utf-8")
+    except Exception:
+        pass
+    return result
 
 
 # Broadcast task state (module-level so it persists across requests)
@@ -317,8 +742,8 @@ def increment_bot_stat(bot_id: str, field: str, count: int = 1):
 
 
 def get_all_analytics() -> list:
-    """Return analytics rows for all bots, merged with bot names from bots.json."""
-    bots_cfg = load_json(BOTS_FILE, [])
+    """Return analytics rows for all bots, merged with bot names from DB."""
+    bots_cfg = db_get_bots()
     name_map = {b.get("id", ""): b.get("name", "?") for b in bots_cfg}
     if BOT_TOKEN and "env_default" not in name_map:
         name_map["env_default"] = "Default Bot"
@@ -358,15 +783,10 @@ def get_all_analytics() -> list:
 
 
 def increment_messages_sent(bot_id: str, count: int):
-    """Increment the messages-sent counter for a bot in stats.json and analytics DB."""
+    """Increment the messages-sent counter for a bot in the analytics DB."""
     if count <= 0:
         return
     increment_bot_stat(bot_id, "messages_sent", count)
-    stats = load_json(STATS_FILE, {})
-    b = stats.get(bot_id, {})
-    b["messages_sent"] = b.get("messages_sent", 0) + count
-    stats[bot_id] = b
-    save_json(STATS_FILE, stats)
 
 
 _DEFAULT_ALBUM_END_NODE = {
@@ -376,10 +796,11 @@ _DEFAULT_ALBUM_END_NODE = {
 
 
 def get_messages_flow() -> dict:
-    """Load messages.json in node-based flow format.
+    """Load message flow from SQLite in node-based format.
     Automatically migrates from the old flat {start_text, buttons[]} format."""
-    data = load_json(MESSAGES_FILE, {})
-    # Detect old flat format (has "start_text" key)
+    data = db_get_messages_flow_raw()
+    # Detect old flat format (has "start_text" key) – may be encountered when
+    # migrating from a JSON file that stored the old format.
     if isinstance(data, dict) and "start_text" in data:
         old_buttons = data.get("buttons", [])
         new_buttons = []
@@ -392,7 +813,7 @@ def get_messages_flow() -> dict:
             elif label and cb:
                 new_buttons.append({"label": label, "type": "node", "value": cb})
         flow = {"start": {"text": data.get("start_text", "Chào mừng bạn! 👋"), "buttons": new_buttons}}
-        save_json(MESSAGES_FILE, flow)
+        db_save_messages_flow(flow)
         return flow
     if not isinstance(data, dict) or not data:
         return {"start": {"text": "Chào mừng bạn! 👋", "buttons": []},
@@ -405,21 +826,11 @@ def get_messages_flow() -> dict:
 
 
 def _backup_files_to_zip(zf: zipfile.ZipFile):
-    """Write all data files into a ZipFile object."""
-    for fname in (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE, BOTS_FILE, MESSAGES_FILE, BANNED_FILE, SLOGANS_FILE):
-        try:
-            with open(fname, "rb") as f:
-                # Store with just the basename so the zip is portable.
-                zf.writestr(os.path.basename(fname), f.read())
-        except FileNotFoundError:
-            pass
-    for path in glob.glob(os.path.join(_APP_DIR, "subs_*.json")):
-        try:
-            with open(path, "rb") as f:
-                zf.writestr(os.path.basename(path), f.read())
-        except FileNotFoundError:
-            pass
-    # Include SQLite database
+    """Write all data into a ZipFile: SQLite DB + JSON exports of every table."""
+    # Export DB tables as human-readable JSON files
+    for fname, data_bytes in db_export_as_json().items():
+        zf.writestr(fname, data_bytes)
+    # Include the raw SQLite database for a full binary restore
     if os.path.exists(DB_FILE):
         try:
             zf.writestr(os.path.basename(DB_FILE), backup_db_to_bytes())
@@ -563,15 +974,12 @@ def logout():
 @app.route("/")
 @login_required
 def index():
-    all_albums = load_json(ALBUMS_FILE, {})
-    subs = load_json(SUBS_FILE, [])
-    bots = load_json(BOTS_FILE, [])
-    messages_cfg = load_json(MESSAGES_FILE, {
-        "start_text": "NHỮNG THỨ BẠN TÌM ĐỀU Ở ĐÂY 😏",
-        "buttons": [{"text": "🔥 CHẠM LÀ NGHIỆN 🔥", "callback_data": "menu", "url": ""}],
-    })
-    cfg = load_json(CONFIG_FILE, {"hour": 0, "minute": 0})
-    slogans = load_json(SLOGANS_FILE, {"enabled": True, "items": []})
+    all_albums = db_get_albums()
+    subs = db_get_subscribers("global")
+    bots = db_get_bots()
+    messages_cfg = get_messages_flow()
+    cfg = db_get_config()
+    slogans = db_get_slogans()
     active_album = request.args.get("album", "")
     # ID stats from SQLite
     id_stats = {"total": 0, "active": 0, "blocked": 0, "invalid": 0, "unknown": 0}
@@ -615,23 +1023,19 @@ def create_album():
     if not title:
         return "Missing title", 400
     album_id = f"album_{uuid.uuid4().hex[:8]}"
-    albums = load_json(ALBUMS_FILE, {})
-    albums[album_id] = {
+    db_save_album(album_id, {
         "title": title,
         "description": description,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "posts": [],
-    }
-    save_json(ALBUMS_FILE, albums)
+    })
     return redirect(f"/?album={album_id}")
 
 
 @app.route("/albums/<album_id>/delete", methods=["POST"])
 @owner_required
 def delete_album(album_id):
-    albums = load_json(ALBUMS_FILE, {})
-    albums.pop(album_id, None)
-    save_json(ALBUMS_FILE, albums)
+    db_delete_album(album_id)
     return redirect("/")
 
 
@@ -641,7 +1045,7 @@ def delete_album(album_id):
 @login_required
 def add_post(album_id):
     caption = request.form.get("caption", "").strip()
-    albums = load_json(ALBUMS_FILE, {})
+    albums = db_get_albums()
     if album_id not in albums:
         return "Album not found", 404
     media_items = []
@@ -673,22 +1077,23 @@ def add_post(album_id):
         "photos": media_items,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    if "posts" not in albums[album_id]:
-        albums[album_id]["posts"] = []
-    albums[album_id]["posts"].append(post)
-    save_json(ALBUMS_FILE, albums)
+    album = albums[album_id]
+    if "posts" not in album:
+        album["posts"] = []
+    album["posts"].append(post)
+    db_save_album(album_id, album)
     return redirect(f"/?album={album_id}")
 
 
 @app.route("/albums/<album_id>/posts/<post_id>/delete", methods=["POST"])
 @owner_required
 def delete_post(album_id, post_id):
-    albums = load_json(ALBUMS_FILE, {})
+    albums = db_get_albums()
     if album_id in albums:
         albums[album_id]["posts"] = [
             p for p in albums[album_id].get("posts", []) if p["id"] != post_id
         ]
-        save_json(ALBUMS_FILE, albums)
+        db_save_album(album_id, albums[album_id])
     return redirect(f"/?album={album_id}")
 
 
@@ -701,7 +1106,7 @@ def upload():
     caption_text = request.form.get("caption", "").strip()
     if not album_id:
         return "Missing album_id", 400
-    albums = load_json(ALBUMS_FILE, {})
+    albums = db_get_albums()
     if album_id not in albums:
         albums[album_id] = {
             "title": album_id,
@@ -736,16 +1141,14 @@ def upload():
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         albums[album_id].setdefault("posts", []).append(post)
-    save_json(ALBUMS_FILE, albums)
+    db_save_album(album_id, albums[album_id])
     return redirect("/")
 
 
 @app.route("/delete/<album_id>")
 @owner_required
 def delete(album_id):
-    albums = load_json(ALBUMS_FILE, {})
-    albums.pop(album_id, None)
-    save_json(ALBUMS_FILE, albums)
+    db_delete_album(album_id)
     return redirect("/")
 
 
@@ -812,29 +1215,47 @@ def backup_restore():
         return jsonify({"ok": False, "error": "Không tìm thấy bản sao lưu cục bộ"}), 404
 
     try:
-        # Build a mapping from basename → absolute path for all known data files.
-        _static_files = (ALBUMS_FILE, SUBS_FILE, CONFIG_FILE, BOTS_FILE, MESSAGES_FILE, BANNED_FILE)
-        allowed_basenames = {os.path.basename(p): p for p in _static_files}
         db_basename = os.path.basename(DB_FILE)
 
         with zipfile.ZipFile(backup_zip_path, "r") as zf:
             for entry in zf.namelist():
-                # Use only the basename to support both old (relative) and new (basename) zips.
                 fname = os.path.basename(entry)
                 if fname == db_basename:
+                    # Restore the raw SQLite DB file and reinitialise tables
                     db_data = zf.read(entry)
                     with open(DB_FILE, "wb") as f:
                         f.write(db_data)
                     init_db()
                     continue
-                if fname in allowed_basenames:
-                    dest = allowed_basenames[fname]
-                elif fname.startswith("subs_") and fname.endswith(".json"):
-                    dest = os.path.join(_APP_DIR, fname)
-                else:
+                # Restore JSON exports back into the DB (for backups that include
+                # human-readable JSON exports alongside the binary DB file).
+                try:
+                    content = json.loads(zf.read(entry).decode("utf-8"))
+                except Exception:
                     continue
-                content = json.loads(zf.read(entry).decode("utf-8"))
-                save_json(dest, content)
+                if fname == "albums.json" and isinstance(content, dict):
+                    for aid, adata in content.items():
+                        db_save_album(aid, adata)
+                elif fname == "bots.json" and isinstance(content, list):
+                    db_save_bots(content)
+                elif fname == "config.json" and isinstance(content, dict):
+                    db_save_config(content)
+                elif fname == "messages.json" and isinstance(content, dict):
+                    db_save_messages_flow(content)
+                elif fname == "slogans.json" and isinstance(content, dict):
+                    db_save_slogans(content)
+                elif fname == "subscribers.json" and isinstance(content, list):
+                    db_save_subscribers("global", content)
+                elif fname.startswith("subs_") and fname.endswith(".json") and isinstance(content, list):
+                    bot_id_key = fname.removeprefix("subs_").removesuffix(".json")
+                    db_save_subscribers(bot_id_key, content)
+                elif fname in ("banned.json", "banned_users.json") and isinstance(content, list):
+                    with get_db() as conn:
+                        for uid in content:
+                            conn.execute(
+                                "INSERT OR IGNORE INTO banned_users (user_id) VALUES (?)", (int(uid),)
+                            )
+                        conn.commit()
 
         return jsonify({"ok": True})
     except Exception as e:
@@ -1097,7 +1518,7 @@ def broadcast():
     message = request.form.get("message", "").strip()
     if not message:
         return jsonify({"ok": False, "error": "Tin nhắn không được để trống"}), 400
-    subs = load_json(SUBS_FILE, [])
+    subs = db_get_subscribers("global")
     if not subs:
         return jsonify({"ok": False, "error": "Chưa có người đăng ký nào"}), 400
     success, fail = 0, 0
@@ -1177,12 +1598,8 @@ def broadcast_all():
         log.error(f"broadcast_all DB read error: {e}")
         return jsonify({"ok": False, "error": "Lỗi đọc database. Vui lòng thử lại."}), 500
 
-    # Also include all subscriber IDs (users who pressed /start) from subs_*.json and subscribers.json
-    # Subscriber lists store integer IDs; convert to strings for consistent set operations.
-    sub_ids: set = set()
-    for sub_path in [SUBS_FILE] + glob.glob(os.path.join(_APP_DIR, "subs_*.json")):
-        for uid in load_json(sub_path, []):
-            sub_ids.add(str(uid))
+    # Also include all subscriber IDs from the subscribers table
+    sub_ids: set = db_get_all_subscriber_ids()
 
     # Merge: active DB IDs + subscriber IDs (deduplicated, all strings)
     user_ids = list(db_ids | sub_ids)
@@ -1226,16 +1643,16 @@ def broadcast_all():
 @app.route("/settings/time", methods=["POST"])
 @login_required
 def settings_time():
-    """Update auto-schedule hour and minute in config.json (Vietnam time, UTC+7)."""
+    """Update auto-schedule hour and minute in the database (Vietnam time, UTC+7)."""
     try:
         hour = int(request.form.get("hour", 0))
         minute = int(request.form.get("minute", 0))
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             return jsonify({"ok": False, "error": "Giờ hoặc phút không hợp lệ"}), 400
-        cfg = load_json(CONFIG_FILE, {})
+        cfg = db_get_config()
         cfg["hour"] = hour
         cfg["minute"] = minute
-        save_json(CONFIG_FILE, cfg)
+        db_save_config(cfg)
         return jsonify({"ok": True, "hour": hour, "minute": minute})
     except (ValueError, TypeError):
         return jsonify({"ok": False, "error": "Dữ liệu không hợp lệ"}), 400
@@ -1244,7 +1661,7 @@ def settings_time():
 @app.route("/bots/add", methods=["POST"])
 @owner_required
 def add_bot():
-    """Add a new bot to bots.json."""
+    """Add a new bot to the database."""
     name = request.form.get("name", "").strip()
     token = request.form.get("token", "").strip()
     admin_id_str = request.form.get("admin_id", "").strip()
@@ -1253,7 +1670,7 @@ def add_bot():
     if admin_id_str and not admin_id_str.isdigit():
         return jsonify({"ok": False, "error": "Admin ID phải là số nguyên dương"}), 400
     admin_id_val = int(admin_id_str) if admin_id_str else None
-    bots = load_json(BOTS_FILE, [])
+    bots = db_get_bots()
     bots.append({
         "id": uuid.uuid4().hex,
         "name": name,
@@ -1261,7 +1678,7 @@ def add_bot():
         "admin_id": admin_id_val,
         "auto_responder": True,
     })
-    save_json(BOTS_FILE, bots)
+    db_save_bots(bots)
     _bot_manager.notify_change()
     return jsonify({"ok": True})
 
@@ -1269,10 +1686,10 @@ def add_bot():
 @app.route("/bots/<bot_id>/delete", methods=["POST"])
 @owner_required
 def delete_bot(bot_id):
-    """Remove a bot from bots.json."""
-    bots = load_json(BOTS_FILE, [])
+    """Remove a bot from the database."""
+    bots = db_get_bots()
     bots = [b for b in bots if b.get("id") != bot_id]
-    save_json(BOTS_FILE, bots)
+    db_save_bots(bots)
     _bot_manager.notify_change()
     return jsonify({"ok": True})
 
@@ -1281,7 +1698,7 @@ def delete_bot(bot_id):
 @owner_required
 def toggle_bot_responder(bot_id):
     """Toggle the auto_responder flag for a bot."""
-    bots = load_json(BOTS_FILE, [])
+    bots = db_get_bots()
     updated = False
     new_state = None
     for bot in bots:
@@ -1292,16 +1709,15 @@ def toggle_bot_responder(bot_id):
             break
     if not updated:
         return jsonify({"ok": False, "error": "Bot không tồn tại"}), 404
-    save_json(BOTS_FILE, bots)
+    db_save_bots(bots)
     return jsonify({"ok": True, "auto_responder": new_state})
 
 
 @app.route("/bots/health", methods=["GET"])
 @owner_required
 def bots_health():
-    """Return health status and per-bot stats for all bots in bots.json."""
-    bots_list = load_json(BOTS_FILE, [])
-    stats = load_json(STATS_FILE, {})
+    """Return health status and per-bot stats for all bots in the database."""
+    bots_list = db_get_bots()
     # Load analytics from DB
     analytics_map = {a["bot_id"]: a for a in get_all_analytics()}
     result = []
@@ -1323,17 +1739,16 @@ def bots_health():
                     status = "ERROR"
             except Exception:
                 status = "ERROR"
-        bot_subs = load_json(subs_file(bot_id), [])
+        bot_subs = db_get_subscribers(bot_id)
         if not bot_subs:
-            bot_subs = load_json(SUBS_FILE, [])
-        bot_stats = stats.get(bot_id, {})
+            bot_subs = db_get_subscribers("global")
         a = analytics_map.get(bot_id, {})
         result.append({
             "id": bot_id,
             "status": status,
             "auto_responder": bot.get("auto_responder", True),
             "subs_count": len(bot_subs),
-            "messages_sent": a.get("messages_sent", bot_stats.get("messages_sent", 0)),
+            "messages_sent": a.get("messages_sent", 0),
             "starts_count": a.get("starts_count", 0),
             "interactions_count": a.get("interactions_count", 0),
             "replies_count": a.get("replies_count", 0),
@@ -1359,7 +1774,7 @@ def analytics_data():
 @owner_required
 def get_bot_token(bot_id):
     """Return the full token of a bot (owner only)."""
-    bots = load_json(BOTS_FILE, [])
+    bots = db_get_bots()
     bot = next((b for b in bots if b.get("id") == bot_id), None)
     if not bot:
         return jsonify({"ok": False, "error": "Bot không tồn tại"}), 404
@@ -1368,7 +1783,7 @@ def get_bot_token(bot_id):
 
 def _get_all_active_bots() -> list:
     """Return list of all configured bots with valid tokens."""
-    bots_list = load_json(BOTS_FILE, [])
+    bots_list = db_get_bots()
     if not bots_list and BOT_TOKEN:
         bots_list = [{"id": "env_default", "name": "Default Bot", "token": BOT_TOKEN}]
     return [b for b in bots_list if (b.get("token") or "").strip()]
@@ -1441,7 +1856,7 @@ def save_messages():
         clean_flow[node_id] = {"text": text, "buttons": clean_buttons}
     if "start" not in clean_flow:
         clean_flow["start"] = {"text": "Chào mừng bạn! 👋", "buttons": []}
-    save_json(MESSAGES_FILE, clean_flow)
+    db_save_messages_flow(clean_flow)
     return jsonify({"ok": True})
 
 
@@ -1476,7 +1891,7 @@ def save_message_node(node_id):
     clean_buttons = _parse_node_buttons(data.get("buttons", []))
     flow = get_messages_flow()
     flow[node_id] = {"text": text, "buttons": clean_buttons}
-    save_json(MESSAGES_FILE, flow)
+    db_save_messages_flow(flow)
     return jsonify({"ok": True})
 
 
@@ -1489,7 +1904,7 @@ def delete_message_node(node_id):
         return jsonify({"ok": False, "error": "Không thể xóa kịch bản 'start'"}), 400
     flow = get_messages_flow()
     flow.pop(node_id, None)
-    save_json(MESSAGES_FILE, flow)
+    db_save_messages_flow(flow)
     return jsonify({"ok": True})
 
 
@@ -1497,8 +1912,7 @@ def delete_message_node(node_id):
 @login_required
 def get_slogans():
     """Return current slogans configuration."""
-    data = load_json(SLOGANS_FILE, {"enabled": True, "items": []})
-    return jsonify(data)
+    return jsonify(db_get_slogans())
 
 
 @app.route("/slogans", methods=["POST"])
@@ -1523,7 +1937,7 @@ def save_slogans():
                 delay = 1.0
             if text:
                 clean_items.append({"text": text, "delay_after": delay})
-    save_json(SLOGANS_FILE, {"enabled": enabled, "items": clean_items})
+    db_save_slogans({"enabled": enabled, "items": clean_items})
     return jsonify({"ok": True})
 
 
@@ -1729,7 +2143,7 @@ def ids_broadcast():
 
 # ===== BOT HANDLERS =====
 
-if BOT_TOKEN or load_json(BOTS_FILE, []):
+if BOT_TOKEN or db_get_bots():
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo
     from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -1758,7 +2172,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         query = update.callback_query
         await query.answer()
 
-        albums = load_json(ALBUMS_FILE, {})
+        albums = db_get_albums()
         log.info("menu handler: loaded albums: %s", list(albums.keys()))
         buttons = []
         for key, val in sorted(albums.items()):
@@ -1852,7 +2266,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
             )
             return
 
-        albums = load_json(ALBUMS_FILE, {})
+        albums = db_get_albums()
         album = albums.get(query.data)
         chat_id = query.message.chat.id
         await query.delete_message()
@@ -1900,11 +2314,10 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         from telegram.ext import MessageHandler, filters as tg_filters
 
         _last_sent = [None]  # mutable list so the nested coroutine can update it
-        _subs_file = subs_file(bot_cfg_id)
 
         async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_id = update.effective_chat.id
-            banned = load_json(BANNED_FILE, [])
+            banned = db_get_banned()
             if user_id in banned:
                 await update.message.reply_text("⛔ Bạn đã bị cấm sử dụng bot này.")
                 return
@@ -1912,20 +2325,17 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
             # Track starts analytics (always, regardless of auto_responder)
             increment_bot_stat(bot_cfg_id, "starts_count")
 
-            bot_subs = load_json(_subs_file, [])
-            if user_id not in bot_subs:
-                bot_subs.append(user_id)
-                save_json(_subs_file, bot_subs)
+            db_add_subscriber(bot_cfg_id, user_id)
 
             # Check auto_responder flag dynamically (can be toggled without restart)
-            bots_cfg = load_json(BOTS_FILE, [])
+            bots_cfg = db_get_bots()
             bot_entry = next((b for b in bots_cfg if b.get("id") == bot_cfg_id), None)
             auto_responder = bot_entry.get("auto_responder", True) if bot_entry else True
             if not auto_responder:
                 return
 
             # Send slogans sequentially if enabled
-            slogans_cfg = load_json(SLOGANS_FILE, {"enabled": False, "items": []})
+            slogans_cfg = db_get_slogans()
             if slogans_cfg.get("enabled") and slogans_cfg.get("items"):
                 slogan_msgs = []
                 for item in slogans_cfg["items"]:
@@ -1989,7 +2399,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                 if not (0 <= h <= 23 and 0 <= m <= 59):
                     await update.message.reply_text("Giờ/phút không hợp lệ (0-23 / 0-59)")
                     return
-                save_json(CONFIG_FILE, {"hour": h, "minute": m})
+                db_save_config({"hour": h, "minute": m})
                 await update.message.reply_text(f"✅ Đã set giờ: {h:02d}:{m:02d} (Giờ VN)")
             except Exception:
                 await update.message.reply_text("Sai format. Dùng: /settudongguilink_HH:MM")
@@ -1997,8 +2407,8 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
         async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not bot_admin_id or update.effective_chat.id != bot_admin_id:
                 return
-            bot_subs = load_json(_subs_file, [])
-            albums = load_json(ALBUMS_FILE, {})
+            bot_subs = db_get_subscribers(bot_cfg_id)
+            albums = db_get_albums()
             total = total_posts(albums)
             a_rows = get_all_analytics()
             a_data = next((r for r in a_rows if r["bot_id"] == bot_cfg_id), {})
@@ -2020,7 +2430,7 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
             if not message_text:
                 await update.message.reply_text("Cú pháp: /sendall <nội dung tin nhắn>")
                 return
-            bot_subs = load_json(_subs_file, [])
+            bot_subs = db_get_subscribers(bot_cfg_id)
             if not bot_subs:
                 await update.message.reply_text("Chưa có người đăng ký nào.")
                 return
@@ -2043,28 +2453,22 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                 await update.message.reply_text("Cú pháp: /ban <user_id>")
                 return
             target_id = int(context.args[0])
-            bot_subs = load_json(_subs_file, [])
-            if target_id in bot_subs:
-                bot_subs.remove(target_id)
-                save_json(_subs_file, bot_subs)
-            banned = load_json(BANNED_FILE, [])
-            if target_id not in banned:
-                banned.append(target_id)
-                save_json(BANNED_FILE, banned)
+            db_remove_subscriber(bot_cfg_id, target_id)
+            db_add_ban(target_id)
             await update.message.reply_text(f"✅ Đã cấm người dùng {target_id}.")
 
         async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
             now_vn = datetime.now(timezone.utc) + timedelta(hours=7)
-            cfg = load_json(CONFIG_FILE, {"hour": 0, "minute": 0})
+            cfg = db_get_config()
             if now_vn.hour == cfg["hour"] and now_vn.minute == cfg["minute"]:
                 key = f"{now_vn.hour}:{now_vn.minute}"
                 if _last_sent[0] != key:
                     _last_sent[0] = key
-                    albums = load_json(ALBUMS_FILE, {})
+                    albums = db_get_albums()
                     if not albums:
                         return
                     latest = sorted(albums.keys())[-1]
-                    bot_subs = load_json(_subs_file, [])
+                    bot_subs = db_get_subscribers(bot_cfg_id)
                     success, fail = 0, 0
                     for u in bot_subs:
                         try:
@@ -2119,20 +2523,20 @@ if BOT_TOKEN or load_json(BOTS_FILE, []):
                 self._loop.call_soon_threadsafe(self._reload_event.set)
 
         async def _reload(self):
-            """Sync running PTB apps with the current bots.json on disk."""
-            log.info("BotManager._reload() called – reading %s", BOTS_FILE)
-            bots_cfg = load_json(BOTS_FILE, [])
-            log.info("BotManager._reload() – bots.json contains %d entry/entries", len(bots_cfg))
+            """Sync running PTB apps with the current bots DB table."""
+            log.info("BotManager._reload() called – reading bots from DB")
+            bots_cfg = db_get_bots()
+            log.info("BotManager._reload() – DB contains %d bot entry/entries", len(bots_cfg))
             if not bots_cfg and BOT_TOKEN:
                 log.info(
-                    "BotManager._reload() – bots.json is empty; falling back to "
+                    "BotManager._reload() – bots DB is empty; falling back to "
                     "BOT_TOKEN env var (token length=%d)", len(BOT_TOKEN)
                 )
                 bots_cfg = [{"id": "env_default", "name": "Default Bot",
                               "token": BOT_TOKEN, "admin_id": ADMIN_ID}]
             elif not bots_cfg and not BOT_TOKEN:
                 log.warning(
-                    "BotManager._reload() – bots.json is empty AND BOT_TOKEN is unset; "
+                    "BotManager._reload() – bots DB is empty AND BOT_TOKEN is unset; "
                     "no bots to start. Set TOKEN/BOT_TOKEN in .env or add a bot via the web UI."
                 )
 
@@ -2276,14 +2680,14 @@ else:
 def run_bot_thread():
     """Entry point called by run_bot.py — runs the dynamic BotManager loop.
 
-    If no bot token is configured and bots.json is empty, this is a no-op.
+    If no bot token is configured and the bots DB table is empty, this is a no-op.
     Otherwise it acquires the exclusive bot-manager lock (blocking) and then
     starts the BotManager loop.  This ensures that if Gunicorn's embedded bot
     thread is already running (and holds the lock), run_bot_thread() waits
     until that thread exits before taking over — providing a seamless handoff
     rather than a conflicting dual-polling situation.
     """
-    bots_cfg = load_json(BOTS_FILE, [])
+    bots_cfg = db_get_bots()
     if not bots_cfg and not BOT_TOKEN:
         log.warning("run_bot_thread: no bots configured – exiting")
         return
