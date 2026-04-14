@@ -1266,6 +1266,7 @@ def backup_restore():
 async def _async_run_ids_broadcast(
     bots: list, message: str, user_ids: list,
     media_type: str = "none", media_url: str = "", buttons: list | None = None,
+    media_bytes: bytes = None, media_filename: str = None,
 ) -> None:
     """Async broadcast to IDs with all bots running concurrently.
 
@@ -1274,7 +1275,8 @@ async def _async_run_ids_broadcast(
     received, only the affected bot sleeps for the Telegram-supplied
     ``retry_after`` duration; all other bots continue uninterrupted.
 
-    Supports rich media (image / video) and inline keyboard buttons.
+    Supports rich media (image / video via URL or file upload) and inline
+    keyboard buttons.
 
     After *all* bots have attempted a given uid, the best reachability status
     (active > blocked > invalid) is written to the DB and the global progress
@@ -1296,6 +1298,7 @@ async def _async_run_ids_broadcast(
     uid_status_map: dict = {uid: None for uid in user_ids}  # None = undetermined
     uid_done_count: dict = {uid: 0 for uid in user_ids}
     stats_lock = asyncio.Lock()
+    file_id_cache: dict = {"id": None}
 
     async def bot_worker(bot: dict) -> None:
         token = (bot.get("token") or "").strip()
@@ -1304,15 +1307,34 @@ async def _async_run_ids_broadcast(
             return
         retry_until = 0.0  # Event-loop clock time after which this bot's 429 cooldown ends
 
-        async with httpx.AsyncClient(timeout=10) as client:
+        # 30s timeout accommodates multipart file uploads which are larger than plain JSON sends
+        async with httpx.AsyncClient(timeout=30) as client:
             for uid in user_ids:
                 # Wait out any active 429 cooldown for this bot
                 now = asyncio.get_running_loop().time()
                 if retry_until > now:
                     await asyncio.sleep(retry_until - now)
 
-                endpoint, payload = _build_telegram_payload(uid, message, media_type, media_url, buttons)
-                if payload is None:
+                # Determine request parameters based on media source
+                use_multipart = False
+                if media_bytes:
+                    cached_fid = file_id_cache["id"]
+                    if cached_fid:
+                        endpoint, payload = _build_telegram_payload(uid, message, media_type, cached_fid, buttons)
+                        send_files = None
+                        send_data = None
+                    else:
+                        endpoint, send_files, send_data = _build_multipart_payload(
+                            uid, message, media_type, media_bytes, media_filename, buttons
+                        )
+                        payload = None
+                        use_multipart = True
+                else:
+                    endpoint, payload = _build_telegram_payload(uid, message, media_type, media_url, buttons)
+                    send_files = None
+                    send_data = None
+
+                if payload is None and not use_multipart:
                     # No valid payload; classify as invalid without calling Telegram
                     new_status: str = "invalid"
                 else:
@@ -1320,7 +1342,10 @@ async def _async_run_ids_broadcast(
                     new_status = "invalid"
                     while True:  # Retry loop – only retries on 429
                         try:
-                            resp = await client.post(api_url, json=payload)
+                            if use_multipart:
+                                resp = await client.post(api_url, files=send_files, data=send_data)
+                            else:
+                                resp = await client.post(api_url, json=payload)
                             if resp.status_code == 429:
                                 try:
                                     retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
@@ -1334,9 +1359,27 @@ async def _async_run_ids_broadcast(
                             rdata = resp.json()
                             if resp.status_code == 200 and rdata.get("ok"):
                                 new_status = "active"
+                                if use_multipart and not file_id_cache["id"]:
+                                    try:
+                                        result = rdata.get("result", {})
+                                        fid = None
+                                        if media_type == "image":
+                                            photos = result.get("photo", [])
+                                            if photos:
+                                                fid = photos[-1]["file_id"]
+                                        elif media_type == "video":
+                                            fid = result.get("video", {}).get("file_id")
+                                        if fid:
+                                            file_id_cache["id"] = fid
+                                    except Exception as fe:
+                                        log.warning("Could not extract file_id: %s", fe)
                             elif resp.status_code == 403:
                                 new_status = "blocked"
                             else:
+                                log.warning(
+                                    "Telegram API error for uid %s via bot %s: status=%s body=%s",
+                                    uid, bot_id, resp.status_code, resp.text[:200],
+                                )
                                 new_status = "invalid"
                             break
                         except Exception as e:
@@ -1393,12 +1436,18 @@ async def _async_run_ids_broadcast(
 async def _async_run_broadcast_all(
     bots: list, user_ids: list, message: str,
     media_type: str, media_url: str, buttons: list, camp_id,
+    media_bytes: bytes = None, media_filename: str = None,
 ) -> None:
     """Async broadcast to active IDs with workload distributed across all bots.
 
     User IDs are split among bots via interleaved slicing so that N bots each
     handle ~1/N of the audience, achieving N × ~25 msg/sec total throughput.
     Per-bot 429 handling pauses only the affected bot; others continue.
+
+    Supports optional file upload (media_bytes/media_filename).  When a file is
+    provided, the first successful send uploads it via multipart and caches the
+    returned file_id; all subsequent sends reuse that file_id via JSON to avoid
+    redundant uploads.
     """
     active_bots = [b for b in bots if (b.get("token") or "").strip()]
     num_bots = len(active_bots)
@@ -1418,6 +1467,9 @@ async def _async_run_broadcast_all(
     total_fail = 0
     done_count = 0
     stats_lock = asyncio.Lock()
+    # Shared mutable cache for the Telegram file_id obtained from the first
+    # successful multipart upload so subsequent sends reuse it efficiently.
+    file_id_cache: dict = {"id": None}
 
     async def bot_worker(bot: dict, uid_slice: list) -> None:
         nonlocal total_success, total_fail, done_count
@@ -1427,14 +1479,35 @@ async def _async_run_broadcast_all(
             return
         retry_until = 0.0  # Event-loop clock time after which this bot's 429 cooldown ends
 
-        async with httpx.AsyncClient(timeout=10) as client:
+        # 30s timeout accommodates multipart file uploads which are larger than plain JSON sends
+        async with httpx.AsyncClient(timeout=30) as client:
             for uid in uid_slice:
                 now = asyncio.get_running_loop().time()
                 if retry_until > now:
                     await asyncio.sleep(retry_until - now)
 
-                endpoint, payload = _build_telegram_payload(uid, message, media_type, media_url, buttons)
-                if payload is None:
+                # Determine request parameters based on media source
+                use_multipart = False
+                if media_bytes:
+                    cached_fid = file_id_cache["id"]
+                    if cached_fid:
+                        # Reuse the already-uploaded file_id as a URL parameter
+                        endpoint, payload = _build_telegram_payload(uid, message, media_type, cached_fid, buttons)
+                        send_files = None
+                        send_data = None
+                    else:
+                        # First upload – use multipart
+                        endpoint, send_files, send_data = _build_multipart_payload(
+                            uid, message, media_type, media_bytes, media_filename, buttons
+                        )
+                        payload = None
+                        use_multipart = True
+                else:
+                    endpoint, payload = _build_telegram_payload(uid, message, media_type, media_url, buttons)
+                    send_files = None
+                    send_data = None
+
+                if payload is None and not use_multipart:
                     async with stats_lock:
                         bot_res[bot_id]["fail"] += 1
                         total_fail += 1
@@ -1452,7 +1525,10 @@ async def _async_run_broadcast_all(
                 uid_success = False
                 while True:
                     try:
-                        resp = await client.post(api_url, json=payload)
+                        if use_multipart:
+                            resp = await client.post(api_url, files=send_files, data=send_data)
+                        else:
+                            resp = await client.post(api_url, json=payload)
                         if resp.status_code == 429:
                             try:
                                 retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
@@ -1465,6 +1541,29 @@ async def _async_run_broadcast_all(
                             continue
                         if resp.status_code == 200 and resp.json().get("ok"):
                             uid_success = True
+                            # Cache the file_id returned by a multipart upload
+                            if use_multipart and not file_id_cache["id"]:
+                                try:
+                                    result = resp.json().get("result", {})
+                                    fid = None
+                                    if media_type == "image":
+                                        photos = result.get("photo", [])
+                                        if photos:
+                                            fid = photos[-1]["file_id"]
+                                    elif media_type == "video":
+                                        fid = result.get("video", {}).get("file_id")
+                                    if fid:
+                                        file_id_cache["id"] = fid
+                                except Exception as fe:
+                                    log.warning("Could not extract file_id from response: %s", fe)
+                        elif resp.status_code == 403:
+                            # User has blocked the bot – update the database
+                            _mark_user_blocked(uid)
+                        else:
+                            log.warning(
+                                "Telegram API error for uid %s via bot %s: status=%s body=%s",
+                                uid, bot_id, resp.status_code, resp.text[:200],
+                            )
                         break
                     except Exception as e:
                         log.warning("Failed to send message to %s via bot %s: %s", uid, bot_id, e)
@@ -1511,11 +1610,15 @@ async def _async_run_broadcast_all(
 @app.route("/broadcast", methods=["POST"])
 @login_required
 def broadcast():
-    """Send a broadcast message to all subscribers via all configured bots.
+    """Send a broadcast message to all subscribers and active IDs via all configured bots.
 
-    Supports optional rich media (image / video) and inline keyboard buttons.
-    The send loop runs in a background thread so it never blocks Flask or causes
-    a browser timeout when the subscriber list is large (1000+ users).
+    Supports optional rich media (image / video via URL or file upload) and
+    inline keyboard buttons.  The send loop runs in a background thread so it
+    never blocks Flask or causes a browser timeout when the subscriber list is
+    large (1000+ users).
+
+    Recipients: all subscribers (people who pressed /start) + all IDs with
+    status='active' in telegram_ids, deduplicated.
     """
     import json as _json
 
@@ -1536,10 +1639,20 @@ def broadcast():
     media_url = request.form.get("media_url", "").strip()
     buttons_raw = request.form.get("buttons_json", "").strip()
 
+    # Handle optional file upload; infer media_type from extension when not set
+    media_file = request.files.get("media_file")
+    media_bytes: bytes | None = None
+    media_filename: str | None = None
+    if media_file and media_file.filename:
+        media_bytes = media_file.read()
+        media_filename = media_file.filename
+        if media_type == "none":
+            media_type = _infer_media_type_from_filename(media_filename)
+
     if not message and media_type == "none":
         return jsonify({"ok": False, "error": "Vui lòng nhập nội dung tin nhắn hoặc chọn media"}), 400
-    if media_type in ("image", "video") and not media_url:
-        return jsonify({"ok": False, "error": "Vui lòng nhập URL media"}), 400
+    if media_type in ("image", "video") and not media_url and not media_bytes:
+        return jsonify({"ok": False, "error": "Vui lòng nhập URL media hoặc tải lên tệp"}), 400
 
     # Parse buttons
     buttons = []
@@ -1551,8 +1664,19 @@ def broadcast():
         except Exception:
             return jsonify({"ok": False, "error": "buttons_json không hợp lệ"}), 400
 
-    # Fetch all subscriber IDs across every bot (deduplicated, as strings)
-    user_ids = list(db_get_all_subscriber_ids())
+    # Recipients: all subscribers (pressed /start) + active IDs from telegram_ids
+    sub_ids: set = db_get_all_subscriber_ids()
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT user_id FROM telegram_ids WHERE status = 'active'"
+            ).fetchall()
+        active_db_ids: set = {str(r["user_id"]) for r in rows}
+    except Exception as e:
+        log.error("broadcast DB read error: %s", e)
+        active_db_ids = set()
+
+    user_ids = list(sub_ids | active_db_ids)
     if not user_ids:
         return jsonify({"ok": False, "error": "Chưa có người đăng ký nào (chưa có ai nhấn /start)"}), 400
 
@@ -1577,11 +1701,14 @@ def broadcast():
             campaign_id = cur.lastrowid
             conn.commit()
     except Exception as e:
-        log.warning(f"broadcast_logs insert failed: {e}")
+        log.warning("broadcast_logs insert failed: %s", e)
 
     t = threading.Thread(
         target=lambda: asyncio.run(
-            _async_run_broadcast_all(bots_list, user_ids, message, media_type, media_url, buttons, campaign_id)
+            _async_run_broadcast_all(
+                bots_list, user_ids, message, media_type, media_url, buttons, campaign_id,
+                media_bytes=media_bytes, media_filename=media_filename,
+            )
         ),
         daemon=True,
     )
@@ -1601,7 +1728,6 @@ def broadcast_all_status():
 def broadcast_all():
     """Broadcast to all active IDs in the database using all bots, with optional rich media and inline buttons."""
     import json as _json
-    import time as _time
 
     with _broadcast_all_lock:
         if _broadcast_all_status.get("running"):
@@ -1621,10 +1747,20 @@ def broadcast_all():
     media_url = request.form.get("media_url", "").strip()
     buttons_raw = request.form.get("buttons_json", "").strip()
 
+    # Handle optional file upload; infer media_type from extension when not set
+    media_file = request.files.get("media_file")
+    media_bytes: bytes | None = None
+    media_filename: str | None = None
+    if media_file and media_file.filename:
+        media_bytes = media_file.read()
+        media_filename = media_file.filename
+        if media_type == "none":
+            media_type = _infer_media_type_from_filename(media_filename)
+
     if not message and media_type == "none":
         return jsonify({"ok": False, "error": "Vui lòng nhập nội dung tin nhắn hoặc chọn media"}), 400
-    if media_type in ("image", "video") and not media_url:
-        return jsonify({"ok": False, "error": "Vui lòng nhập URL media"}), 400
+    if media_type in ("image", "video") and not media_url and not media_bytes:
+        return jsonify({"ok": False, "error": "Vui lòng nhập URL media hoặc tải lên tệp"}), 400
 
     # Parse buttons
     buttons = []
@@ -1644,7 +1780,7 @@ def broadcast_all():
             ).fetchall()
         db_ids: set = {str(r["user_id"]) for r in rows}
     except Exception as e:
-        log.error(f"broadcast_all DB read error: {e}")
+        log.error("broadcast_all DB read error: %s", e)
         return jsonify({"ok": False, "error": "Lỗi đọc database. Vui lòng thử lại."}), 500
 
     # Also include all subscriber IDs from the subscribers table
@@ -1677,11 +1813,14 @@ def broadcast_all():
             campaign_id = cur.lastrowid
             conn.commit()
     except Exception as e:
-        log.warning(f"broadcast_logs insert failed: {e}")
+        log.warning("broadcast_logs insert failed: %s", e)
 
     t = threading.Thread(
         target=lambda: asyncio.run(
-            _async_run_broadcast_all(bots_list, user_ids, message, media_type, media_url, buttons, campaign_id)
+            _async_run_broadcast_all(
+                bots_list, user_ids, message, media_type, media_url, buttons, campaign_id,
+                media_bytes=media_bytes, media_filename=media_filename,
+            )
         ),
         daemon=True,
     )
@@ -1838,26 +1977,50 @@ def _get_all_active_bots() -> list:
     return [b for b in bots_list if (b.get("token") or "").strip()]
 
 
-def _build_telegram_payload(uid: str, message: str, media_type: str, media_url: str, buttons: list) -> tuple:
-    """Build (endpoint_suffix, payload_dict) for a Telegram API call with optional media and buttons."""
-    import json as _json
-    reply_markup = None
-    if buttons:
-        inline_keyboard = []
-        for btn in buttons:
-            text = (btn.get("text") or "").strip()
-            url = (btn.get("url") or "").strip()
-            cb = (btn.get("callback_data") or "").strip()
-            if text and (url or cb):
-                if url:
-                    inline_keyboard.append([{"text": text, "url": url}])
-                else:
-                    inline_keyboard.append([{"text": text, "callback_data": cb}])
-        if inline_keyboard:
-            reply_markup = _json.dumps({"inline_keyboard": inline_keyboard})
+def _build_inline_keyboard(buttons: list) -> dict | None:
+    """Return an inline_keyboard dict suitable for reply_markup, or None if no valid buttons."""
+    inline_keyboard = []
+    for btn in buttons:
+        text = (btn.get("text") or "").strip()
+        url = (btn.get("url") or "").strip()
+        cb = (btn.get("callback_data") or "").strip()
+        if text and (url or cb):
+            if url:
+                inline_keyboard.append([{"text": text, "url": url}])
+            else:
+                inline_keyboard.append([{"text": text, "callback_data": cb}])
+    return {"inline_keyboard": inline_keyboard} if inline_keyboard else None
 
-    chat_id_str = str(uid)
-    chat_id = int(chat_id_str) if (chat_id_str.startswith("-") and chat_id_str[1:].isdigit()) or chat_id_str.isdigit() else uid
+
+def _parse_chat_id(uid: str):
+    """Convert a user-id string to an int when possible (required by Telegram API)."""
+    uid_str = str(uid)
+    if uid_str.isdigit() or (uid_str.startswith("-") and uid_str[1:].isdigit()):
+        return int(uid_str)
+    return uid
+
+
+def _infer_media_type_from_filename(filename: str) -> str:
+    """Return 'image', 'video', or 'none' based on the file extension."""
+    if not filename:
+        return "none"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext in ("mp4", "mov", "avi", "mkv", "webm"):
+        return "video"
+    if ext in ("jpg", "jpeg", "png", "gif", "webp"):
+        return "image"
+    return "none"
+
+
+def _build_telegram_payload(uid: str, message: str, media_type: str, media_url: str, buttons: list) -> tuple:
+    """Build (endpoint_suffix, payload_dict) for a Telegram API call with optional media and buttons.
+
+    reply_markup is kept as a dict so that httpx serialises it correctly when
+    using ``json=payload``.  Do NOT pre-serialise it to a JSON string here.
+    """
+    reply_markup = _build_inline_keyboard(buttons) if buttons else None
+    chat_id = _parse_chat_id(uid)
+
     if media_type == "image" and media_url:
         payload: dict = {"chat_id": chat_id, "photo": media_url}
         if message:
@@ -1879,6 +2042,71 @@ def _build_telegram_payload(uid: str, message: str, media_type: str, media_url: 
         if reply_markup:
             payload["reply_markup"] = reply_markup
         return "sendMessage", payload
+
+
+def _build_multipart_payload(
+    uid: str, message: str, media_type: str,
+    media_bytes: bytes, media_filename: str, buttons: list,
+) -> tuple:
+    """Build (endpoint, files_dict, form_data_dict) for a multipart Telegram file upload.
+
+    reply_markup is JSON-serialised as a string here because multipart form
+    fields are plain text values.
+    """
+    import json as _json
+
+    chat_id = _parse_chat_id(uid)
+    form_data: dict = {"chat_id": str(chat_id)}
+    if message:
+        form_data["caption"] = message
+
+    reply_markup = _build_inline_keyboard(buttons) if buttons else None
+    if reply_markup:
+        form_data["reply_markup"] = _json.dumps(reply_markup)
+
+    ext = media_filename.rsplit(".", 1)[-1].lower() if media_filename and "." in media_filename else ""
+    if media_type == "video":
+        field_name = "video"
+        endpoint = "sendVideo"
+        content_type = "video/mp4"
+        if ext == "mov":
+            content_type = "video/quicktime"
+        elif ext == "avi":
+            content_type = "video/x-msvideo"
+        elif ext == "webm":
+            content_type = "video/webm"
+    else:
+        field_name = "photo"
+        endpoint = "sendPhoto"
+        content_type = "image/jpeg"
+        if ext == "png":
+            content_type = "image/png"
+        elif ext == "gif":
+            content_type = "image/gif"
+        elif ext == "webp":
+            content_type = "image/webp"
+
+    fname = media_filename or ("media.mp4" if media_type == "video" else "media.jpg")
+    files = {field_name: (fname, media_bytes, content_type)}
+    return endpoint, files, form_data
+
+
+def _mark_user_blocked(uid: str) -> None:
+    """Remove a blocked user from subscribers and update telegram_ids status to 'blocked'."""
+    try:
+        with get_db() as conn:
+            try:
+                uid_int = int(uid)
+                conn.execute("DELETE FROM subscribers WHERE user_id=?", (uid_int,))
+            except (ValueError, TypeError):
+                pass
+            conn.execute(
+                "UPDATE telegram_ids SET status='blocked', updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+                (str(uid),),
+            )
+            conn.commit()
+    except Exception as e:
+        log.warning("_mark_user_blocked(%s) failed: %s", uid, e)
 
 
 @app.route("/messages", methods=["GET"])
@@ -2122,7 +2350,7 @@ def ids_broadcast_status():
 def ids_broadcast():
     """Broadcast a message to all uploaded IDs using ALL configured bots, classifying status via Telegram API errors.
 
-    Supports optional rich media (image / video) and inline keyboard buttons alongside the text message.
+    Supports optional rich media (image / video via URL or file upload) and inline keyboard buttons alongside the text message.
     """
     import json as _json
 
@@ -2144,10 +2372,20 @@ def ids_broadcast():
     media_url = request.form.get("media_url", "").strip()
     buttons_raw = request.form.get("buttons_json", "").strip()
 
+    # Handle optional file upload; infer media_type from extension when not set
+    media_file = request.files.get("media_file")
+    media_bytes: bytes | None = None
+    media_filename: str | None = None
+    if media_file and media_file.filename:
+        media_bytes = media_file.read()
+        media_filename = media_file.filename
+        if media_type == "none":
+            media_type = _infer_media_type_from_filename(media_filename)
+
     if not message and media_type == "none":
         return jsonify({"ok": False, "error": "Tin nhắn không được để trống"}), 400
-    if media_type in ("image", "video") and not media_url:
-        return jsonify({"ok": False, "error": "Vui lòng nhập URL media"}), 400
+    if media_type in ("image", "video") and not media_url and not media_bytes:
+        return jsonify({"ok": False, "error": "Vui lòng nhập URL media hoặc tải lên tệp"}), 400
 
     buttons = []
     if buttons_raw:
@@ -2165,7 +2403,7 @@ def ids_broadcast():
             ).fetchall()
         user_ids = [r["user_id"] for r in rows]
     except Exception as e:
-        log.error(f"ids_broadcast DB read error: {e}")
+        log.error("ids_broadcast DB read error: %s", e)
         return jsonify({"ok": False, "error": "Lỗi đọc database. Vui lòng thử lại."}), 500
 
     if not user_ids:
@@ -2182,7 +2420,10 @@ def ids_broadcast():
 
     t = threading.Thread(
         target=lambda: asyncio.run(
-            _async_run_ids_broadcast(bots_list, message, user_ids, media_type, media_url, buttons)
+            _async_run_ids_broadcast(
+                bots_list, message, user_ids, media_type, media_url, buttons,
+                media_bytes=media_bytes, media_filename=media_filename,
+            )
         ),
         daemon=True,
     )
