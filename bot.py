@@ -210,11 +210,71 @@ async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
                     f"📊 Report\nUsers: {len(subs)}\nOK: {success}\nFail: {fail}"
                 )
 
-# ================= RUN =================
+# ================= SENDALL =================
+async def sendall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command: /sendall <text> [| ButtonText - URL ...]
+    
+    Optional inline buttons can be appended after a pipe (|) separator.
+    Each button is formatted as "Button Text - URL" and separated by semicolons.
+    Example: /sendall Hello world! | Click here - https://example.com; More - https://t.me/channel
+    """
+    if not ADMIN_ID or update.effective_chat.id != ADMIN_ID:
+        return
+
+    full_text = " ".join(context.args) if context.args else ""
+    if not full_text:
+        await update.message.reply_text(
+            "Cú pháp: /sendall <nội dung> [| Tên nút - URL; Tên nút 2 - URL2]"
+        )
+        return
+
+    # Parse optional inline buttons from pipe-separated section
+    reply_markup = None
+    if "|" in full_text:
+        parts = full_text.split("|", 1)
+        message_text = parts[0].strip()
+        buttons_raw = parts[1].strip()
+        keyboard = []
+        for btn_def in buttons_raw.split(";"):
+            btn_def = btn_def.strip()
+            if " - " in btn_def:
+                btn_text, btn_url = btn_def.rsplit(" - ", 1)
+                btn_text = btn_text.strip()
+                btn_url = btn_url.strip()
+                if btn_text and btn_url:
+                    keyboard.append([InlineKeyboardButton(btn_text, url=btn_url)])
+        if keyboard:
+            reply_markup = InlineKeyboardMarkup(keyboard)
+    else:
+        message_text = full_text
+
+    if not message_text:
+        await update.message.reply_text("Nội dung tin nhắn không được để trống.")
+        return
+
+    subs = _db_get_subscribers()
+    if not subs:
+        await update.message.reply_text("Chưa có người đăng ký nào.")
+        return
+
+    success, fail = 0, 0
+    for user_id in subs:
+        try:
+            await context.bot.send_message(user_id, message_text, reply_markup=reply_markup)
+            success += 1
+        except Exception:
+            fail += 1
+
+    await update.message.reply_text(
+        f"📢 Đã gửi thông báo!\n✅ Thành công: {success}\n❌ Thất bại: {fail}"
+    )
+
+
 def run_bot():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("sendall", sendall_cmd))
     app.add_handler(CommandHandler("settudongguilink", set_time))
     app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
     app.add_handler(CallbackQueryHandler(album_click))

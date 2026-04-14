@@ -1511,33 +1511,82 @@ async def _async_run_broadcast_all(
 @app.route("/broadcast", methods=["POST"])
 @login_required
 def broadcast():
-    """Send a broadcast message to all subscribers via all configured bots."""
+    """Send a broadcast message to all subscribers via all configured bots.
+
+    Supports optional rich media (image / video) and inline keyboard buttons.
+    The send loop runs in a background thread so it never blocks Flask or causes
+    a browser timeout when the subscriber list is large (1000+ users).
+    """
+    import json as _json
+
+    with _broadcast_all_lock:
+        if _broadcast_all_status.get("running"):
+            return jsonify({"ok": False, "error": "Đang có broadcast đang chạy, vui lòng đợi"}), 409
+
+    with _broadcast_lock:
+        if _broadcast_status.get("running"):
+            return jsonify({"ok": False, "error": "Đang có broadcast (IDs) đang chạy, vui lòng đợi"}), 409
+
     bots_list = _get_all_active_bots()
     if not bots_list:
         return jsonify({"ok": False, "error": "Bot chưa được cấu hình"}), 500
+
     message = request.form.get("message", "").strip()
-    if not message:
-        return jsonify({"ok": False, "error": "Tin nhắn không được để trống"}), 400
-    subs = db_get_subscribers("global")
-    if not subs:
-        return jsonify({"ok": False, "error": "Chưa có người đăng ký nào"}), 400
-    success, fail = 0, 0
-    for bot in bots_list:
-        token = (bot.get("token") or "").strip()
-        if not token:
-            continue
-        api_url = f"https://api.telegram.org/bot{token}/sendMessage"
-        for user_id in subs:
-            try:
-                resp = httpx.post(api_url, json={"chat_id": user_id, "text": message}, timeout=10)
-                if resp.status_code == 200:
-                    success += 1
-                else:
-                    fail += 1
-            except Exception as e:
-                log.warning(f"Broadcast to {user_id} failed: {e}")
-                fail += 1
-    return jsonify({"ok": True, "success": success, "fail": fail})
+    media_type = request.form.get("media_type", "none").strip().lower()
+    media_url = request.form.get("media_url", "").strip()
+    buttons_raw = request.form.get("buttons_json", "").strip()
+
+    if not message and media_type == "none":
+        return jsonify({"ok": False, "error": "Vui lòng nhập nội dung tin nhắn hoặc chọn media"}), 400
+    if media_type in ("image", "video") and not media_url:
+        return jsonify({"ok": False, "error": "Vui lòng nhập URL media"}), 400
+
+    # Parse buttons
+    buttons = []
+    if buttons_raw:
+        try:
+            buttons = _json.loads(buttons_raw)
+            if not isinstance(buttons, list):
+                buttons = []
+        except Exception:
+            return jsonify({"ok": False, "error": "buttons_json không hợp lệ"}), 400
+
+    # Fetch all subscriber IDs across every bot (deduplicated, as strings)
+    user_ids = list(db_get_all_subscriber_ids())
+    if not user_ids:
+        return jsonify({"ok": False, "error": "Chưa có người đăng ký nào (chưa có ai nhấn /start)"}), 400
+
+    bot_results_init = {b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0} for b in bots_list}
+
+    with _broadcast_all_lock:
+        _broadcast_all_status.update({
+            "running": True, "total": len(user_ids), "done": 0,
+            "success": 0, "fail": 0,
+            "bot_results": bot_results_init,
+        })
+
+    # Log campaign start in DB
+    campaign_id = None
+    try:
+        with get_db() as conn:
+            cur = conn.execute(
+                "INSERT INTO broadcast_logs (campaign_type, message, media_type, media_url, buttons_json, total_ids) VALUES (?, ?, ?, ?, ?, ?)",
+                ("subscribers", message, media_type if media_type != "none" else None,
+                 media_url or None, buttons_raw or None, len(user_ids)),
+            )
+            campaign_id = cur.lastrowid
+            conn.commit()
+    except Exception as e:
+        log.warning(f"broadcast_logs insert failed: {e}")
+
+    t = threading.Thread(
+        target=lambda: asyncio.run(
+            _async_run_broadcast_all(bots_list, user_ids, message, media_type, media_url, buttons, campaign_id)
+        ),
+        daemon=True,
+    )
+    t.start()
+    return jsonify({"ok": True, "total": len(user_ids), "bots_count": len(bots_list), "message": "Broadcast đã bắt đầu"})
 
 
 @app.route("/broadcast/all/status", methods=["GET"])
@@ -2430,14 +2479,16 @@ if BOT_TOKEN or db_get_bots():
             if not message_text:
                 await update.message.reply_text("Cú pháp: /sendall <nội dung tin nhắn>")
                 return
-            bot_subs = db_get_subscribers(bot_cfg_id)
-            if not bot_subs:
+            # Use all subscriber IDs across all bots so no subscriber is missed
+            all_sub_ids = db_get_all_subscriber_ids()
+            if not all_sub_ids:
                 await update.message.reply_text("Chưa có người đăng ký nào.")
                 return
             success, fail = 0, 0
-            for user_id in bot_subs:
+            for user_id in all_sub_ids:
                 try:
-                    await context.bot.send_message(user_id, message_text)
+                    chat_id = int(user_id) if str(user_id).lstrip("-").isdigit() else user_id
+                    await context.bot.send_message(chat_id, message_text)
                     success += 1
                 except Exception:
                     fail += 1

@@ -720,8 +720,16 @@
           <div class="dash-card">
             <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-megaphone-fill me-2" style="color:#00c853;"></i>Broadcast Subscribers</span></div>
             <div class="dash-card-body">
-              <p style="font-size:.85rem;color:#aaa;">Gửi tới tất cả người đã bấm /start. ({{ subs|length }} người đăng ký)</p>
+              <p style="font-size:.85rem;color:#aaa;">Gửi tới tất cả người đã bấm /start. ({{ subs|length }} người đăng ký)<br><small>Hỗ trợ text, ảnh, video và nút bấm inline.</small></p>
               <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#broadcastModal"><i class="bi bi-send-fill me-1"></i>Gửi Thông Báo</button>
+              <div id="broadcastSubsProgress" class="mt-3" style="display:none;">
+                <div class="d-flex justify-content-between mb-1" style="font-size:.78rem;"><span id="bspLabel">Đang gửi...</span><span id="bspPercent">0%</span></div>
+                <div class="progress mb-2"><div class="progress-bar progress-bar-striped progress-bar-animated bg-success" id="bspBar" style="width:0%;"></div></div>
+                <div class="d-flex gap-3 flex-wrap mb-2" style="font-size:.76rem;color:#aaa;">
+                  <span>&#9989; Thành công: <strong id="bspSuccess">0</strong></span>
+                  <span>&#10060; Thất bại: <strong id="bspFail">0</strong></span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -760,15 +768,39 @@
 
 <!-- Broadcast Subscribers Modal -->
 <div class="modal fade" id="broadcastModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header"><h5 class="modal-title"><i class="bi bi-megaphone-fill me-2" style="color:#00c853;"></i>Gửi Thông Báo All &#128226;</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
-        <label class="form-label fw-semibold">Nội dung <span class="text-danger">*</span></label>
-        <textarea id="broadcastMessage" class="form-control" rows="5" placeholder="Nhập nội dung..."></textarea>
-        <div class="text-muted mt-2" style="font-size:.8rem;"><i class="bi bi-info-circle me-1"></i>Gửi tới tất cả người đã bấm /start.</div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold"><i class="bi bi-chat-left-text me-1" style="color:var(--accent);"></i>Nội dung tin nhắn</label>
+          <textarea id="broadcastMessage" class="form-control" rows="4" placeholder="Nhập nội dung..."></textarea>
+          <div class="text-muted mt-1" style="font-size:.8rem;"><i class="bi bi-info-circle me-1"></i>Gửi tới tất cả người đã bấm /start.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold"><i class="bi bi-image me-1" style="color:#4d9fff;"></i>Loại Media</label>
+          <select id="bcMediaType" class="form-select" onchange="toggleBcMedia(this.value)">
+            <option value="none">Không có (chỉ text)</option>
+            <option value="image">&#128247; Hình ảnh</option>
+            <option value="video">&#127916; Video</option>
+          </select>
+        </div>
+        <div id="bcMediaUrlRow" class="mb-3" style="display:none;">
+          <label class="form-label fw-semibold"><i class="bi bi-link-45deg me-1" style="color:#4d9fff;"></i>URL Media <span class="text-danger">*</span></label>
+          <input type="url" id="bcMediaUrl" class="form-control" placeholder="https://... (Cloudinary, direct URL)">
+          <div class="form-text text-muted">Nhập đường dẫn trực tiếp tới ảnh hoặc video.</div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label fw-semibold"><i class="bi bi-grid-1x2 me-1" style="color:var(--accent);"></i>Nút bấm Inline <span class="text-muted">(tuỳ chọn)</span></label>
+          <div id="bcBtnList" class="mb-2"></div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="bcAddBtn()"><i class="bi bi-plus-lg me-1"></i>Thêm nút</button>
+          <div class="form-text text-muted mt-1">Mỗi nút có thể mở link (URL) hoặc gửi callback_data.</div>
+        </div>
       </div>
-      <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button><button type="button" class="btn btn-success" id="btnBroadcast" onclick="doBroadcast(this)"><i class="bi bi-send-fill me-1"></i>Gửi ngay</button></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+        <button type="button" class="btn btn-success" id="btnBroadcast" onclick="doBroadcast(this)"><i class="bi bi-send-fill me-1"></i>Gửi ngay</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1279,17 +1311,81 @@ async function doRestore(btn) {
   catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = origHtml; }
 }
+/* ====== BROADCAST SUBSCRIBERS helpers ====== */
+function toggleBcMedia(val) {
+  document.getElementById('bcMediaUrlRow').style.display = val === 'none' ? 'none' : '';
+}
+function bcAddBtn(text, url, cbData) {
+  const container = document.getElementById('bcBtnList');
+  const isUrl = !cbData;
+  const div = document.createElement('div');
+  div.className = 'ba-btn-row mb-2 p-2 rounded';
+  div.style.cssText = 'background:rgba(255,255,255,.03);border:1px solid var(--border-color);';
+  div.innerHTML = '<div class="mb-1"><input class="form-control form-control-sm ba-btn-text" placeholder="Tên nút" value="'+escapeHtml(text||'')+'"></div>'
+    + '<div class="d-flex gap-2 align-items-center flex-wrap">'
+    + '<select class="form-select form-select-sm ba-btn-type" onchange="bcToggleBtnType(this)" style="max-width:160px;">'
+    + '<option value="url"'+(isUrl?' selected':'')+'>&#128279; URL</option>'
+    + '<option value="callback"'+(!isUrl?' selected':'')+'>&#128172; Callback</option>'
+    + '</select>'
+    + '<input class="form-control form-control-sm ba-btn-url'+(isUrl?'':' d-none')+'" placeholder="https://..." value="'+escapeHtml(isUrl?(url||''):'') +'" style="flex:1;">'
+    + '<input class="form-control form-control-sm ba-btn-cb'+(!isUrl?'':' d-none')+'" placeholder="callback_data" value="'+escapeHtml(!isUrl?(cbData||''):'') +'" style="flex:1;">'
+    + '<button class="btn btn-sm btn-outline-danger" onclick="this.closest(\'.ba-btn-row\').remove()"><i class="bi bi-x-lg"></i></button>'
+    + '</div>';
+  container.appendChild(div);
+}
+function bcToggleBtnType(select) {
+  const row = select.closest('.ba-btn-row');
+  const urlInp = row.querySelector('.ba-btn-url'); const cbInp = row.querySelector('.ba-btn-cb');
+  if (select.value === 'callback') { urlInp.classList.add('d-none'); cbInp.classList.remove('d-none'); }
+  else { urlInp.classList.remove('d-none'); cbInp.classList.add('d-none'); }
+}
+let _broadcastSubsInterval = null;
 async function doBroadcast(btn) {
   const message = document.getElementById('broadcastMessage').value.trim();
-  if (!message) { showToast('&#9888;&#65039; Vui lòng nhập nội dung', 'error'); return; }
-  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang gửi...';
+  const mediaType = document.getElementById('bcMediaType').value;
+  const mediaUrl = document.getElementById('bcMediaUrl').value.trim();
+  if (!message && mediaType === 'none') { showToast('&#9888;&#65039; Vui lòng nhập nội dung hoặc chọn media', 'error'); return; }
+  if (mediaType !== 'none' && !mediaUrl) { showToast('&#9888;&#65039; Vui lòng nhập URL media', 'error'); return; }
+  // Collect buttons
+  const buttons = [];
+  document.querySelectorAll('#bcBtnList .ba-btn-row').forEach(function(row) {
+    const text = row.querySelector('.ba-btn-text').value.trim();
+    const type = row.querySelector('.ba-btn-type').value;
+    const url = row.querySelector('.ba-btn-url').value.trim();
+    const cb = row.querySelector('.ba-btn-cb').value.trim();
+    if (type === 'callback' && text && cb) buttons.push({ text: text, callback_data: cb });
+    else if (type === 'url' && text && url) buttons.push({ text: text, url: url });
+  });
+  const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang khởi động...';
+  bootstrap.Modal.getInstance(document.getElementById('broadcastModal')).hide();
+  document.getElementById('broadcastSubsProgress').style.display = '';
+  document.getElementById('bspBar').style.width = '0%'; document.getElementById('bspLabel').textContent = 'Đang khởi động...'; document.getElementById('bspPercent').textContent = '0%';
+  document.getElementById('bspSuccess').textContent = '0'; document.getElementById('bspFail').textContent = '0';
   try {
-    const form = new FormData(); form.append('message', message);
+    const form = new FormData();
+    form.append('message', message); form.append('media_type', mediaType);
+    form.append('media_url', mediaUrl); form.append('buttons_json', JSON.stringify(buttons));
     const res = await fetch('/broadcast', { method: 'POST', body: form }); const data = await res.json();
-    if (data.ok) { showToast('&#9989; Đã gửi! Thành công:' + data.success + ', Thất bại:' + data.fail, 'success'); bootstrap.Modal.getInstance(document.getElementById('broadcastModal')).hide(); document.getElementById('broadcastMessage').value = ''; }
-    else { showToast('&#10060; ' + (data.error||'?'), 'error'); }
-  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
-  finally { btn.disabled = false; btn.innerHTML = origHtml; }
+    if (data.ok) {
+      showToast('&#9989; Broadcast bắt đầu! ' + data.total + ' người · ' + (data.bots_count||1) + ' bot...', 'success');
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang gửi...';
+      if (_broadcastSubsInterval) clearInterval(_broadcastSubsInterval);
+      _broadcastSubsInterval = setInterval(async function() {
+        try {
+          const sr = await fetch('/broadcast/all/status'); const s = await sr.json();
+          const pct = s.total > 0 ? Math.round(s.done / s.total * 100) : 0;
+          document.getElementById('bspBar').style.width = pct + '%'; document.getElementById('bspPercent').textContent = pct + '%';
+          document.getElementById('bspLabel').textContent = s.running ? 'Đang gửi (' + s.done + '/' + s.total + ')...' : '&#9989; Hoàn thành!';
+          document.getElementById('bspSuccess').textContent = s.success || 0; document.getElementById('bspFail').textContent = s.fail || 0;
+          if (!s.running) {
+            clearInterval(_broadcastSubsInterval);
+            btn.disabled = false; btn.innerHTML = '<i class="bi bi-send-fill me-1"></i>Gửi Thông Báo';
+            showToast('&#9989; Broadcast hoàn tất! Thành công: ' + (s.success||0) + ' · Thất bại: ' + (s.fail||0), 'success');
+          }
+        } catch(e) { console.error('Broadcast status poll failed:', e); }
+      }, 2000);
+    } else { showToast('&#10060; ' + (data.error||'?'), 'error'); btn.disabled = false; btn.innerHTML = origHtml; document.getElementById('broadcastSubsProgress').style.display = 'none'; }
+  } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); btn.disabled = false; btn.innerHTML = origHtml; document.getElementById('broadcastSubsProgress').style.display = 'none'; }
 }
 /* ====== BROADCAST ALL ====== */
 let _broadcastAllInterval = null;
