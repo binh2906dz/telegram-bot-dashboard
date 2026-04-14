@@ -1,6 +1,7 @@
 import json, os, asyncio, datetime, sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.error import Forbidden, TelegramError
 
 TOKEN = os.getenv("TOKEN", "")
 _admin_str = os.getenv("ADMIN_ID", "")
@@ -63,6 +64,49 @@ def _db_get_subscribers() -> list:
         return [row["user_id"] for row in rows]
     except Exception:
         return []
+
+
+def _db_get_all_target_ids() -> list:
+    """Return deduplicated list of all target IDs: all subscribers + all active IDs."""
+    ids: set = set()
+    try:
+        conn = _get_db()
+        # All subscribers (people who pressed /start)
+        rows = conn.execute("SELECT DISTINCT user_id FROM subscribers").fetchall()
+        for row in rows:
+            ids.add(int(row["user_id"]))
+        # All IDs with status='active' in telegram_ids
+        rows = conn.execute(
+            "SELECT user_id FROM telegram_ids WHERE status = 'active'"
+        ).fetchall()
+        for row in rows:
+            try:
+                ids.add(int(row["user_id"]))
+            except (ValueError, TypeError):
+                pass
+        conn.close()
+    except Exception:
+        pass
+    return list(ids)
+
+
+def _db_mark_blocked(user_id: int) -> None:
+    """Remove a blocked user from subscribers and set their telegram_ids status to 'blocked'.
+
+    Note: subscribers.user_id is INTEGER; telegram_ids.user_id is TEXT — both
+    conversions below are intentional to match their respective column types.
+    """
+    try:
+        conn = _get_db()
+        conn.execute("DELETE FROM subscribers WHERE user_id=?", (user_id,))
+        conn.execute(
+            "UPDATE telegram_ids SET status='blocked' WHERE user_id=?",
+            (str(user_id),),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 
 def _db_add_subscriber(user_id: int):
@@ -213,10 +257,16 @@ async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
 # ================= SENDALL =================
 async def sendall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command: /sendall <text> [| ButtonText - URL ...]
-    
-    Optional inline buttons can be appended after a pipe (|) separator.
+
+    Sends a text message (with optional inline buttons) to all subscribers
+    AND all IDs with status='active' in the database.
+
+    Optional inline buttons are appended after a pipe (|) separator.
     Each button is formatted as "Button Text - URL" and separated by semicolons.
     Example: /sendall Hello world! | Click here - https://example.com; More - https://t.me/channel
+
+    Blocked users (Forbidden error) are automatically marked in the database
+    so they are excluded from future broadcasts.
     """
     if not ADMIN_ID or update.effective_chat.id != ADMIN_ID:
         return
@@ -252,22 +302,32 @@ async def sendall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Nội dung tin nhắn không được để trống.")
         return
 
-    subs = _db_get_subscribers()
-    if not subs:
+    # Combine subscribers + active IDs, deduplicated
+    target_ids = _db_get_all_target_ids()
+    if not target_ids:
         await update.message.reply_text("Chưa có người đăng ký nào.")
         return
 
-    success, fail = 0, 0
-    for user_id in subs:
+    success, fail, blocked = 0, 0, 0
+    for user_id in target_ids:
         try:
             await context.bot.send_message(user_id, message_text, reply_markup=reply_markup)
             success += 1
+        except Forbidden:
+            # User has blocked the bot — mark in DB so future broadcasts skip them.
+            # Blocked users are counted in both `blocked` and `fail`.
+            _db_mark_blocked(user_id)
+            blocked += 1
+            fail += 1
+        except TelegramError:
+            fail += 1
         except Exception:
             fail += 1
 
-    await update.message.reply_text(
-        f"📢 Đã gửi thông báo!\n✅ Thành công: {success}\n❌ Thất bại: {fail}"
-    )
+    summary = f"📢 Đã gửi thông báo!\n✅ Thành công: {success}\n❌ Thất bại: {fail}"
+    if blocked:
+        summary += f"\n🚫 Đã chặn bot (đánh dấu blocked): {blocked}"
+    await update.message.reply_text(summary)
 
 
 def run_bot():
