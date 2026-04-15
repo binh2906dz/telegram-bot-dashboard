@@ -1,4 +1,4 @@
-import json, os, asyncio, datetime, sqlite3
+import json, os, asyncio, datetime, sqlite3, re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, WebAppInfo
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.error import Forbidden, TelegramError
@@ -21,6 +21,9 @@ WEBHOOK_URL = (
 _BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(_BOT_DIR, "data.db")
 
+# Number of items per page in Telegram inline keyboard menus
+_PAGE_SIZE = 8
+
 
 def _get_db():
     """Return a thread-safe SQLite connection to the shared data.db."""
@@ -39,6 +42,19 @@ def _db_get_albums() -> dict:
         return {row["id"]: json.loads(row["data_json"]) for row in rows}
     except Exception:
         return {}
+
+
+def _db_get_categories() -> list:
+    """Return all categories as list of dicts [{id, name}], sorted by name.
+    Gracefully returns [] if the categories table does not exist yet.
+    """
+    try:
+        conn = _get_db()
+        rows = conn.execute("SELECT id, name FROM categories ORDER BY name").fetchall()
+        conn.close()
+        return [{"id": row["id"], "name": row["name"]} for row in rows]
+    except Exception:
+        return []
 
 
 def _db_get_config() -> dict:
@@ -157,23 +173,136 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # Parse page number from callback data (e.g. "menu_p2")
+    page = 0
+    if query.data and query.data.startswith("menu_p"):
+        try:
+            page = int(query.data[6:])
+        except ValueError:
+            page = 0
+
+    categories = _db_get_categories()
     albums = _db_get_albums()
+
+    if categories:
+        # Show paginated list of categories
+        total = len(categories)
+        start = page * _PAGE_SIZE
+        end = start + _PAGE_SIZE
+        page_cats = categories[start:end]
+
+        buttons = []
+        for cat in page_cats:
+            buttons.append([InlineKeyboardButton(f"📁 {cat['name']}", callback_data=f"cat_{cat['id']}")])
+
+        # Show uncategorized albums button if any exist
+        uncategorized = [k for k, v in albums.items() if isinstance(v, dict) and not v.get("category_id")]
+        if uncategorized:
+            buttons.append([InlineKeyboardButton("📋 Album chưa phân loại", callback_data="cat__uncategorized")])
+
+        # Pagination nav row
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("⬅️ Trang trước", callback_data=f"menu_p{page - 1}"))
+        if end < total:
+            nav.append(InlineKeyboardButton("Tiếp theo ➡️", callback_data=f"menu_p{page + 1}"))
+        if nav:
+            buttons.append(nav)
+
+        buttons.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="back")])
+        await query.edit_message_text("📂 CHỌN DANH MỤC:", reply_markup=InlineKeyboardMarkup(buttons))
+    else:
+        # No categories — show all albums with pagination
+        all_albums = sorted(albums.items())
+        total = len(all_albums)
+        start = page * _PAGE_SIZE
+        end = start + _PAGE_SIZE
+        page_albums = all_albums[start:end]
+
+        buttons = []
+        for key, val in page_albums:
+            date = key.replace("album_", "").replace("_", "-")
+            label = f"Link🔥 {date[8:10]}-{date[5:7]}"
+            title = val.get("title", label) if isinstance(val, dict) else label
+            if WEBHOOK_URL:
+                bridge_url = f"{WEBHOOK_URL}/miniapp/bridge/{key}"
+                buttons.append([InlineKeyboardButton(title, web_app=WebAppInfo(url=bridge_url))])
+            else:
+                buttons.append([InlineKeyboardButton(title, callback_data=key)])
+
+        # Pagination nav row
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("⬅️ Trang trước", callback_data=f"menu_p{page - 1}"))
+        if end < total:
+            nav.append(InlineKeyboardButton("Tiếp theo ➡️", callback_data=f"menu_p{page + 1}"))
+        if nav:
+            buttons.append(nav)
+
+        buttons.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="back")])
+        await query.edit_message_text("Chọn album:", reply_markup=InlineKeyboardMarkup(buttons))
+
+
+# ================= CATEGORY PAGE =================
+async def category_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show albums within a specific category, with pagination."""
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data  # e.g. "cat_abc123" or "cat_abc123_p2" or "cat__uncategorized"
+    inner = data[4:]  # strip leading "cat_"
+
+    # Parse trailing "_p<digits>" as page number
+    page = 0
+    _m = re.search(r"_p(\d+)$", inner)
+    if _m:
+        page = int(_m.group(1))
+        cat_id = inner[: _m.start()]
+    else:
+        cat_id = inner
+
+    albums = _db_get_albums()
+
+    if cat_id == "_uncategorized":
+        filtered = sorted(
+            [(k, v) for k, v in albums.items() if isinstance(v, dict) and not v.get("category_id")]
+        )
+        title_text = "📋 Album chưa phân loại"
+    else:
+        filtered = sorted(
+            [(k, v) for k, v in albums.items() if isinstance(v, dict) and v.get("category_id") == cat_id]
+        )
+        categories = _db_get_categories()
+        cat_name = next((c["name"] for c in categories if c["id"] == cat_id), cat_id)
+        title_text = f"📁 {cat_name}"
+
+    total = len(filtered)
+    start = page * _PAGE_SIZE
+    end = start + _PAGE_SIZE
+    page_albums = filtered[start:end]
+
     buttons = []
-
-    for key in sorted(albums.keys()):
-        date = key.replace("album_", "").replace("_", "-")
-        label = f"Link🔥 {date[8:10]}-{date[5:7]}"
+    for key, val in page_albums:
+        t = val.get("title", key) if isinstance(val, dict) else key
         if WEBHOOK_URL:
-            # Use a WebApp button so Telegram opens the Mini App bridge
             bridge_url = f"{WEBHOOK_URL}/miniapp/bridge/{key}"
-            buttons.append([InlineKeyboardButton(label, web_app=WebAppInfo(url=bridge_url))])
+            buttons.append([InlineKeyboardButton(f"🔥 {t}", web_app=WebAppInfo(url=bridge_url))])
         else:
-            # Fallback: standard callback when WEBHOOK_URL is not configured
-            buttons.append([InlineKeyboardButton(label, callback_data=key)])
+            buttons.append([InlineKeyboardButton(f"🔥 {t}", callback_data=key)])
 
-    buttons.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="back")])
+    # Pagination nav row
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("⬅️ Trang trước", callback_data=f"cat_{cat_id}_p{page - 1}"))
+    if end < total:
+        nav.append(InlineKeyboardButton("Tiếp theo ➡️", callback_data=f"cat_{cat_id}_p{page + 1}"))
+    if nav:
+        buttons.append(nav)
 
-    await query.edit_message_text("Chọn album:", reply_markup=InlineKeyboardMarkup(buttons))
+    buttons.append([InlineKeyboardButton("⬅️ Danh mục", callback_data="menu")])
+
+    body = f"{title_text}:" if page_albums else f"{title_text}\n\n(Không có bài viết nào)"
+    await query.edit_message_text(body, reply_markup=InlineKeyboardMarkup(buttons))
 
 # ================= SEND ALBUM =================
 async def send_album(chat_id, bot, album):
@@ -253,14 +382,32 @@ async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
             if not albums:
                 return
 
-            latest = sorted(albums.keys())[-1]
             subs = _db_get_subscribers()
+
+            # Build album list buttons (send notification instead of raw content)
+            sched_buttons = []
+            for album_id, album_data in sorted(albums.items()):
+                title = album_data.get("title", album_id) if isinstance(album_data, dict) else album_id
+                if WEBHOOK_URL:
+                    bridge_url = f"{WEBHOOK_URL}/miniapp/bridge/{album_id}"
+                    sched_buttons.append(
+                        [InlineKeyboardButton(f"🔥 {title}", web_app=WebAppInfo(url=bridge_url))]
+                    )
+                else:
+                    sched_buttons.append(
+                        [InlineKeyboardButton(f"🔥 {title}", callback_data=album_id)]
+                    )
+            reply_markup = InlineKeyboardMarkup(sched_buttons) if sched_buttons else None
 
             success, fail = 0, 0
 
             for u in subs:
                 try:
-                    await send_album(u, context.bot, albums[latest])
+                    await context.bot.send_message(
+                        u,
+                        "🔔 Bài viết mới đã lên lịch!",
+                        reply_markup=reply_markup,
+                    )
                     success += 1
                 except Exception:
                     fail += 1
@@ -375,7 +522,8 @@ def run_bot():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("sendall", sendall_cmd))
     app.add_handler(CommandHandler("settudongguilink", set_time))
-    app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
+    app.add_handler(CallbackQueryHandler(menu, pattern=r"^menu(_p\d+)?$"))
+    app.add_handler(CallbackQueryHandler(category_page, pattern=r"^cat_"))
     app.add_handler(CallbackQueryHandler(album_click))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 

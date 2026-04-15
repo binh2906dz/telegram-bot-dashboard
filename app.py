@@ -288,6 +288,13 @@ def init_db():
                 expires_at DATETIME NOT NULL
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS categories (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         conn.commit()
     _migrate_json_to_db()
 
@@ -462,6 +469,48 @@ def db_delete_album(album_id: str):
     """Delete an album from SQLite."""
     with get_db() as conn:
         conn.execute("DELETE FROM albums WHERE id=?", (album_id,))
+        conn.commit()
+
+
+def db_get_categories() -> list:
+    """Return all categories as list of dicts [{id, name, created_at}], sorted by name."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, name, created_at FROM categories ORDER BY name"
+            ).fetchall()
+        return [{"id": row["id"], "name": row["name"], "created_at": row["created_at"]} for row in rows]
+    except Exception as exc:
+        log.error("db_get_categories failed: %s", exc)
+        return []
+
+
+def db_save_category(cat_id: str, name: str):
+    """Insert or replace a category."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO categories (id, name) VALUES (?, ?)",
+            (cat_id, name),
+        )
+        conn.commit()
+
+
+def db_delete_category(cat_id: str):
+    """Delete a category and remove category_id from its albums."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM categories WHERE id=?", (cat_id,))
+        try:
+            rows = conn.execute("SELECT id, data_json FROM albums").fetchall()
+            for row in rows:
+                data = json.loads(row["data_json"])
+                if isinstance(data, dict) and data.get("category_id") == cat_id:
+                    data["category_id"] = None
+                    conn.execute(
+                        "UPDATE albums SET data_json=? WHERE id=?",
+                        (json.dumps(data, ensure_ascii=False), row["id"]),
+                    )
+        except Exception as exc:
+            log.warning("db_delete_category: failed to clear album category_ids: %s", exc)
         conn.commit()
 
 
@@ -1138,6 +1187,7 @@ def index():
                            bots=bots, messages_cfg=messages_cfg, cfg=cfg, slogans=slogans,
                            id_stats=id_stats, page=page, total_pages=total_pages,
                            total_albums=total_albums,
+                           categories=db_get_categories(),
                            expired_warning_message=db_get_expired_warning_message())
 
 
@@ -1148,12 +1198,14 @@ def index():
 def create_album():
     title = request.form.get("title", "").strip()
     description = request.form.get("description", "").strip()
+    category_id = request.form.get("category_id", "").strip() or None
     if not title:
         return "Missing title", 400
     album_id = f"album_{uuid.uuid4().hex[:8]}"
     db_save_album(album_id, {
         "title": title,
         "description": description,
+        "category_id": category_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "posts": [],
     })
@@ -1165,6 +1217,48 @@ def create_album():
 def delete_album(album_id):
     db_delete_album(album_id)
     return redirect("/")
+
+
+# --- Category management ---
+
+@app.route("/categories", methods=["GET"])
+@login_required
+def get_categories_api():
+    return jsonify(db_get_categories())
+
+
+@app.route("/categories/create", methods=["POST"])
+@login_required
+def create_category():
+    name = request.form.get("name", "").strip()
+    if not name:
+        return "Missing name", 400
+    cat_id = f"cat_{uuid.uuid4().hex[:8]}"
+    db_save_category(cat_id, name)
+    return redirect("/")
+
+
+@app.route("/categories/<cat_id>/delete", methods=["POST"])
+@owner_required
+def delete_category_route(cat_id):
+    db_delete_category(cat_id)
+    return redirect("/")
+
+
+@app.route("/albums/<album_id>/category", methods=["POST"])
+@login_required
+def set_album_category(album_id):
+    cat_id = request.form.get("category_id", "").strip() or None
+    albums = db_get_albums()
+    if album_id not in albums:
+        return "Album not found", 404
+    # Use the DB-verified key for the redirect to avoid open-redirect concerns
+    safe_album_id = album_id
+    album = albums[safe_album_id]
+    if isinstance(album, dict):
+        album["category_id"] = cat_id
+        db_save_album(safe_album_id, album)
+    return redirect(url_for("index", album=safe_album_id))
 
 
 # --- Post management ---
@@ -2734,26 +2828,145 @@ if BOT_TOKEN or db_get_bots():
                 keyboard.append([InlineKeyboardButton(label, callback_data=f"flow_{value}")])
         return keyboard
 
+    # ---- Pagination page size ----
+    _PAGE_SIZE = 8
+
     # ---- Shared handlers (no per-bot subscriber state needed) ----
 
     async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
 
-        albums = db_get_albums()
-        log.info("menu handler: loaded albums: %s", list(albums.keys()))
+        # Parse page number from callback data (e.g. "menu_p2")
+        page = 0
+        if query.data and query.data.startswith("menu_p"):
+            try:
+                page = int(query.data[6:])
+            except ValueError:
+                page = 0
+
         _base_url = os.environ.get("APP_BASE_URL", os.environ.get("DOMAIN", "")).rstrip("/")
+        categories = db_get_categories()
+        albums = db_get_albums()
+        log.info("menu handler: loaded %d categories, %d albums", len(categories), len(albums))
+
+        if categories:
+            # Show paginated list of categories
+            total = len(categories)
+            start = page * _PAGE_SIZE
+            end = start + _PAGE_SIZE
+            page_cats = categories[start:end]
+
+            buttons = []
+            for cat in page_cats:
+                buttons.append([InlineKeyboardButton(f"📁 {cat['name']}", callback_data=f"cat_{cat['id']}")])
+
+            # Show uncategorized albums button if any exist
+            uncategorized = [k for k, v in albums.items() if isinstance(v, dict) and not v.get("category_id")]
+            if uncategorized:
+                buttons.append([InlineKeyboardButton("📋 Album chưa phân loại", callback_data="cat__uncategorized")])
+
+            # Pagination nav row
+            nav = []
+            if page > 0:
+                nav.append(InlineKeyboardButton("⬅️ Trang trước", callback_data=f"menu_p{page - 1}"))
+            if end < total:
+                nav.append(InlineKeyboardButton("Tiếp theo ➡️", callback_data=f"menu_p{page + 1}"))
+            if nav:
+                buttons.append(nav)
+
+            buttons.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="back")])
+            await query.edit_message_text("📂 CHỌN DANH MỤC:", reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            # No categories — show all albums with pagination
+            all_albums = sorted(albums.items())
+            total = len(all_albums)
+            start = page * _PAGE_SIZE
+            end = start + _PAGE_SIZE
+            page_albums = all_albums[start:end]
+
+            buttons = []
+            for key, val in page_albums:
+                title = val.get("title", key) if isinstance(val, dict) else key
+                if _base_url:
+                    bridge_url = f"{_base_url}/miniapp/bridge/{key}"
+                    buttons.append([InlineKeyboardButton(f"🔥 {title}", web_app=WebAppInfo(url=bridge_url))])
+                else:
+                    buttons.append([InlineKeyboardButton(f"🔥 {title}", callback_data=key)])
+
+            # Pagination nav row
+            nav = []
+            if page > 0:
+                nav.append(InlineKeyboardButton("⬅️ Trang trước", callback_data=f"menu_p{page - 1}"))
+            if end < total:
+                nav.append(InlineKeyboardButton("Tiếp theo ➡️", callback_data=f"menu_p{page + 1}"))
+            if nav:
+                buttons.append(nav)
+
+            buttons.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="back")])
+            await query.edit_message_text("CHỌN COMBO LlNK HOT🔥", reply_markup=InlineKeyboardMarkup(buttons))
+
+    async def category_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show albums within a specific category, with pagination."""
+        query = update.callback_query
+        await query.answer()
+
+        data = query.data  # e.g. "cat_abc123" or "cat_abc123_p2" or "cat__uncategorized"
+        # Strip leading "cat_" prefix
+        inner = data[4:]
+
+        # Parse page: look for trailing "_p<digits>"
+        page = 0
+        _m = re.search(r"_p(\d+)$", inner)
+        if _m:
+            page = int(_m.group(1))
+            cat_id = inner[: _m.start()]
+        else:
+            cat_id = inner
+
+        _base_url = os.environ.get("APP_BASE_URL", os.environ.get("DOMAIN", "")).rstrip("/")
+        albums = db_get_albums()
+
+        if cat_id == "_uncategorized":
+            filtered = sorted(
+                [(k, v) for k, v in albums.items() if isinstance(v, dict) and not v.get("category_id")]
+            )
+            title_text = "📋 Album chưa phân loại"
+        else:
+            filtered = sorted(
+                [(k, v) for k, v in albums.items() if isinstance(v, dict) and v.get("category_id") == cat_id]
+            )
+            categories = db_get_categories()
+            cat_name = next((c["name"] for c in categories if c["id"] == cat_id), cat_id)
+            title_text = f"📁 {cat_name}"
+
+        total = len(filtered)
+        start = page * _PAGE_SIZE
+        end = start + _PAGE_SIZE
+        page_albums = filtered[start:end]
+
         buttons = []
-        for key, val in sorted(albums.items()):
-            title = val.get("title", key) if isinstance(val, dict) else key
+        for key, val in page_albums:
+            t = val.get("title", key) if isinstance(val, dict) else key
             if _base_url:
                 bridge_url = f"{_base_url}/miniapp/bridge/{key}"
-                buttons.append([InlineKeyboardButton(f"🔥 {title}", web_app=WebAppInfo(url=bridge_url))])
+                buttons.append([InlineKeyboardButton(f"🔥 {t}", web_app=WebAppInfo(url=bridge_url))])
             else:
-                buttons.append([InlineKeyboardButton(f"🔥 {title}", callback_data=key)])
-        buttons.append([InlineKeyboardButton("⬅️ Quay lại", callback_data="back")])
+                buttons.append([InlineKeyboardButton(f"🔥 {t}", callback_data=key)])
 
-        await query.edit_message_text("CHỌN COMBO LlNK HOT🔥", reply_markup=InlineKeyboardMarkup(buttons))
+        # Pagination nav row
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("⬅️ Trang trước", callback_data=f"cat_{cat_id}_p{page - 1}"))
+        if end < total:
+            nav.append(InlineKeyboardButton("Tiếp theo ➡️", callback_data=f"cat_{cat_id}_p{page + 1}"))
+        if nav:
+            buttons.append(nav)
+
+        buttons.append([InlineKeyboardButton("⬅️ Danh mục", callback_data="menu")])
+
+        body = f"{title_text}:" if page_albums else f"{title_text}\n\n(Không có bài viết nào)"
+        await query.edit_message_text(body, reply_markup=InlineKeyboardMarkup(buttons))
 
     async def send_album(chat_id, bot, album):
         """Send all posts in an album (supports images, videos, and legacy photos[] format).
@@ -2983,6 +3196,10 @@ if BOT_TOKEN or db_get_bots():
             await track_interaction(update, context)
             await album_click(update, context)
 
+        async def category_page_tracked(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            await track_interaction(update, context)
+            await category_page(update, context)
+
         async def set_time_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not bot_admin_id or update.effective_chat.id != bot_admin_id:
                 return
@@ -3062,12 +3279,30 @@ if BOT_TOKEN or db_get_bots():
                     albums = db_get_albums()
                     if not albums:
                         return
-                    latest = sorted(albums.keys())[-1]
+                    _base_url = os.environ.get("APP_BASE_URL", os.environ.get("DOMAIN", "")).rstrip("/")
+                    # Build album list buttons (notification instead of raw content)
+                    sched_buttons = []
+                    for album_id, album_data in sorted(albums.items()):
+                        title = album_data.get("title", album_id) if isinstance(album_data, dict) else album_id
+                        if _base_url:
+                            bridge_url = f"{_base_url}/miniapp/bridge/{album_id}"
+                            sched_buttons.append(
+                                [InlineKeyboardButton(f"🔥 {title}", web_app=WebAppInfo(url=bridge_url))]
+                            )
+                        else:
+                            sched_buttons.append(
+                                [InlineKeyboardButton(f"🔥 {title}", callback_data=album_id)]
+                            )
+                    reply_markup = InlineKeyboardMarkup(sched_buttons) if sched_buttons else None
                     bot_subs = db_get_subscribers(bot_cfg_id)
                     success, fail = 0, 0
                     for u in bot_subs:
                         try:
-                            await send_album(u, context.bot, albums[latest])
+                            await context.bot.send_message(
+                                u,
+                                "🔔 Bài viết mới đã lên lịch!",
+                                reply_markup=reply_markup,
+                            )
                             success += 1
                         except Exception:
                             fail += 1
@@ -3094,7 +3329,8 @@ if BOT_TOKEN or db_get_bots():
         ptb_app.add_handler(CommandHandler("stats", stats_cmd))
         ptb_app.add_handler(CommandHandler("sendall", sendall_cmd))
         ptb_app.add_handler(CommandHandler("ban", ban_cmd))
-        ptb_app.add_handler(CallbackQueryHandler(menu_tracked, pattern="^menu$"))
+        ptb_app.add_handler(CallbackQueryHandler(menu_tracked, pattern=r"^menu(_p\d+)?$"))
+        ptb_app.add_handler(CallbackQueryHandler(category_page_tracked, pattern=r"^cat_"))
         ptb_app.add_handler(CallbackQueryHandler(flow_handler_tracked, pattern="^flow_"))
         ptb_app.add_handler(CallbackQueryHandler(album_click_tracked))
         # Track non-command text messages as user replies
