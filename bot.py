@@ -1,6 +1,6 @@
 import json, os, asyncio, datetime, sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, WebAppInfo
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.error import Forbidden, TelegramError
 
 TOKEN = os.getenv("TOKEN", "")
@@ -346,6 +346,29 @@ async def sendall_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(summary)
 
 
+# ================= AUTO-REPLY =================
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Auto-reply with a Mini App link when the user's text matches an album title."""
+    if not WEBHOOK_URL:
+        return
+
+    user_text = (update.message.text or "").strip().lower()
+    if not user_text:
+        return
+
+    albums = _db_get_albums()
+    for album_id, album_data in albums.items():
+        title = (album_data.get("title", "") if isinstance(album_data, dict) else "").lower()
+        if title and (user_text in title or title in user_text):
+            bridge_url = f"{WEBHOOK_URL}/miniapp/bridge/{album_id}"
+            keyboard = [[InlineKeyboardButton("🔥 Xem ngay", web_app=WebAppInfo(url=bridge_url))]]
+            await update.message.reply_text(
+                f"🔥 {album_data.get('title', album_id)}",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+            return
+
+
 def run_bot():
     app = Application.builder().token(TOKEN).build()
 
@@ -354,6 +377,7 @@ def run_bot():
     app.add_handler(CommandHandler("settudongguilink", set_time))
     app.add_handler(CallbackQueryHandler(menu, pattern="^menu$"))
     app.add_handler(CallbackQueryHandler(album_click))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
 
