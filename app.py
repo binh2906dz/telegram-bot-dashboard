@@ -1252,11 +1252,13 @@ def set_album_category(album_id):
     albums = db_get_albums()
     if album_id not in albums:
         return "Album not found", 404
-    album = albums[album_id]
+    # Use the DB-verified key for the redirect to avoid open-redirect concerns
+    safe_album_id = album_id
+    album = albums[safe_album_id]
     if isinstance(album, dict):
         album["category_id"] = cat_id
-        db_save_album(album_id, album)
-    return redirect(f"/?album={album_id}")
+        db_save_album(safe_album_id, album)
+    return redirect(url_for("index", album=safe_album_id))
 
 
 # --- Post management ---
@@ -2915,8 +2917,7 @@ if BOT_TOKEN or db_get_bots():
 
         # Parse page: look for trailing "_p<digits>"
         page = 0
-        import re as _re
-        _m = _re.search(r"_p(\d+)$", inner)
+        _m = re.search(r"_p(\d+)$", inner)
         if _m:
             page = int(_m.group(1))
             cat_id = inner[: _m.start()]
