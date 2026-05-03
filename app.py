@@ -2483,38 +2483,38 @@ def bots_health():
     bots_list = db_get_bots()
     analytics_map = {a["bot_id"]: a for a in get_all_analytics()}
 
-    def _check_bot(bot):
-        token = (bot.get("token") or "").strip()
-        bot_id = bot.get("id", "")
-        status = "ERROR"
-        if token:
-            try:
-                with httpx.Client(timeout=5) as client:
-                    resp = client.get(f"https://api.telegram.org/bot{token}/getMe")
-                if resp.status_code == 200:
-                    status = "LIVE"
-                elif resp.status_code == 401:
-                    status = "BAN"
-            except Exception:
-                status = "ERROR"
-        bot_subs = db_get_subscribers(bot_id)
-        if not bot_subs:
-            bot_subs = db_get_subscribers("global")
-        a = analytics_map.get(bot_id, {})
-        return {
-            "id": bot_id,
-            "status": status,
-            "auto_responder": bot.get("auto_responder", True),
-            "subs_count": len(bot_subs),
-            "messages_sent": a.get("messages_sent", 0),
-            "starts_count": a.get("starts_count", 0),
-            "interactions_count": a.get("interactions_count", 0),
-            "replies_count": a.get("replies_count", 0),
-        }
-
     max_workers = min(10, len(bots_list)) if bots_list else 1
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        result = list(executor.map(_check_bot, bots_list))
+    with httpx.Client(timeout=5) as client:
+        def _check_bot(bot):
+            token = (bot.get("token") or "").strip()
+            bot_id = bot.get("id", "")
+            status = "ERROR"
+            if token:
+                try:
+                    resp = client.get(f"https://api.telegram.org/bot{token}/getMe")
+                    if resp.status_code == 200:
+                        status = "LIVE"
+                    elif resp.status_code == 401:
+                        status = "BAN"
+                except Exception:
+                    status = "ERROR"
+            bot_subs = db_get_subscribers(bot_id)
+            if not bot_subs:
+                bot_subs = db_get_subscribers("global")
+            a = analytics_map.get(bot_id, {})
+            return {
+                "id": bot_id,
+                "status": status,
+                "auto_responder": bot.get("auto_responder", True),
+                "subs_count": len(bot_subs),
+                "messages_sent": a.get("messages_sent", 0),
+                "starts_count": a.get("starts_count", 0),
+                "interactions_count": a.get("interactions_count", 0),
+                "replies_count": a.get("replies_count", 0),
+            }
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            result = list(executor.map(_check_bot, bots_list))
     return jsonify(result)
 
 
