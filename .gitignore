@@ -8,3 +8,4 @@ static/uploads/videos/*
 static/backups/*
 !static/backups/.gitkeep
 .env
+*.db
