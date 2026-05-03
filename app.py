@@ -219,8 +219,7 @@ def get_db() -> sqlite3.Connection:
 
 def init_db():
     """Create tables if they don't exist."""
-    # Declared before the with-block so it's clearly visible at module scope
-    # (Python with-blocks don't create a new scope, but this is clearer).
+    # Tracks whether the category_id column was just added (triggers one-time backfill below).
     _category_col_added = False
 
     with get_db() as conn:
@@ -325,7 +324,7 @@ def init_db():
             if "duplicate column name" in str(_e).lower():
                 pass  # column already exists — that's fine
             else:
-                log.warning("init_db: unexpected error adding category_id column: %s", _e)
+                log.error("init_db: unexpected error adding category_id column: %s", _e)
 
         # --- Performance indexes (all idempotent) ---
         # Speeds up category filtering for the bot's category_page handler
@@ -3226,8 +3225,15 @@ if BOT_TOKEN or db_get_bots():
 
             Using asyncio.to_thread keeps the DB write off the bot event loop so
             it never adds latency to user-facing handlers (menu, category_page, etc.).
+            A done-callback logs any exception so analytics errors are not silently lost.
             """
-            asyncio.create_task(asyncio.to_thread(increment_bot_stat, bot_cfg_id, field, count))
+            def _log_stat_error(t):
+                exc = t.exception()
+                if exc:
+                    log.warning("_fire_stat: analytics write failed (%s.%s): %s", bot_cfg_id, field, exc)
+
+            task = asyncio.create_task(asyncio.to_thread(increment_bot_stat, bot_cfg_id, field, count))
+            task.add_done_callback(_log_stat_error)
 
         async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_id = update.effective_chat.id
@@ -3467,8 +3473,11 @@ if BOT_TOKEN or db_get_bots():
         ptb_app.add_handler(MessageHandler(tg_filters.TEXT & ~tg_filters.COMMAND, track_reply))
         ptb_app.job_queue.run_repeating(
             scheduler_job,
-            # 60s interval: with 50 bots this is 50 scheduler jobs/min instead of
-            # 100 jobs/min at 30s.  Minute-level accuracy is still preserved.
+            # 60s interval: scheduler_job checks whether a scheduled post or album
+            # broadcast should be sent at the current UTC hour:minute.  Checking
+            # once per minute is sufficient for that granularity.  With 50 bots
+            # this halves the job-queue load (50 jobs/min instead of 100 jobs/min
+            # at 30s), with no meaningful reduction in scheduling accuracy.
             interval=60,
             first=1,
         )
