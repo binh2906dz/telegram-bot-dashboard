@@ -1272,7 +1272,11 @@ def index():
         pass
     # Paginate albums: 20 per page
     ALBUMS_PER_PAGE = 20
-    sorted_keys = sorted(all_albums.keys())
+    sorted_keys = sorted(
+        all_albums.keys(),
+        key=lambda k: (all_albums[k].get("created_at", "") if isinstance(all_albums.get(k), dict) else "", k),
+        reverse=True,
+    )
     total_albums = len(sorted_keys)
     total_pages = max(1, (total_albums + ALBUMS_PER_PAGE - 1) // ALBUMS_PER_PAGE)
     try:
@@ -2994,7 +2998,11 @@ if BOT_TOKEN or db_get_bots():
             await query.edit_message_text("📂 CHỌN DANH MỤC:", reply_markup=InlineKeyboardMarkup(buttons))
         else:
             # No categories — show all albums with pagination
-            all_albums = sorted(albums.items())
+            all_albums = sorted(
+                albums.items(),
+                key=lambda kv: (kv[1].get("created_at", "") if isinstance(kv[1], dict) else "", kv[0]),
+                reverse=True,
+            )
             total = len(all_albums)
             start = page * _PAGE_SIZE
             end = start + _PAGE_SIZE
@@ -3043,7 +3051,11 @@ if BOT_TOKEN or db_get_bots():
 
         # Use indexed category_id column — avoids loading all albums into Python
         albums_in_cat = db_get_albums_by_category(cat_id)
-        filtered = sorted(albums_in_cat.items())
+        filtered = sorted(
+            albums_in_cat.items(),
+            key=lambda kv: (kv[1].get("created_at", "") if isinstance(kv[1], dict) else "", kv[0]),
+            reverse=True,
+        )
 
         if cat_id == "_uncategorized":
             title_text = "📋 Album chưa phân loại"
@@ -3418,7 +3430,12 @@ if BOT_TOKEN or db_get_bots():
                     _base_url = os.environ.get("APP_BASE_URL", os.environ.get("DOMAIN", "")).rstrip("/")
                     # Build album list buttons (notification instead of raw content)
                     sched_buttons = []
-                    for album_id, album_data in sorted(albums.items()):
+                    sorted_albums = sorted(
+                        albums.items(),
+                        key=lambda kv: (kv[1].get("created_at", "") if isinstance(kv[1], dict) else "", kv[0]),
+                        reverse=True,
+                    )
+                    for album_id, album_data in sorted_albums:
                         title = album_data.get("title", album_id) if isinstance(album_data, dict) else album_id
                         if _base_url:
                             bridge_url = f"{_base_url}/miniapp/bridge/{album_id}"
