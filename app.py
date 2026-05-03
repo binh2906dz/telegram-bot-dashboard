@@ -219,6 +219,10 @@ def get_db() -> sqlite3.Connection:
 
 def init_db():
     """Create tables if they don't exist."""
+    # Declared before the with-block so it's clearly visible at module scope
+    # (Python with-blocks don't create a new scope, but this is clearer).
+    _category_col_added = False
+
     with get_db() as conn:
         # Enable WAL mode once for the entire DB file (persistent; subsequent
         # connections inherit it automatically).  Do this before any DDL so
@@ -311,14 +315,17 @@ def init_db():
 
         # --- Performance: add category_id shortcut column on albums ---
         # SQLite does not support "ADD COLUMN IF NOT EXISTS" before version 3.37,
-        # so we wrap in try/except to make this idempotent.
-        _category_col_added = False
+        # so we attempt the ALTER and catch only the OperationalError that SQLite
+        # raises when the column already exists ("duplicate column name").
         try:
             conn.execute("ALTER TABLE albums ADD COLUMN category_id TEXT")
             _category_col_added = True
             log.info("init_db: added category_id column to albums table")
-        except Exception:
-            pass  # column already exists — that's fine
+        except sqlite3.OperationalError as _e:
+            if "duplicate column name" in str(_e).lower():
+                pass  # column already exists — that's fine
+            else:
+                log.warning("init_db: unexpected error adding category_id column: %s", _e)
 
         # --- Performance indexes (all idempotent) ---
         # Speeds up category filtering for the bot's category_page handler
@@ -351,8 +358,8 @@ def init_db():
                                 (cat_id, row["id"]),
                             )
                             updated += 1
-                    except Exception:
-                        pass
+                    except Exception as row_exc:
+                        log.warning("init_db: skipped backfill for album %s: %s", row["id"], row_exc)
                 conn.commit()
                 log.info("init_db: backfilled category_id for %d albums", updated)
         except Exception as exc:
@@ -1615,12 +1622,12 @@ def telegram_webhook(token_path):
         # An error callback logs any exception so we don't lose debug info.
         fut = asyncio.run_coroutine_threadsafe(ptb_app.process_update(update), bot_loop)
 
-        def _log_exc(f):
+        def _log_background_exception(f):
             exc = f.exception()
             if exc:
                 log.error("telegram_webhook process_update error (background): %s", exc, exc_info=exc)
 
-        fut.add_done_callback(_log_exc)
+        fut.add_done_callback(_log_background_exception)
     except Exception as exc:
         log.error("telegram_webhook dispatch error: %s", exc, exc_info=True)
 
@@ -3214,6 +3221,14 @@ if BOT_TOKEN or db_get_bots():
 
         _last_sent = [None]  # mutable list so the nested coroutine can update it
 
+        async def _fire_stat(field: str, count: int = 1):
+            """Fire-and-forget: increment a bot analytics stat in a thread pool.
+
+            Using asyncio.to_thread keeps the DB write off the bot event loop so
+            it never adds latency to user-facing handlers (menu, category_page, etc.).
+            """
+            asyncio.create_task(asyncio.to_thread(increment_bot_stat, bot_cfg_id, field, count))
+
         async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_id = update.effective_chat.id
             banned = db_get_banned()
@@ -3222,8 +3237,7 @@ if BOT_TOKEN or db_get_bots():
                 return
 
             # Track starts analytics (always, regardless of auto_responder)
-            # Run DB write in thread pool so it doesn't block the event loop.
-            asyncio.create_task(asyncio.to_thread(increment_bot_stat, bot_cfg_id, "starts_count"))
+            await _fire_stat("starts_count")
 
             db_add_subscriber(bot_cfg_id, user_id)
 
@@ -3272,7 +3286,7 @@ if BOT_TOKEN or db_get_bots():
         async def track_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Handle incoming text: count for analytics and auto-reply with Mini App link when text matches an album title."""
             # DB write in thread pool — don't block event loop for analytics
-            asyncio.create_task(asyncio.to_thread(increment_bot_stat, bot_cfg_id, "replies_count"))
+            await _fire_stat("replies_count")
 
             _base_url = os.environ.get("APP_BASE_URL", os.environ.get("DOMAIN", "")).rstrip("/")
             if not _base_url:
@@ -3298,7 +3312,7 @@ if BOT_TOKEN or db_get_bots():
             """Track callback query interactions before delegating to real handlers."""
             # Only count once; actual handling is done by other handlers (menu/flow/album_click)
             # DB write in thread pool — don't block event loop for analytics
-            asyncio.create_task(asyncio.to_thread(increment_bot_stat, bot_cfg_id, "interactions_count"))
+            await _fire_stat("interactions_count")
 
         async def menu_tracked(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await track_interaction(update, context)
@@ -3451,7 +3465,13 @@ if BOT_TOKEN or db_get_bots():
         ptb_app.add_handler(CallbackQueryHandler(album_click_tracked))
         # Track non-command text messages as user replies
         ptb_app.add_handler(MessageHandler(tg_filters.TEXT & ~tg_filters.COMMAND, track_reply))
-        ptb_app.job_queue.run_repeating(scheduler_job, interval=60, first=1)
+        ptb_app.job_queue.run_repeating(
+            scheduler_job,
+            # 60s interval: with 50 bots this is 50 scheduler jobs/min instead of
+            # 100 jobs/min at 30s.  Minute-level accuracy is still preserved.
+            interval=60,
+            first=1,
+        )
         ptb_app.job_queue.run_daily(daily_backup_job, time=dt_time(1, 0, 0, tzinfo=timezone.utc))
         return ptb_app
 
