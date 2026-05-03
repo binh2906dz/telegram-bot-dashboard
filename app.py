@@ -116,8 +116,9 @@ WEBHOOK_URL = (
     or "https://ngeyhsvge683874.online"
 ).rstrip("/")
 
-# Maximum seconds to wait for PTB to process a single incoming webhook update
-# before returning a response to Telegram.
+# WEBHOOK_UPDATE_TIMEOUT was previously used to block the Flask worker until
+# PTB finished processing an update.  The webhook handler now uses fire-and-
+# forget so this value is no longer read — kept here for reference only.
 WEBHOOK_UPDATE_TIMEOUT = 10
 
 app = Flask(__name__)
@@ -196,23 +197,35 @@ def save_json(file, data):
 def get_db() -> sqlite3.Connection:
     """Return a new SQLite connection with row_factory set.
 
-    WAL mode allows concurrent readers and a single writer without exclusive
-    file-level locks, preventing 'database is locked' errors when the bot
-    process and the gunicorn broadcast threads both write at the same time.
-    busy_timeout tells SQLite to retry for up to 5 s before raising an error.
+    WAL mode is enabled once in init_db() and persists for the DB file.
+    busy_timeout, synchronous=NORMAL (safe with WAL), a 20 MB page cache,
+    and in-memory temp store are set per-connection — they are cheap and
+    improve throughput when 50 bots share the same file.
     Each call creates a fresh connection bound to the calling thread, so no
     cross-thread sharing occurs.
     """
     conn = sqlite3.connect(DB_FILE, timeout=20)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    # busy_timeout must be per-connection; retry up to 5 s before raising
     conn.execute("PRAGMA busy_timeout=5000")
+    # NORMAL is safe with WAL and faster than the default FULL
+    conn.execute("PRAGMA synchronous=NORMAL")
+    # ~20 MB shared page cache reduces physical I/O for 50 concurrent bots
+    conn.execute("PRAGMA cache_size=-20000")
+    # Use RAM for temporary tables/indexes (avoids temp-file I/O)
+    conn.execute("PRAGMA temp_store=MEMORY")
     return conn
 
 
 def init_db():
     """Create tables if they don't exist."""
     with get_db() as conn:
+        # Enable WAL mode once for the entire DB file (persistent; subsequent
+        # connections inherit it automatically).  Do this before any DDL so
+        # the schema changes themselves are written in WAL mode.
+        result = conn.execute("PRAGMA journal_mode=WAL").fetchone()
+        log.info("init_db: journal_mode set to %s", result[0] if result else "unknown")
+
         conn.execute('''
             CREATE TABLE IF NOT EXISTS telegram_ids (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -295,7 +308,56 @@ def init_db():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        # --- Performance: add category_id shortcut column on albums ---
+        # SQLite does not support "ADD COLUMN IF NOT EXISTS" before version 3.37,
+        # so we wrap in try/except to make this idempotent.
+        _category_col_added = False
+        try:
+            conn.execute("ALTER TABLE albums ADD COLUMN category_id TEXT")
+            _category_col_added = True
+            log.info("init_db: added category_id column to albums table")
+        except Exception:
+            pass  # column already exists — that's fine
+
+        # --- Performance indexes (all idempotent) ---
+        # Speeds up category filtering for the bot's category_page handler
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_albums_category ON albums(category_id)")
+        # Speeds up broadcast recipient queries (status filter)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_telegram_ids_status ON telegram_ids(status)")
+        # Speeds up per-bot subscriber lookups
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_subscribers_bot_id ON subscribers(bot_id)")
+        # Speeds up expired-token cleanup
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_album_tokens_expires ON album_tokens(expires_at)")
+
         conn.commit()
+
+    # One-time backfill: populate category_id column from JSON data_json for
+    # rows that were inserted before this column existed.
+    if _category_col_added:
+        try:
+            with get_db() as conn:
+                rows = conn.execute(
+                    "SELECT id, data_json FROM albums WHERE category_id IS NULL"
+                ).fetchall()
+                updated = 0
+                for row in rows:
+                    try:
+                        data = json.loads(row["data_json"])
+                        cat_id = data.get("category_id") if isinstance(data, dict) else None
+                        if cat_id is not None:
+                            conn.execute(
+                                "UPDATE albums SET category_id=? WHERE id=?",
+                                (cat_id, row["id"]),
+                            )
+                            updated += 1
+                    except Exception:
+                        pass
+                conn.commit()
+                log.info("init_db: backfilled category_id for %d albums", updated)
+        except Exception as exc:
+            log.warning("init_db: category_id backfill failed: %s", exc)
+
     _migrate_json_to_db()
 
 
@@ -456,13 +518,47 @@ def db_get_albums() -> dict:
 
 
 def db_save_album(album_id: str, album_data: dict):
-    """Insert or replace a single album in SQLite."""
+    """Insert or replace a single album in SQLite.
+
+    Also syncs the denormalized category_id column so category-based
+    queries can use the index instead of scanning all JSON blobs.
+    """
+    cat_id = album_data.get("category_id") if isinstance(album_data, dict) else None
     with get_db() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO albums (id, data_json) VALUES (?, ?)",
-            (album_id, json.dumps(album_data, ensure_ascii=False)),
+            "INSERT OR REPLACE INTO albums (id, data_json, category_id) VALUES (?, ?, ?)",
+            (album_id, json.dumps(album_data, ensure_ascii=False), cat_id),
         )
         conn.commit()
+
+
+def db_get_albums_by_category(cat_id) -> dict:
+    """Return only albums belonging to a given category (or uncategorized).
+
+    Uses the indexed category_id column instead of loading all albums and
+    filtering in Python — O(log n) instead of O(n).
+
+    Args:
+        cat_id: category id string, or None / "_uncategorized" for albums
+                that have no category assigned.
+    Returns:
+        dict keyed by album_id, same format as db_get_albums().
+    """
+    try:
+        with get_db() as conn:
+            if cat_id is None or cat_id == "_uncategorized":
+                rows = conn.execute(
+                    "SELECT id, data_json FROM albums WHERE category_id IS NULL"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, data_json FROM albums WHERE category_id=?",
+                    (cat_id,),
+                ).fetchall()
+        return {row["id"]: json.loads(row["data_json"]) for row in rows}
+    except Exception as exc:
+        log.error("db_get_albums_by_category failed: %s", exc)
+        return {}
 
 
 def db_delete_album(album_id: str):
@@ -506,7 +602,7 @@ def db_delete_category(cat_id: str):
                 if isinstance(data, dict) and data.get("category_id") == cat_id:
                     data["category_id"] = None
                     conn.execute(
-                        "UPDATE albums SET data_json=? WHERE id=?",
+                        "UPDATE albums SET data_json=?, category_id=NULL WHERE id=?",
                         (json.dumps(data, ensure_ascii=False), row["id"]),
                     )
         except Exception as exc:
@@ -1512,10 +1608,21 @@ def telegram_webhook(token_path):
     try:
         from telegram import Update as _TGUpdate
         update = _TGUpdate.de_json(update_data, ptb_app.bot)
+        # Fire-and-forget: schedule the coroutine on the bot event loop and
+        # return 200 immediately without waiting for processing to finish.
+        # This is the recommended Telegram webhook pattern — Telegram only
+        # needs a fast ACK; the actual handler runs in the background.
+        # An error callback logs any exception so we don't lose debug info.
         fut = asyncio.run_coroutine_threadsafe(ptb_app.process_update(update), bot_loop)
-        fut.result(timeout=WEBHOOK_UPDATE_TIMEOUT)
+
+        def _log_exc(f):
+            exc = f.exception()
+            if exc:
+                log.error("telegram_webhook process_update error (background): %s", exc, exc_info=exc)
+
+        fut.add_done_callback(_log_exc)
     except Exception as exc:
-        log.error("telegram_webhook process_update error: %s", exc, exc_info=True)
+        log.error("telegram_webhook dispatch error: %s", exc, exc_info=True)
 
     return "OK", 200
 
@@ -2275,38 +2382,40 @@ def bots_health():
     # Load analytics from DB
     analytics_map = {a["bot_id"]: a for a in get_all_analytics()}
     result = []
-    for bot in bots_list:
-        token = (bot.get("token") or "").strip()
-        bot_id = bot.get("id", "")
-        status = "ERROR"
-        if token:
-            try:
-                resp = httpx.get(
-                    f"https://api.telegram.org/bot{token}/getMe",
-                    timeout=5,
-                )
-                if resp.status_code == 200:
-                    status = "LIVE"
-                elif resp.status_code == 401:
-                    status = "BAN"
-                else:
+    # Reuse a single httpx.Client for all getMe calls instead of creating
+    # one TCP connection per bot (important when 50 bots are configured).
+    with httpx.Client(timeout=5) as client:
+        for bot in bots_list:
+            token = (bot.get("token") or "").strip()
+            bot_id = bot.get("id", "")
+            status = "ERROR"
+            if token:
+                try:
+                    resp = client.get(
+                        f"https://api.telegram.org/bot{token}/getMe",
+                    )
+                    if resp.status_code == 200:
+                        status = "LIVE"
+                    elif resp.status_code == 401:
+                        status = "BAN"
+                    else:
+                        status = "ERROR"
+                except Exception:
                     status = "ERROR"
-            except Exception:
-                status = "ERROR"
-        bot_subs = db_get_subscribers(bot_id)
-        if not bot_subs:
-            bot_subs = db_get_subscribers("global")
-        a = analytics_map.get(bot_id, {})
-        result.append({
-            "id": bot_id,
-            "status": status,
-            "auto_responder": bot.get("auto_responder", True),
-            "subs_count": len(bot_subs),
-            "messages_sent": a.get("messages_sent", 0),
-            "starts_count": a.get("starts_count", 0),
-            "interactions_count": a.get("interactions_count", 0),
-            "replies_count": a.get("replies_count", 0),
-        })
+            bot_subs = db_get_subscribers(bot_id)
+            if not bot_subs:
+                bot_subs = db_get_subscribers("global")
+            a = analytics_map.get(bot_id, {})
+            result.append({
+                "id": bot_id,
+                "status": status,
+                "auto_responder": bot.get("auto_responder", True),
+                "subs_count": len(bot_subs),
+                "messages_sent": a.get("messages_sent", 0),
+                "starts_count": a.get("starts_count", 0),
+                "interactions_count": a.get("interactions_count", 0),
+                "replies_count": a.get("replies_count", 0),
+            })
     return jsonify(result)
 
 
@@ -2925,19 +3034,23 @@ if BOT_TOKEN or db_get_bots():
             cat_id = inner
 
         _base_url = os.environ.get("APP_BASE_URL", os.environ.get("DOMAIN", "")).rstrip("/")
-        albums = db_get_albums()
+
+        # Use indexed category_id column — avoids loading all albums into Python
+        albums_in_cat = db_get_albums_by_category(cat_id)
+        filtered = sorted(albums_in_cat.items())
 
         if cat_id == "_uncategorized":
-            filtered = sorted(
-                [(k, v) for k, v in albums.items() if isinstance(v, dict) and not v.get("category_id")]
-            )
             title_text = "📋 Album chưa phân loại"
         else:
-            filtered = sorted(
-                [(k, v) for k, v in albums.items() if isinstance(v, dict) and v.get("category_id") == cat_id]
-            )
-            categories = db_get_categories()
-            cat_name = next((c["name"] for c in categories if c["id"] == cat_id), cat_id)
+            # Single-row lookup instead of loading all categories
+            try:
+                with get_db() as _conn:
+                    _row = _conn.execute(
+                        "SELECT name FROM categories WHERE id=?", (cat_id,)
+                    ).fetchone()
+                cat_name = _row["name"] if _row else cat_id
+            except Exception:
+                cat_name = cat_id
             title_text = f"📁 {cat_name}"
 
         total = len(filtered)
@@ -3109,7 +3222,8 @@ if BOT_TOKEN or db_get_bots():
                 return
 
             # Track starts analytics (always, regardless of auto_responder)
-            increment_bot_stat(bot_cfg_id, "starts_count")
+            # Run DB write in thread pool so it doesn't block the event loop.
+            asyncio.create_task(asyncio.to_thread(increment_bot_stat, bot_cfg_id, "starts_count"))
 
             db_add_subscriber(bot_cfg_id, user_id)
 
@@ -3157,7 +3271,8 @@ if BOT_TOKEN or db_get_bots():
 
         async def track_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Handle incoming text: count for analytics and auto-reply with Mini App link when text matches an album title."""
-            increment_bot_stat(bot_cfg_id, "replies_count")
+            # DB write in thread pool — don't block event loop for analytics
+            asyncio.create_task(asyncio.to_thread(increment_bot_stat, bot_cfg_id, "replies_count"))
 
             _base_url = os.environ.get("APP_BASE_URL", os.environ.get("DOMAIN", "")).rstrip("/")
             if not _base_url:
@@ -3182,7 +3297,8 @@ if BOT_TOKEN or db_get_bots():
         async def track_interaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Track callback query interactions before delegating to real handlers."""
             # Only count once; actual handling is done by other handlers (menu/flow/album_click)
-            increment_bot_stat(bot_cfg_id, "interactions_count")
+            # DB write in thread pool — don't block event loop for analytics
+            asyncio.create_task(asyncio.to_thread(increment_bot_stat, bot_cfg_id, "interactions_count"))
 
         async def menu_tracked(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await track_interaction(update, context)
@@ -3335,7 +3451,7 @@ if BOT_TOKEN or db_get_bots():
         ptb_app.add_handler(CallbackQueryHandler(album_click_tracked))
         # Track non-command text messages as user replies
         ptb_app.add_handler(MessageHandler(tg_filters.TEXT & ~tg_filters.COMMAND, track_reply))
-        ptb_app.job_queue.run_repeating(scheduler_job, interval=30, first=1)
+        ptb_app.job_queue.run_repeating(scheduler_job, interval=60, first=1)
         ptb_app.job_queue.run_daily(daily_backup_job, time=dt_time(1, 0, 0, tzinfo=timezone.utc))
         return ptb_app
 
@@ -3345,6 +3461,7 @@ if BOT_TOKEN or db_get_bots():
 
         def __init__(self):
             self._running_apps: dict = {}  # {bot_id: ptb_app}
+            self._token_to_app: dict = {}  # {token: ptb_app} — O(1) webhook dispatch
             self._loop: asyncio.AbstractEventLoop | None = None
             self._reload_event: asyncio.Event | None = None
 
@@ -3354,11 +3471,12 @@ if BOT_TOKEN or db_get_bots():
                 self._loop.call_soon_threadsafe(self._reload_event.set)
 
         def get_app_by_token(self, token: str):
-            """Return the running PTB Application whose bot token matches, or None."""
-            for ptb in self._running_apps.values():
-                if ptb.bot.token == token:
-                    return ptb
-            return None
+            """Return the running PTB Application whose bot token matches, or None.
+
+            Uses a pre-built dict for O(1) lookup instead of scanning all running
+            apps linearly — important when 50 bots share one server.
+            """
+            return self._token_to_app.get(token)
 
         def get_loop(self):
             """Return the event loop used by the BotManager thread, or None."""
@@ -3394,6 +3512,8 @@ if BOT_TOKEN or db_get_bots():
             # Stop apps for bots that have been removed
             for bot_id in list(running_ids - current_ids):
                 ptb = self._running_apps.pop(bot_id)
+                # Remove from O(1) lookup dict as well
+                self._token_to_app.pop(ptb.bot.token, None)
                 try:
                     await ptb.bot.delete_webhook(drop_pending_updates=True)
                     await ptb.stop()
@@ -3435,6 +3555,8 @@ if BOT_TOKEN or db_get_bots():
                         drop_pending_updates=True,
                     )
                     self._running_apps[bot_id] = ptb
+                    # Maintain O(1) token→app index for webhook dispatch
+                    self._token_to_app[token] = ptb
                     log.info("✅ Bot %s (%s) webhook registered at %s", bot_id, cfg_entry.get("name", "?"), webhook_endpoint)
                 except Exception as exc:
                     log.error(
