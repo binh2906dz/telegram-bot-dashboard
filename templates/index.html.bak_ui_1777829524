@@ -706,17 +706,13 @@
           <div class="dash-card">
             <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-cloud-arrow-up me-2" style="color:var(--accent);"></i>Sao lưu dữ liệu</span></div>
             <div class="dash-card-body">
-              <p style="font-size:.85rem;color:#aaa;">Sao lưu toàn bộ: Albums, IDs, Slogans, Cấu hình. Lưu trực tiếp trên VPS.</p>
-              {% if role == 'owner' %}
+              <p style="font-size:.85rem;color:#aaa;">Sao lưu toàn bộ: Albums, IDs, Slogans, Cấu hình...</p>
               <div class="d-flex flex-wrap gap-2 mb-3">
-                <button class="btn btn-accent btn-sm" id="btnBackupNow" onclick="doBackupNow(this)"><i class="bi bi-cloud-arrow-up me-1"></i>Sao lưu ngay</button>
-                <button class="btn btn-sm btn-outline-secondary" onclick="loadBackupsList()"><i class="bi bi-arrow-clockwise me-1"></i>Làm mới</button>
+                <a href="/backup/download" class="btn btn-accent btn-sm"><i class="bi bi-download me-1"></i>Tải Backup Ngay</a>
+                {% if role == 'owner' %}<button class="btn btn-sm btn-outline-info" id="btnBackupCloud" onclick="doBackup(this)"><i class="bi bi-cloud-arrow-up me-1"></i>Lưu lên Cloudinary</button>{% endif %}
               </div>
-              {% else %}
-              <div class="alert alert-warning py-2" style="font-size:.85rem;">⚠️ Chỉ tài khoản <strong>Owner</strong> mới có quyền sao lưu &amp; tải backup.</div>
-              {% endif %}
               <div style="font-size:.78rem;color:#666;padding:10px;background:rgba(255,255,255,.03);border-radius:8px;">
-                <i class="bi bi-clock-fill me-1" style="color:var(--accent);"></i><strong>Tự động:</strong> mỗi ngày lúc <strong>0:01 sáng (Giờ Việt Nam)</strong> — giữ tối đa <strong>3 bản</strong>, bản cũ nhất tự động xóa.
+                <i class="bi bi-clock-fill me-1" style="color:var(--accent);"></i><strong>Tự động:</strong> mỗi ngày lúc <strong>0:01 sáng (Giờ Việt Nam)</strong> — APScheduler
               </div>
             </div>
           </div>
@@ -728,20 +724,6 @@
             <div class="dash-card-body">
               <p style="font-size:.85rem;color:#aaa;">Khôi phục từ bản sao lưu gần nhất trên Cloudinary. <strong class="text-danger">Dữ liệu hiện tại sẽ bị ghi đè!</strong></p>
               <button class="btn btn-sm btn-outline-danger" id="btnRestore" onclick="doRestore(this)"><i class="bi bi-cloud-arrow-down me-1"></i>Khôi phục</button>
-            </div>
-          </div>
-        </div>
-        {% endif %}
-        {% if role == 'owner' %}
-        <div class="col-12">
-          <div class="dash-card">
-            <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-archive-fill me-2" style="color:#28a745;"></i>Danh sách bản sao lưu trên VPS</span></div>
-            <div class="dash-card-body">
-              <div id="backupsListContainer" style="font-size:.9rem;">
-                <div class="text-muted text-center py-3">
-                  <span class="spinner-border spinner-border-sm me-2"></span>Đang tải...
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -1405,75 +1387,6 @@ async function doRestore(btn) {
   catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = origHtml; }
 }
-
-/* ====== BACKUP LIST (VPS) ====== */
-async function loadBackupsList() {
-  var container = document.getElementById('backupsListContainer');
-  if (!container) { console.warn('backupsListContainer not found'); return; }
-  container.innerHTML = '<div class="text-muted text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Đang tải...</div>';
-  try {
-    var res = await fetch('/backups', {credentials: 'same-origin', headers: {'Accept': 'application/json'}});
-    if (res.status === 403) { container.innerHTML = '<div class="alert alert-danger py-2 mb-0">Chỉ Owner xem được.</div>'; return; }
-    if (res.status === 302 || res.redirected) { container.innerHTML = '<div class="alert alert-warning py-2 mb-0">Phiên đăng nhập hết hạn, vui lòng login lại.</div>'; return; }
-    var data = await res.json();
-    if (!data.ok) { container.innerHTML = '<div class="alert alert-warning py-2 mb-0">' + (data.error || 'Lỗi') + '</div>'; return; }
-    if (!data.items || data.items.length === 0) { container.innerHTML = '<div class="text-muted text-center py-3">Chưa có bản sao lưu.</div>'; return; }
-    var html = '<div class="table-responsive"><table class="table table-sm table-dark table-hover mb-0" style="font-size:.85rem;"><thead><tr><th>#</th><th>Tên file</th><th>Kích thước</th><th>Thời gian</th><th class="text-end">Hành động</th></tr></thead><tbody>';
-    data.items.forEach(function(item, idx) {
-      var dt = new Date(item.created_at);
-      var dateStr = dt.toLocaleString('vi-VN', {timeZone: 'Asia/Ho_Chi_Minh', hour12: false});
-      html += '<tr><td>' + (idx+1) + '</td>';
-      html += '<td><code style="font-size:.78rem;color:#9ec5fe;">' + item.filename + '</code>' + (idx===0 ? ' <span class="badge bg-success ms-1">Mới nhất</span>' : '') + '</td>';
-      html += '<td>' + item.size_human + '</td><td>' + dateStr + '</td>';
-      html += '<td class="text-end"><a href="' + item.download_url + '" class="btn btn-sm btn-outline-primary me-1" download><i class="bi bi-download"></i> Tải</a>';
-      html += '<button class="btn btn-sm btn-outline-danger" onclick="deleteBackupFile(\'' + item.filename + '\', this)"><i class="bi bi-trash"></i></button></td></tr>';
-    });
-    html += '</tbody></table></div><div class="text-muted mt-2" style="font-size:.78rem;">Tối đa <strong>' + data.max_backups + ' bản</strong>, bản cũ nhất tự động xóa khi backup mới.</div>';
-    container.innerHTML = html;
-  } catch(e) {
-    container.innerHTML = '<div class="alert alert-danger py-2 mb-0">Lỗi: ' + e.message + '</div>';
-    console.error('loadBackupsList error:', e);
-  }
-}
-
-async function doBackupNow(btn) {
-  var orig = btn.innerHTML;
-  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang sao lưu...';
-  try {
-    var res = await fetch('/backup/manual', {method: 'POST', credentials: 'same-origin'});
-    var data = await res.json();
-    if (data.ok) { showToast('✅ Sao lưu thành công!', 'success'); loadBackupsList(); }
-    else { showToast('❌ ' + (data.error || 'Lỗi'), 'error'); }
-  } catch(e) { showToast('❌ ' + e.message, 'error'); }
-  finally { btn.disabled = false; btn.innerHTML = orig; }
-}
-
-async function deleteBackupFile(filename, btn) {
-  if (!confirm('Xóa bản sao lưu này?\n' + filename)) return;
-  var orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-  try {
-    var res = await fetch('/backups/' + encodeURIComponent(filename) + '/delete', {method: 'POST', credentials: 'same-origin'});
-    var data = await res.json();
-    if (data.ok) { showToast('✅ Đã xóa', 'success'); loadBackupsList(); }
-    else { showToast('❌ ' + (data.error || 'Lỗi'), 'error'); btn.disabled = false; btn.innerHTML = orig; }
-  } catch(e) { showToast('❌ ' + e.message, 'error'); btn.disabled = false; btn.innerHTML = orig; }
-}
-
-// Auto-load: poll cho đến khi container xuất hiện trên DOM (do navigate qua tabs)
-(function autoLoadBackups() {
-  var tries = 0;
-  var iv = setInterval(function() {
-    tries++;
-    if (document.getElementById('backupsListContainer')) {
-      clearInterval(iv);
-      loadBackupsList();
-    } else if (tries > 60) {
-      clearInterval(iv); // sau 30s thì bỏ
-    }
-  }, 500);
-})();
-/* ====== END BACKUP LIST ====== */
-
 /* ====== BROADCAST SUBSCRIBERS helpers ====== */
 function toggleBcMedia(val) {
   document.getElementById('bcMediaUrlRow').style.display = val === 'none' ? 'none' : '';

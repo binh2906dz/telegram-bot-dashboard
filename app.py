@@ -1190,29 +1190,47 @@ def process_video_to_hls(input_video_path: str, output_dir: str) -> str:
     return f"/static/uploads/videos/{file_id}/index.m3u8"
 
 
-def run_daily_backup():
-    """Package JSON data files into a zip and save to local backups/ folder.
-    Keeps only the latest backup by removing the previous day's file."""
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    yesterday_str = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-    backup_filename = f"backup_{today_str}.zip"
-    old_backup_filename = f"backup_{yesterday_str}.zip"
-    backup_path = os.path.join(BACKUP_DIR, backup_filename)
-    old_backup_path = os.path.join(BACKUP_DIR, old_backup_filename)
+# Maximum number of backup files to keep on disk.
+# When a new backup is created, older files beyond this limit are deleted automatically.
+MAX_BACKUPS = 3
 
-    # Delete yesterday's backup
+
+def _cleanup_old_backups(keep: int = MAX_BACKUPS):
+    """Keep only the `keep` most recent backup zip files; delete the rest."""
     try:
-        if os.path.exists(old_backup_path):
-            os.remove(old_backup_path)
-            log.info(f"Deleted old backup: {old_backup_path}")
-    except Exception as e:
-        log.warning(f"Could not delete old backup {old_backup_path}: {e}")
+        files = []
+        for fname in os.listdir(BACKUP_DIR):
+            if fname.startswith("backup_") and fname.endswith(".zip"):
+                fpath = os.path.join(BACKUP_DIR, fname)
+                files.append((os.path.getmtime(fpath), fpath, fname))
+        # Newest first
+        files.sort(reverse=True)
+        for _mtime, fpath, fname in files[keep:]:
+            try:
+                os.remove(fpath)
+                log.info("Backup cleanup: deleted old %s", fname)
+            except OSError as exc:
+                log.warning("Backup cleanup: could not delete %s: %s", fname, exc)
+    except Exception as exc:
+        log.warning("Backup cleanup failed: %s", exc)
 
-    # Build zip and save locally
+
+def run_daily_backup():
+    """Package data into a timestamped zip in static/backups/ and keep only
+    the MAX_BACKUPS most recent ones (older are auto-deleted)."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    backup_filename = f"backup_{timestamp}.zip"
+    backup_path = os.path.join(BACKUP_DIR, backup_filename)
+
+    # Build zip
     with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
         _backup_files_to_zip(zf)
 
-    log.info(f"Backup saved locally: {backup_path}")
+    log.info("Backup saved locally: %s (%d bytes)", backup_path, os.path.getsize(backup_path))
+
+    # Auto-cleanup: keep only the latest MAX_BACKUPS files
+    _cleanup_old_backups(MAX_BACKUPS)
+
     return f"/static/backups/{backup_filename}"
 
 
@@ -1480,6 +1498,71 @@ def delete(album_id):
     return redirect("/")
 
 
+@app.route("/backups", methods=["GET"])
+@owner_required
+def backups_list():
+    """JSON list of all backup files on disk (newest first)."""
+    items = []
+    try:
+        for fname in os.listdir(BACKUP_DIR):
+            if fname.startswith("backup_") and fname.endswith(".zip"):
+                fpath = os.path.join(BACKUP_DIR, fname)
+                stat = os.stat(fpath)
+                items.append({
+                    "filename": fname,
+                    "size": stat.st_size,
+                    "size_human": f"{stat.st_size / 1024:.1f} KB" if stat.st_size < 1024 * 1024 else f"{stat.st_size / 1024 / 1024:.1f} MB",
+                    "created_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    "download_url": f"/backups/download/{fname}",
+                })
+        items.sort(key=lambda x: x["created_at"], reverse=True)
+    except Exception as exc:
+        log.error("backups_list failed: %s", exc)
+        return jsonify({"ok": False, "error": "Lỗi đọc danh sách backup"}), 500
+    return jsonify({"ok": True, "items": items, "max_backups": MAX_BACKUPS})
+
+
+@app.route("/backups/download/<filename>", methods=["GET"])
+@owner_required
+def backups_download_file(filename):
+    """Download a specific backup file by name (with path-traversal protection)."""
+    # Strict whitelist: only files matching backup_YYYYMMDD_HHMMSS.zip
+    if not re.fullmatch(r"backup_\d{8}_\d{6}\.zip", filename):
+        return "Invalid filename", 400
+    fpath = os.path.join(BACKUP_DIR, filename)
+    if not os.path.isfile(fpath):
+        return "Backup not found", 404
+    try:
+        with open(fpath, "rb") as fh:
+            data = fh.read()
+    except OSError as exc:
+        log.error("backups_download_file read error: %s", exc)
+        return "Read error", 500
+    return Response(
+        data,
+        mimetype="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.route("/backups/<filename>/delete", methods=["POST"])
+@owner_required
+def backups_delete_file(filename):
+    """Delete a specific backup file (owner only)."""
+    if not re.fullmatch(r"backup_\d{8}_\d{6}\.zip", filename):
+        return jsonify({"ok": False, "error": "Tên file không hợp lệ"}), 400
+    fpath = os.path.join(BACKUP_DIR, filename)
+    if not os.path.isfile(fpath):
+        return jsonify({"ok": False, "error": "File không tồn tại"}), 404
+    try:
+        os.remove(fpath)
+        log.info("Backup deleted via web: %s", filename)
+        return jsonify({"ok": True})
+    except OSError as exc:
+        log.error("backups_delete_file failed: %s", exc)
+        return jsonify({"ok": False, "error": "Lỗi xóa file"}), 500
+
+
 @app.route("/healthz")
 def healthz():
     return "OK", 200
@@ -1700,6 +1783,63 @@ def view_album(album_id):
 
     base_url = request.host_url.rstrip("/")
     return render_template("album_view.html", album=album, album_id=album_id, base_url=base_url)
+
+
+@app.route("/view/catalog")
+def view_catalog():
+    """Public catalog page – validates any non-expired token and renders all
+    categories + albums.  Generates a fresh per-album token so each link in
+    the catalog passes view_album's strict token check."""
+    token = request.args.get("token", "")
+    warning_msg = db_get_expired_warning_message()
+    if not token:
+        return render_template("expired.html", message=warning_msg), 403
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT expires_at FROM album_tokens WHERE token=?",
+                (token,),
+            ).fetchone()
+        if not row:
+            return render_template("expired.html", message=warning_msg), 403
+        expires_at = datetime.fromisoformat(row["expires_at"])
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) >= expires_at:
+            return render_template("expired.html", message=warning_msg), 403
+    except Exception as exc:
+        log.error("view_catalog token check failed: %s", exc)
+        return render_template("expired.html", message=warning_msg), 403
+
+    albums_raw = db_get_albums()
+    categories_raw = db_get_categories()
+
+    # Sort categories by created_at DESC (newest month/category on top).
+    # Fallback: sort by id desc if created_at missing.
+    def _cat_key(c):
+        return (c.get("created_at", "") if isinstance(c, dict) else "", c.get("id", "") if isinstance(c, dict) else "")
+    categories = sorted(categories_raw, key=_cat_key, reverse=True)
+
+    # Sort albums by created_at DESC (newest post on top in each category).
+    # Use OrderedDict so Jinja iterates in this order.
+    from collections import OrderedDict
+    sorted_album_items = sorted(
+        albums_raw.items(),
+        key=lambda kv: (kv[1].get("created_at", "") if isinstance(kv[1], dict) else "", kv[0]),
+        reverse=True,
+    )
+    albums = OrderedDict(sorted_album_items)
+
+    # Issue a fresh 24h token for every album so the catalog links work
+    album_tokens = {aid: db_create_album_token(aid) for aid in albums.keys()}
+    return render_template(
+        "public_catalog.html",
+        categories=categories,
+        albums=albums,
+        album_tokens=album_tokens,
+        token=token,
+    )
+
 
 
 @app.route("/settings/expired_warning_message", methods=["POST"])
@@ -3421,44 +3561,66 @@ if BOT_TOKEN or db_get_bots():
             now_vn = datetime.now(timezone.utc) + timedelta(hours=7)
             cfg = db_get_config()
             if now_vn.hour == cfg["hour"] and now_vn.minute == cfg["minute"]:
-                key = f"{now_vn.hour}:{now_vn.minute}"
+                # FIX: include DATE so the key resets each day (otherwise it
+                # only ever fires once for that HH:MM forever)
+                key = f"{now_vn.strftime('%Y-%m-%d')} {now_vn.hour}:{now_vn.minute}"
                 if _last_sent[0] != key:
                     _last_sent[0] = key
                     albums = db_get_albums()
                     if not albums:
                         return
                     _base_url = os.environ.get("APP_BASE_URL", os.environ.get("DOMAIN", "")).rstrip("/")
-                    # Build album list buttons (notification instead of raw content)
-                    sched_buttons = []
+                    # Only send the LATEST album + a "Xem thêm" button
                     sorted_albums = sorted(
                         albums.items(),
                         key=lambda kv: (kv[1].get("created_at", "") if isinstance(kv[1], dict) else "", kv[0]),
                         reverse=True,
                     )
-                    for album_id, album_data in sorted_albums:
-                        title = album_data.get("title", album_id) if isinstance(album_data, dict) else album_id
+                    sched_buttons = []
+                    if sorted_albums:
+                        latest_id, latest_data = sorted_albums[0]
+                        latest_title = latest_data.get("title", latest_id) if isinstance(latest_data, dict) else latest_id
                         if _base_url:
-                            bridge_url = f"{_base_url}/miniapp/bridge/{album_id}"
+                            bridge_url = f"{_base_url}/miniapp/bridge/{latest_id}"
                             sched_buttons.append(
-                                [InlineKeyboardButton(f"🔥 {title}", web_app=WebAppInfo(url=bridge_url))]
+                                [InlineKeyboardButton(f"🔥 {latest_title}", web_app=WebAppInfo(url=bridge_url))]
                             )
                         else:
                             sched_buttons.append(
-                                [InlineKeyboardButton(f"🔥 {title}", callback_data=album_id)]
+                                [InlineKeyboardButton(f"🔥 {latest_title}", callback_data=latest_id)]
                             )
-                    reply_markup = InlineKeyboardMarkup(sched_buttons) if sched_buttons else None
+                    # Always add a "Xem thêm" button that returns to the category menu
+                    sched_buttons.append(
+                        [InlineKeyboardButton("📂 Xem thêm Album khác", callback_data="menu")]
+                    )
+                    reply_markup = InlineKeyboardMarkup(sched_buttons)
                     bot_subs = db_get_subscribers(bot_cfg_id)
-                    success, fail = 0, 0
-                    for u in bot_subs:
+                    if not bot_subs:
+                        bot_subs = db_get_subscribers("global")
+
+                    # FIX: parallel batched send (25 concurrent + 1s gap) so
+                    # 1000 subscribers finish in ~40 s instead of blocking the
+                    # scheduler for 5-10 min.  Telegram global limit is 30 msg/s.
+                    async def _sched_send_one(uid):
                         try:
                             await context.bot.send_message(
-                                u,
+                                uid,
                                 "🔔 Bài viết mới đã lên lịch!",
                                 reply_markup=reply_markup,
                             )
-                            success += 1
+                            return True
                         except Exception:
-                            fail += 1
+                            return False
+
+                    success, fail = 0, 0
+                    BATCH = 25
+                    for _i in range(0, len(bot_subs), BATCH):
+                        _batch = bot_subs[_i:_i + BATCH]
+                        _results = await asyncio.gather(*[_sched_send_one(u) for u in _batch])
+                        success += sum(1 for r in _results if r)
+                        fail += sum(1 for r in _results if not r)
+                        if _i + BATCH < len(bot_subs):
+                            await asyncio.sleep(1)
                     increment_messages_sent(bot_cfg_id, success)
                     if bot_admin_id:
                         await context.bot.send_message(
@@ -3490,13 +3652,12 @@ if BOT_TOKEN or db_get_bots():
         ptb_app.add_handler(MessageHandler(tg_filters.TEXT & ~tg_filters.COMMAND, track_reply))
         ptb_app.job_queue.run_repeating(
             scheduler_job,
-            # 60s interval: scheduler_job checks whether a scheduled post or album
-            # broadcast should be sent at the current UTC hour:minute.  Checking
-            # once per minute is sufficient for that granularity.  With 50 bots
-            # this halves the job-queue load (50 jobs/min instead of 100 jobs/min
-            # at 30s), with no meaningful reduction in scheduling accuracy.
             interval=60,
             first=1,
+            # FIX: allow up to 3 concurrent runs so that if one job is still
+            # sending to many subscribers, the next minute's check is not
+            # silently skipped (which previously caused missed schedules).
+            job_kwargs={"max_instances": 3, "coalesce": True, "misfire_grace_time": 30},
         )
         ptb_app.job_queue.run_daily(daily_backup_job, time=dt_time(1, 0, 0, tzinfo=timezone.utc))
         return ptb_app

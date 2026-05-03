@@ -88,14 +88,14 @@
     .post-images video {
       width: 100%;
       display: block;
-      object-fit: cover;
+      object-fit: contain;
       aspect-ratio: 1 / 1;
       background: #000;
     }
     .post-images.count-1 img,
     .post-images.count-1 video {
       aspect-ratio: auto;
-      max-height: 75vw;
+      max-height: 90vh; height: auto;
     }
 
     /* Video wrapper */
@@ -175,27 +175,27 @@
             {% if img_list %}
               <div class="post-images count-{{ [img_list|length, 4]|min }}">
                 {% for item in img_list %}
-                  {% set src = item.url %}
-                  {% if src.startswith('/') %}{% set src = base_url + src %}{% endif %}
-                  <img src="{{ src }}" alt="" loading="lazy">
+                  {% set src = item.url | replace("/static/uploads/", "/media/") | replace("http://", "https://") %}
+                  
+                  <img src="{{ src | replace('http://', 'https://') }}" alt="" loading="lazy">
                 {% endfor %}
               </div>
             {% endif %}
 
             {# Videos #}
             {% for item in vid_list %}
-              {% set src = item.url %}
+              {% set src = item.url | replace("/static/uploads/", "/media/") | replace("http://", "https://") %}
               {% if src.endswith('.m3u8') %}
                 {# HLS: link to stream player #}
                 {% set file_id = src.split('/')[-2] %}
-                <a class="hls-btn" href="{{ base_url }}/stream/{{ file_id }}" target="_blank" rel="noopener">
+                <a class="hls-btn" href="/stream/{{ file_id }}" target="_blank" rel="noopener">
                   ▶ Xem video
                 </a>
               {% else %}
-                {% if src.startswith('/') %}{% set src = base_url + src %}{% endif %}
+                
                 <div class="post-video-wrapper">
                   <video controls playsinline preload="metadata">
-                    <source src="{{ src }}">
+                    <source src="{{ src | replace('http://', 'https://') }}">
                   </video>
                 </div>
               {% endif %}
@@ -215,8 +215,116 @@
       </div>
     {% endif %}
 
+    
+    
+
+    
+    <div style="text-align: center; margin-top: 40px; margin-bottom: 20px; padding: 0 16px;">
+      <a href="/view/catalog?token={{ request.args.get('token', '') }}" style="display: block; width: 100%; background: linear-gradient(90deg, #ff5e00, #ff9800); color: #fff; font-size: 1.1rem; font-weight: 800; padding: 16px 20px; border: none; border-radius: 14px; cursor: pointer; box-shadow: 0 4px 15px rgba(255,94,0,0.4); text-transform: uppercase; animation: pulseBtn 2s infinite; text-align: center; text-decoration: none;">
+        🔥 Bấm vào đây để xem nhiều Link hơn 🔥
+      </a>
+    </div>
+    <style>
+      @keyframes pulseBtn {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.02); }
+        100% { transform: scale(1); }
+      }
+    </style>
+
     <footer>— Hết album —</footer>
   </div>
 
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const origin = window.location.protocol + "//" + window.location.host;
+    
+    // Xử lý ảnh
+    const images = document.querySelectorAll('.lazy-load-image');
+    images.forEach(img => {
+        let src = img.getAttribute('data-src');
+        if (!src) return;
+        // Đảm bảo là đường dẫn tuyệt đối và là HTTPS
+        if (src.startsWith('/')) src = origin + src;
+        src = src.replace('http://', 'https://');
+        
+        // Thêm tham số timestamp để phá cache trình duyệt cũ
+        const finalUrl = src + (src.includes('?') ? '&' : '?') + 't=' + new Date().getTime();
+        
+        // Ép tải ảnh
+        img.onerror = function() { console.error("Lỗi tải ảnh:", finalUrl); };
+        img.src = finalUrl;
+    });
+
+    // Xử lý Video
+    const videos = document.querySelectorAll('.lazy-load-video');
+    videos.forEach(source => {
+        let src = source.getAttribute('data-src');
+        if (!src) return;
+        if (src.startsWith('/')) src = origin + src;
+        src = src.replace('http://', 'https://');
+        
+        source.src = src;
+        const videoTag = source.parentElement;
+        if (videoTag) videoTag.load();
+    });
+});
+</script>
+
+
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+  function goBackToBot() {
+    try {
+      // 1. Nếu đang ở trong Mini App -> Đóng ngay lập tức
+      if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
+          window.Telegram.WebApp.close();
+          return;
+      }
+    } catch(e) {}
+
+    // 2. Nếu đang mở bằng Chrome/Safari, biến trang web thành màn hình Chúc mừng
+    document.body.innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; background:#0f0f0f; color:#fff; text-align:center; padding:30px; animation: fadeIn 0.5s;">
+        <div style="font-size:5rem; margin-bottom:20px; animation: bounce 2s infinite;">🎉</div>
+        <h2 style="color:#ff9800; font-weight:800; margin-bottom:15px; font-size:1.8rem; text-transform:uppercase;">Đã xem xong!</h2>
+        <p style="font-size:1.1rem; color:#ccc; line-height:1.6; margin-bottom:30px;">
+          Hãy <b>Đóng tab này lại</b> và mở ứng dụng <b>Telegram</b> để xem thêm hàng ngàn Link cực HOT khác nhé!
+        </p>
+      </div>
+      <style>
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-15px); } }
+      </style>
+    `;
+    window.scrollTo(0, 0);
+  }
+</script>
+
+
+
+
+
+
+<script id="safe-linkify">
+  document.addEventListener("DOMContentLoaded", function() {
+    var captions = document.querySelectorAll('.post-caption');
+    // Regex an toàn: Bỏ qua các dấu ngoặc kép, nháy đơn để không bắt nhầm mã HTML
+    var urlRegex = /(https?:\/\/[^\s<"']+)/g;
+    
+    captions.forEach(function(cap) {
+      // Dùng cờ (flag) để đảm bảo CHỈ CHẠY ĐÚNG 1 LẦN DUY NHẤT cho mỗi đoạn text
+      if (!cap.dataset.linkified) {
+        var text = cap.innerHTML;
+        cap.innerHTML = text.replace(urlRegex, function(url) {
+          return '<a href="' + url + '" target="_blank" style="color: #4d9fff; text-decoration: underline; font-weight: bold;" onclick="event.stopPropagation();">' + url + '</a>';
+        });
+        cap.dataset.linkified = "true";
+      }
+    });
+  });
+</script>
 </body>
 </html>
