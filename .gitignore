@@ -9,3 +9,11 @@ static/backups/*
 !static/backups/.gitkeep
 .env
 *.db
+
+# Runtime database — never commit
+data.db
+data.db-shm
+data.db-wal
+data.db.backup*
+data.db.empty*
+data.db.broken*
