@@ -213,7 +213,11 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("📂 CHỌN DANH MỤC:", reply_markup=InlineKeyboardMarkup(buttons))
     else:
         # No categories — show all albums with pagination
-        all_albums = sorted(albums.items())
+        all_albums = sorted(
+            albums.items(),
+            key=lambda kv: (kv[1].get("created_at", "") if isinstance(kv[1], dict) else "", kv[0]),
+            reverse=True,
+        )
         total = len(all_albums)
         start = page * _PAGE_SIZE
         end = start + _PAGE_SIZE
@@ -265,12 +269,16 @@ async def category_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if cat_id == "_uncategorized":
         filtered = sorted(
-            [(k, v) for k, v in albums.items() if isinstance(v, dict) and not v.get("category_id")]
+            [(k, v) for k, v in albums.items() if isinstance(v, dict) and not v.get("category_id")],
+            key=lambda kv: (kv[1].get("created_at", ""), kv[0]),
+            reverse=True,
         )
         title_text = "📋 Album chưa phân loại"
     else:
         filtered = sorted(
-            [(k, v) for k, v in albums.items() if isinstance(v, dict) and v.get("category_id") == cat_id]
+            [(k, v) for k, v in albums.items() if isinstance(v, dict) and v.get("category_id") == cat_id],
+            key=lambda kv: (kv[1].get("created_at", ""), kv[0]),
+            reverse=True,
         )
         categories = _db_get_categories()
         cat_name = next((c["name"] for c in categories if c["id"] == cat_id), cat_id)
@@ -386,7 +394,12 @@ async def scheduler_job(context: ContextTypes.DEFAULT_TYPE):
 
             # Build album list buttons (send notification instead of raw content)
             sched_buttons = []
-            for album_id, album_data in sorted(albums.items()):
+            sorted_albums = sorted(
+                albums.items(),
+                key=lambda kv: (kv[1].get("created_at", "") if isinstance(kv[1], dict) else "", kv[0]),
+                reverse=True,
+            )
+            for album_id, album_data in sorted_albums:
                 title = album_data.get("title", album_id) if isinstance(album_data, dict) else album_id
                 if WEBHOOK_URL:
                     bridge_url = f"{WEBHOOK_URL}/miniapp/bridge/{album_id}"
