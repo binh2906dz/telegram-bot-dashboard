@@ -4,6 +4,7 @@ import re
 import glob
 import json
 import uuid
+import time as _time_module
 import asyncio
 import logging
 import secrets
@@ -12,6 +13,7 @@ import tempfile
 import threading
 import zipfile
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta, time as dt_time
 from functools import wraps
 from flask import Flask, request, redirect, render_template, jsonify, Response, session, url_for
@@ -131,6 +133,41 @@ if not _secret_key:
         "Set SECRET_KEY env var in production!"
     )
 app.secret_key = _secret_key
+# Sessions last 12 hours and require session.permanent = True in the login route
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
+
+# ===== LOGIN BRUTE-FORCE PROTECTION =====
+_login_attempts: dict = {}   # {ip: {"count": int, "window_start": float}}
+_LOGIN_MAX_ATTEMPTS = 10
+_LOGIN_WINDOW_SECS = 900  # 15 minutes
+
+
+def _check_login_rate_limit(ip: str) -> bool:
+    """Return True if the IP is allowed to attempt login, False if rate-limited."""
+    now = _time_module.time()
+    entry = _login_attempts.get(ip)
+    if entry is None:
+        return True
+    if now - entry["window_start"] > _LOGIN_WINDOW_SECS:
+        _login_attempts.pop(ip, None)
+        return True
+    return entry["count"] < _LOGIN_MAX_ATTEMPTS
+
+
+def _record_failed_login(ip: str) -> None:
+    """Record a failed login attempt for an IP address."""
+    now = _time_module.time()
+    entry = _login_attempts.get(ip)
+    if entry is None or now - entry["window_start"] > _LOGIN_WINDOW_SECS:
+        _login_attempts[ip] = {"count": 1, "window_start": now}
+    else:
+        entry["count"] += 1
+
+
+def _clear_login_attempts(ip: str) -> None:
+    """Clear the failed login counter after a successful login."""
+    _login_attempts.pop(ip, None)
+
 
 # ===== AUTH CONFIG =====
 OWNER_USER = os.environ.get("OWNER_USER", "admin")
@@ -156,7 +193,8 @@ DB_FILE = os.path.join(_APP_DIR, "data.db")
 UPLOAD_BASE_DIR = os.path.join(_APP_DIR, "static", "uploads")
 UPLOAD_IMAGES_DIR = os.path.join(UPLOAD_BASE_DIR, "images")
 UPLOAD_VIDEOS_DIR = os.path.join(UPLOAD_BASE_DIR, "videos")
-BACKUP_DIR = os.path.join(_APP_DIR, "static", "backups")
+# Backups are stored outside static/ so they are not publicly accessible
+BACKUP_DIR = os.path.join(_APP_DIR, "data", "backups")
 
 # Ensure upload directories exist at startup
 for _d in (UPLOAD_IMAGES_DIR, UPLOAD_VIDEOS_DIR, BACKUP_DIR):
@@ -598,19 +636,25 @@ def db_save_category(cat_id: str, name: str):
 
 
 def db_delete_category(cat_id: str):
-    """Delete a category and remove category_id from its albums."""
+    """Delete a category and efficiently remove its reference from affected albums."""
     with get_db() as conn:
         conn.execute("DELETE FROM categories WHERE id=?", (cat_id,))
         try:
-            rows = conn.execute("SELECT id, data_json FROM albums").fetchall()
+            # Use the category_id index to avoid a full table scan
+            rows = conn.execute(
+                "SELECT id, data_json FROM albums WHERE category_id=?", (cat_id,)
+            ).fetchall()
             for row in rows:
-                data = json.loads(row["data_json"])
-                if isinstance(data, dict) and data.get("category_id") == cat_id:
-                    data["category_id"] = None
-                    conn.execute(
-                        "UPDATE albums SET data_json=?, category_id=NULL WHERE id=?",
-                        (json.dumps(data, ensure_ascii=False), row["id"]),
-                    )
+                try:
+                    data = json.loads(row["data_json"])
+                    if isinstance(data, dict):
+                        data["category_id"] = None
+                        conn.execute(
+                            "UPDATE albums SET data_json=?, category_id=NULL WHERE id=?",
+                            (json.dumps(data, ensure_ascii=False), row["id"]),
+                        )
+                except Exception as row_exc:
+                    log.warning("db_delete_category: failed for album %s: %s", row["id"], row_exc)
         except Exception as exc:
             log.warning("db_delete_category: failed to clear album category_ids: %s", exc)
         conn.commit()
@@ -1138,7 +1182,46 @@ def owner_required(f):
     return decorated
 
 
-# ===== LOCAL STORAGE HELPERS =====
+# ===== CSRF PROTECTION =====
+
+def _generate_csrf_token() -> str:
+    """Generate (or retrieve) the anti-CSRF token for the current session."""
+    if "_csrf_token" not in session:
+        session["_csrf_token"] = secrets.token_hex(32)
+    return session["_csrf_token"]
+
+
+def _check_csrf():
+    """Validate the CSRF token for all state-changing requests.
+
+    Skips:
+    - Safe HTTP methods (GET, HEAD, OPTIONS)
+    - Telegram webhook endpoint (authenticated by token in URL path)
+    - Telegram Mini App API endpoints (authenticated by initData HMAC)
+    - Health-check endpoint
+    """
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    # Exempt paths that are not protected by session auth
+    exempt_prefixes = ("/webhook/", "/api/", "/healthz")
+    if any(request.path.startswith(p) for p in exempt_prefixes):
+        return None
+
+    server_token = session.get("_csrf_token", "")
+    # Header takes priority (fetch/AJAX), then form field (traditional HTML form POST)
+    client_token = (
+        request.headers.get("X-CSRF-Token", "")
+        or request.form.get("_csrf_token", "")
+    )
+    if not server_token or not client_token:
+        return jsonify({"ok": False, "error": "CSRF token thiếu"}), 403
+    if not secrets.compare_digest(client_token, server_token):
+        return jsonify({"ok": False, "error": "CSRF token không hợp lệ"}), 403
+    return None
+
+
+app.before_request(_check_csrf)
+app.jinja_env.globals["csrf_token"] = _generate_csrf_token
 
 def save_file_locally(file_stream, filename: str, file_type: str) -> str:
     """Save an uploaded file to the local static/uploads directory.
@@ -1213,7 +1296,7 @@ def run_daily_backup():
         _backup_files_to_zip(zf)
 
     log.info(f"Backup saved locally: {backup_path}")
-    return f"/static/backups/{backup_filename}"
+    return f"/backup/download"
 
 
 # ===== FLASK ROUTES =====
@@ -1222,6 +1305,10 @@ def run_daily_backup():
 def login():
     error = None
     if request.method == "POST":
+        client_ip = request.remote_addr or "unknown"
+        if not _check_login_rate_limit(client_ip):
+            error = "Quá nhiều lần thử đăng nhập. Vui lòng thử lại sau 15 phút."
+            return render_template("login.html", error=error)
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "").strip()
         # Use constant-time comparison to prevent timing attacks
@@ -1230,15 +1317,20 @@ def login():
         is_manager = (secrets.compare_digest(username, MANAGER_USER) and
                       secrets.compare_digest(password, MANAGER_PASS))
         if is_owner or is_manager:
+            _clear_login_attempts(client_ip)
+            # Regenerate session to prevent session fixation attacks
+            session.clear()
             session["logged_in"] = True
             session["role"] = "owner" if is_owner else "manager"
             session["username"] = username
+            session.permanent = True  # Apply PERMANENT_SESSION_LIFETIME
             # Validate next_url to prevent open redirect: only allow relative paths
             next_url = request.args.get("next", "")
             if next_url and next_url.startswith("/") and not next_url.startswith("//"):
                 return redirect(next_url)
             return redirect("/")
         else:
+            _record_failed_login(client_ip)
             error = "Sai tên đăng nhập hoặc mật khẩu!"
     return render_template("login.html", error=error)
 
@@ -1703,7 +1795,7 @@ def view_album(album_id):
 
 
 @app.route("/settings/expired_warning_message", methods=["POST"])
-@login_required
+@owner_required
 def settings_expired_warning_message():
     """Save the expired-token warning message (admin-only)."""
     try:
@@ -2389,43 +2481,40 @@ def toggle_bot_responder(bot_id):
 def bots_health():
     """Return health status and per-bot stats for all bots in the database."""
     bots_list = db_get_bots()
-    # Load analytics from DB
     analytics_map = {a["bot_id"]: a for a in get_all_analytics()}
-    result = []
-    # Reuse a single httpx.Client for all getMe calls instead of creating
-    # one TCP connection per bot (important when 50 bots are configured).
-    with httpx.Client(timeout=5) as client:
-        for bot in bots_list:
-            token = (bot.get("token") or "").strip()
-            bot_id = bot.get("id", "")
-            status = "ERROR"
-            if token:
-                try:
-                    resp = client.get(
-                        f"https://api.telegram.org/bot{token}/getMe",
-                    )
-                    if resp.status_code == 200:
-                        status = "LIVE"
-                    elif resp.status_code == 401:
-                        status = "BAN"
-                    else:
-                        status = "ERROR"
-                except Exception:
-                    status = "ERROR"
-            bot_subs = db_get_subscribers(bot_id)
-            if not bot_subs:
-                bot_subs = db_get_subscribers("global")
-            a = analytics_map.get(bot_id, {})
-            result.append({
-                "id": bot_id,
-                "status": status,
-                "auto_responder": bot.get("auto_responder", True),
-                "subs_count": len(bot_subs),
-                "messages_sent": a.get("messages_sent", 0),
-                "starts_count": a.get("starts_count", 0),
-                "interactions_count": a.get("interactions_count", 0),
-                "replies_count": a.get("replies_count", 0),
-            })
+
+    def _check_bot(bot):
+        token = (bot.get("token") or "").strip()
+        bot_id = bot.get("id", "")
+        status = "ERROR"
+        if token:
+            try:
+                with httpx.Client(timeout=5) as client:
+                    resp = client.get(f"https://api.telegram.org/bot{token}/getMe")
+                if resp.status_code == 200:
+                    status = "LIVE"
+                elif resp.status_code == 401:
+                    status = "BAN"
+            except Exception:
+                status = "ERROR"
+        bot_subs = db_get_subscribers(bot_id)
+        if not bot_subs:
+            bot_subs = db_get_subscribers("global")
+        a = analytics_map.get(bot_id, {})
+        return {
+            "id": bot_id,
+            "status": status,
+            "auto_responder": bot.get("auto_responder", True),
+            "subs_count": len(bot_subs),
+            "messages_sent": a.get("messages_sent", 0),
+            "starts_count": a.get("starts_count", 0),
+            "interactions_count": a.get("interactions_count", 0),
+            "replies_count": a.get("replies_count", 0),
+        }
+
+    max_workers = min(10, len(bots_list)) if bots_list else 1
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        result = list(executor.map(_check_bot, bots_list))
     return jsonify(result)
 
 
@@ -3594,7 +3683,9 @@ if BOT_TOKEN or db_get_bots():
                     log.info("BotManager._reload() – calling start() for bot %s", bot_id)
                     await ptb.start()
                     webhook_endpoint = f"{WEBHOOK_URL}/webhook/{token}"
-                    log.info("BotManager._reload() – registering webhook for bot %s: %s", bot_id, webhook_endpoint)
+                    # Mask the token in logs to avoid leaking credentials
+                    token_display = f"...{token[-8:]}" if len(token) > 8 else "***"
+                    log.info("BotManager._reload() – registering webhook for bot %s (token %s)", bot_id, token_display)
                     await ptb.bot.set_webhook(
                         url=webhook_endpoint,
                         allowed_updates=["message", "callback_query"],
@@ -3603,7 +3694,7 @@ if BOT_TOKEN or db_get_bots():
                     self._running_apps[bot_id] = ptb
                     # Maintain O(1) token→app index for webhook dispatch
                     self._token_to_app[token] = ptb
-                    log.info("✅ Bot %s (%s) webhook registered at %s", bot_id, cfg_entry.get("name", "?"), webhook_endpoint)
+                    log.info("✅ Bot %s (%s) webhook registered (token %s)", bot_id, cfg_entry.get("name", "?"), token_display)
                 except Exception as exc:
                     log.error(
                         "Failed to start bot %s (%s): %s",
