@@ -1,19 +1,28 @@
-__pycache__/
+# Python
 *.pyc
-*.pyo
-static/uploads/images/*
-!static/uploads/images/.gitkeep
-static/uploads/videos/*
-!static/uploads/videos/.gitkeep
-static/backups/*
-!static/backups/.gitkeep
-.env
-*.db
+__pycache__/
+venv/
+.venv/
+*.egg-info/
 
-# Runtime database — never commit
+# Secrets & Data — NEVER COMMIT
+.env
+.env.local
 data.db
-data.db-shm
+data.db-journal
 data.db-wal
-data.db.backup*
-data.db.empty*
-data.db.broken*
+data.db-shm
+
+# Backups & uploads
+static/backups/
+static/uploads/
+*.bak_*
+*.bak
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
