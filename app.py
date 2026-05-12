@@ -33,40 +33,40 @@ _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 _DOTENV_PATH = os.path.join(_APP_DIR, ".env")
 
 def _load_dotenv_fallback(dotenv_path: str) -> None:
- """Parse a .env file and inject variables into os.environ.
+    """Parse a .env file and inject variables into os.environ.
 
- A variable is written to os.environ when it is either absent from the
- environment OR currently set to an empty string. This ensures that an
- empty-string placeholder injected by a misconfigured systemd
- ``Environment=`` directive (e.g. ``Environment="BOT_TOKEN="``) never
- hides the real token stored in the .env file. A non-empty value that
- is already present in the environment is always preserved so that the
- runtime environment (systemd / Docker) can still override .env values.
- """
- if not os.path.isfile(dotenv_path):
- return
- try:
- with open(dotenv_path, encoding="utf-8") as _fh:
- for _line in _fh:
- _line = _line.strip()
- if not _line or _line.startswith("#") or "=" not in _line:
- continue
- _key, _, _val = _line.partition("=")
- _key = _key.strip()
- _val = _val.strip()
- # Strip a matched outer quote pair (e.g. "value" or 'value')
- if len(_val) >= 2 and _val[0] == _val[-1] and _val[0] in ('"', "'"):
- _val = _val[1:-1]
- # Set if the key is absent OR the existing value is an empty string.
- # Using explicit `== ''` (not `not os.environ.get()`) so that
- # legitimate falsy-but-non-empty values such as '0' or 'false'
- # are preserved while empty-string placeholders injected by a
- # misconfigured systemd Environment= directive are overridden.
- if _key and (_key not in os.environ or os.environ[_key] == "") and _val:
- os.environ[_key] = _val
- except Exception as _exc:
- # Log at debug level – never crash on .env parse failure
- logging.getLogger("app").debug("_load_dotenv_fallback: failed to parse %s: %s", dotenv_path, _exc)
+    A variable is written to os.environ when it is either absent from the
+    environment OR currently set to an empty string. This ensures that an
+    empty-string placeholder injected by a misconfigured systemd
+    ``Environment=`` directive (e.g. ``Environment="BOT_TOKEN="``) never
+    hides the real token stored in the .env file. A non-empty value that
+    is already present in the environment is always preserved so that the
+    runtime environment (systemd / Docker) can still override .env values.
+    """
+    if not os.path.isfile(dotenv_path):
+        return
+    try:
+        with open(dotenv_path, encoding="utf-8") as _fh:
+            for _line in _fh:
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _key, _, _val = _line.partition("=")
+                _key = _key.strip()
+                _val = _val.strip()
+                # Strip a matched outer quote pair (e.g. "value" or 'value')
+                if len(_val) >= 2 and _val[0] == _val[-1] and _val[0] in ('"', "'"):
+                    _val = _val[1:-1]
+                # Set if the key is absent OR the existing value is an empty string.
+                # Using explicit `== ''` (not `not os.environ.get()`) so that
+                # legitimate falsy-but-non-empty values such as '0' or 'false'
+                # are preserved while empty-string placeholders injected by a
+                # misconfigured systemd Environment= directive are overridden.
+                if _key and (_key not in os.environ or os.environ[_key] == "") and _val:
+                    os.environ[_key] = _val
+    except Exception as _exc:
+        # Log at debug level – never crash on .env parse failure
+        logging.getLogger("app").debug("_load_dotenv_fallback: failed to parse %s: %s", dotenv_path, _exc)
 
 # Always run our own reliable parser first so the empty-string fix is applied
 # unconditionally regardless of whether python-dotenv is installed.
