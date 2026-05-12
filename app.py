@@ -1361,45 +1361,45 @@ def set_album_category(album_id):
 @app.route("/albums/<album_id>/posts", methods=["POST"])
 @login_required
 def add_post(album_id):
- caption = request.form.get("caption", "").strip()
- albums = db_get_albums()
- if album_id not in albums:
- return "Album not found", 404
- media_items = []
- # Accept both 'media' (new) and 'images' (legacy) field names
- if "media" in request.files:
- files = request.files.getlist("media")
- else:
- files = request.files.getlist("images")
- for f in files:
- if f and f.filename:
- try:
- mime = (f.content_type or "").lower()
- item_type = "video" if mime.startswith("video/") else "image"
- url = save_file_locally(f.stream, f.filename, item_type)
- if item_type == "video":
- file_id = os.path.splitext(os.path.basename(url))[0]
- hls_dir = os.path.join(UPLOAD_VIDEOS_DIR, file_id)
- src_path = url.lstrip("/")
- try:
- url = process_video_to_hls(src_path, hls_dir)
- except RuntimeError:
- pass # fall back to serving original video
- media_items.append({"url": url, "type": item_type})
- except Exception as e:
- log.error(f"Local upload failed: {e}")
- post = {
- "id": uuid.uuid4().hex,
- "caption": caption,
- "photos": media_items,
- "created_at": datetime.now(timezone.utc).isoformat(),
- }
- album = albums[album_id]
- if "posts" not in album:
- album["posts"] = []
- album["posts"].append(post)
- db_save_album(album_id, album)
- return redirect(f"/?album={album_id}")
+    caption = request.form.get("caption", "").strip()
+    albums = db_get_albums()
+    if album_id not in albums:
+        return "Album not found", 404
+    media_items = []
+    # Accept both 'media' (new) and 'images' (legacy) field names
+    if "media" in request.files:
+        files = request.files.getlist("media")
+    else:
+        files = request.files.getlist("images")
+    for f in files:
+        if f and f.filename:
+            try:
+                mime = (f.content_type or "").lower()
+                item_type = "video" if mime.startswith("video/") else "image"
+                url = save_file_locally(f.stream, f.filename, item_type)
+                if item_type == "video":
+                    file_id = os.path.splitext(os.path.basename(url))[0]
+                    hls_dir = os.path.join(UPLOAD_VIDEOS_DIR, file_id)
+                    src_path = url.lstrip("/")
+                    try:
+                        url = process_video_to_hls(src_path, hls_dir)
+                    except RuntimeError:
+                        pass # fall back to serving original video
+                media_items.append({"url": url, "type": item_type})
+            except Exception as e:
+                log.error(f"Local upload failed: {e}")
+    post = {
+        "id": uuid.uuid4().hex,
+        "caption": caption,
+        "photos": media_items,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    album = albums[album_id]
+    if "posts" not in album:
+        album["posts"] = []
+    album["posts"].append(post)
+    db_save_album(album_id, album)
+    return redirect(f"/?album={album_id}")
 
 @app.route("/albums/<album_id>/posts/<post_id>/delete", methods=["POST"])
 @owner_required
@@ -1417,47 +1417,47 @@ def delete_post(album_id, post_id):
 @app.route("/upload", methods=["POST"])
 @login_required
 def upload():
- album_id = request.form.get("album_id", "").strip()
- caption_text = request.form.get("caption", "").strip()
- if not album_id:
- return "Missing album_id", 400
- albums = db_get_albums()
- if album_id not in albums:
- albums[album_id] = {
- "title": album_id,
- "description": "",
- "created_at": datetime.now(timezone.utc).isoformat(),
- "posts": [],
- }
- photos = []
- for img in request.files.getlist("images"):
- if img and img.filename:
- try:
- mime = (img.content_type or "").lower()
- item_type = "video" if mime.startswith("video/") else "image"
- url = save_file_locally(img.stream, img.filename, item_type)
- if item_type == "video":
- # Build HLS output dir from the saved file path
- file_id = os.path.splitext(os.path.basename(url))[0]
- hls_dir = os.path.join(UPLOAD_VIDEOS_DIR, file_id)
- src_path = url.lstrip("/")
- try:
- url = process_video_to_hls(src_path, hls_dir)
- except RuntimeError:
- pass # fall back to serving original video
- photos.append({"url": url, "type": item_type})
- except Exception as e:
- log.error(f"Local upload failed: {e}")
- if photos:
- post = {
- "id": uuid.uuid4().hex,
- "caption": caption_text,
- "photos": photos,
- "created_at": datetime.now(timezone.utc).isoformat(),
- }
- albums[album_id].setdefault("posts", []).append(post)
- db_save_album(album_id, albums[album_id])
- return redirect("/")
+    album_id = request.form.get("album_id", "").strip()
+    caption_text = request.form.get("caption", "").strip()
+    if not album_id:
+        return "Missing album_id", 400
+    albums = db_get_albums()
+    if album_id not in albums:
+        albums[album_id] = {
+            "title": album_id,
+            "description": "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "posts": [],
+        }
+    photos = []
+    for img in request.files.getlist("images"):
+        if img and img.filename:
+            try:
+                mime = (img.content_type or "").lower()
+                item_type = "video" if mime.startswith("video/") else "image"
+                url = save_file_locally(img.stream, img.filename, item_type)
+                if item_type == "video":
+                    # Build HLS output dir from the saved file path
+                    file_id = os.path.splitext(os.path.basename(url))[0]
+                    hls_dir = os.path.join(UPLOAD_VIDEOS_DIR, file_id)
+                    src_path = url.lstrip("/")
+                    try:
+                        url = process_video_to_hls(src_path, hls_dir)
+                    except RuntimeError:
+                        pass # fall back to serving original video
+                photos.append({"url": url, "type": item_type})
+            except Exception as e:
+                log.error(f"Local upload failed: {e}")
+    if photos:
+        post = {
+            "id": uuid.uuid4().hex,
+            "caption": caption_text,
+            "photos": photos,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        albums[album_id].setdefault("posts", []).append(post)
+        db_save_album(album_id, albums[album_id])
+    return redirect("/")
 
 @app.route("/delete/<album_id>")
 @owner_required
