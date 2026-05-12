@@ -1232,7 +1232,7 @@ def login():
  session["role"] = "owner" if is_owner else "manager"
  session["username"] = username
  # Validate next_url to prevent open redirect: only allow relative paths
- next_url = request.args.get("next", "")
+ next_url = request.form.get("next", "") or request.args.get("next", "")
  if next_url and next_url.startswith("/") and not next_url.startswith("//"):
  return redirect(next_url)
  return redirect("/")
