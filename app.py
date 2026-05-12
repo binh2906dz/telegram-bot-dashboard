@@ -94,11 +94,11 @@ log.info(
  "set" if BOT_TOKEN else "EMPTY",
 )
 if not BOT_TOKEN and os.path.isfile(_DOTENV_PATH):
- log.warning(
- "Token is still empty even though .env exists at %s – check that the file contains "
- "TELEGRAM_BOT_TOKEN, TOKEN, or BOT_TOKEN and that it is readable by the service user.",
- _DOTENV_PATH,
- )
+    log.warning(
+        "Token is still empty even though .env exists at %s – check that the file contains "
+        "TELEGRAM_BOT_TOKEN, TOKEN, or BOT_TOKEN and that it is readable by the service user.",
+        _DOTENV_PATH,
+    )
 _admin_str = os.environ.get("ADMIN_CHAT_ID", os.environ.get("ADMIN_ID", ""))
 ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
