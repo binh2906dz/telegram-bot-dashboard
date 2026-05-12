@@ -1312,7 +1312,7 @@ def create_album():
  })
  return redirect(f"/?album={album_id}")
 
-@app.route("/albums/ /delete", methods=["POST"])
+@app.route("/albums/<album_id>/delete", methods=["POST"])
 @owner_required
 def delete_album(album_id):
  db_delete_album(album_id)
@@ -1335,13 +1335,13 @@ def create_category():
  db_save_category(cat_id, name)
  return redirect("/")
 
-@app.route("/categories/ /delete", methods=["POST"])
+@app.route("/categories/<cat_id>/delete", methods=["POST"])
 @owner_required
 def delete_category_route(cat_id):
  db_delete_category(cat_id)
  return redirect("/")
 
-@app.route("/albums/ /category", methods=["POST"])
+@app.route("/albums/<album_id>/category", methods=["POST"])
 @login_required
 def set_album_category(album_id):
  cat_id = request.form.get("category_id", "").strip() or None
@@ -1358,7 +1358,7 @@ def set_album_category(album_id):
 
 # --- Post management ---
 
-@app.route("/albums/ /posts", methods=["POST"])
+@app.route("/albums/<album_id>/posts", methods=["POST"])
 @login_required
 def add_post(album_id):
  caption = request.form.get("caption", "").strip()
@@ -1401,7 +1401,7 @@ def add_post(album_id):
  db_save_album(album_id, album)
  return redirect(f"/?album={album_id}")
 
-@app.route("/albums/ /posts/ /delete", methods=["POST"])
+@app.route("/albums/<album_id>/posts/<post_id>/delete", methods=["POST"])
 @owner_required
 def delete_post(album_id, post_id):
  albums = db_get_albums()
@@ -1459,7 +1459,7 @@ def upload():
  db_save_album(album_id, albums[album_id])
  return redirect("/")
 
-@app.route("/delete/ ")
+@app.route("/delete/<album_id>")
 @owner_required
 def delete(album_id):
  db_delete_album(album_id)
@@ -1488,7 +1488,7 @@ def backups_list():
  return jsonify({"ok": False, "error": "Lỗi đọc danh sách backup"}), 500
  return jsonify({"ok": True, "items": items, "max_backups": MAX_BACKUPS})
 
-@app.route("/backups/download/ ", methods=["GET"])
+@app.route("/backups/download/<filename>", methods=["GET"])
 @owner_required
 def backups_download_file(filename):
  """Download a specific backup file by name (with path-traversal protection)."""
@@ -1510,7 +1510,7 @@ def backups_download_file(filename):
  headers={"Content-Disposition": f"attachment; filename={filename}"},
  )
 
-@app.route("/backups/ /delete", methods=["POST"])
+@app.route("/backups/<filename>/delete", methods=["POST"])
 @owner_required
 def backups_delete_file(filename):
  """Delete a specific backup file (owner only)."""
@@ -1531,7 +1531,7 @@ def backups_delete_file(filename):
 def healthz():
  return "OK", 200
 
-@app.route("/stream/ ")
+@app.route("/stream/<file_id>")
 def stream_video(file_id):
  """Serve the HLS player page for a given video file_id."""
  # Validate file_id: only allow hex UUIDs (32 hex chars) to prevent path traversal
@@ -1635,7 +1635,7 @@ def backup_restore():
 
 # ===== TELEGRAM WEBHOOK ROUTE =====
 
-@app.route("/webhook/ ", methods=["POST"])
+@app.route("/webhook/<token_path>", methods=["POST"])
 def telegram_webhook(token_path):
  """Receive Telegram update POSTs and feed them to the matching PTB application.
 
@@ -1680,7 +1680,7 @@ def telegram_webhook(token_path):
 
 # ===== TELEGRAM MINI APP BRIDGE ROUTES =====
 
-@app.route("/miniapp/bridge/ ")
+@app.route("/miniapp/bridge/<album_id>")
 def miniapp_bridge(album_id):
  """Lightweight bridge page: validates Telegram initData, generates a 24-hour
  token and redirects the user to the external album view in their browser."""
@@ -1733,7 +1733,7 @@ def api_generate_token(album_id):
  access_token = db_create_album_token(album_id)
  return jsonify({"ok": True, "token": access_token})
 
-@app.route("/view/album/ ")
+@app.route("/view/album/<album_id>")
 def view_album(album_id):
  """External (Chrome) album view protected by a 24-hour token."""
  token = request.args.get("token", "")
@@ -2448,7 +2448,7 @@ def add_bot():
  _bot_manager.notify_change()
  return jsonify({"ok": True})
 
-@app.route("/bots/ /delete", methods=["POST"])
+@app.route("/bots/<bot_id>/delete", methods=["POST"])
 @owner_required
 def delete_bot(bot_id):
  """Remove a bot from the database."""
@@ -2458,7 +2458,7 @@ def delete_bot(bot_id):
  _bot_manager.notify_change()
  return jsonify({"ok": True})
 
-@app.route("/bots/ /toggle_responder", methods=["POST"])
+@app.route("/bots/<bot_id>/toggle_responder", methods=["POST"])
 @owner_required
 def toggle_bot_responder(bot_id):
  """Toggle the auto_responder flag for a bot."""
@@ -2533,7 +2533,7 @@ def analytics_data():
  }
  return jsonify({"ok": True, "totals": totals, "bots": rows})
 
-@app.route("/bots/ /token", methods=["GET"])
+@app.route("/bots/<bot_id>/token", methods=["GET"])
 @owner_required
 def get_bot_token(bot_id):
  """Return the full token of a bot (owner only)."""
@@ -2718,7 +2718,7 @@ def _parse_node_buttons(raw: list) -> list:
  clean.append({"label": label, "type": btn_type, "value": value})
  return clean
 
-@app.route("/messages/ ", methods=["POST"])
+@app.route("/messages/<node_id>", methods=["POST"])
 @login_required
 def save_message_node(node_id):
  """Save or update a single message node."""
@@ -2735,7 +2735,7 @@ def save_message_node(node_id):
  db_save_messages_flow(flow)
  return jsonify({"ok": True})
 
-@app.route("/messages/ /delete", methods=["POST"])
+@app.route("/messages/<node_id>/delete", methods=["POST"])
 @login_required
 def delete_message_node(node_id):
  """Delete a message node (cannot delete 'start')."""
