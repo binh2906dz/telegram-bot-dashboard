@@ -133,6 +133,10 @@ def csrf_token():
 
 app.jinja_env.globals["csrf_token"] = csrf_token
 
+@app.context_processor
+def inject_csrf_token():
+    return {"csrf_token": csrf_token}
+
 # ===== AUTH CONFIG =====
 OWNER_USER = os.environ.get("OWNER_USER", "admin")
 OWNER_PASS = os.environ.get("OWNER_PASS", "admin123")
@@ -1260,7 +1264,6 @@ def run_daily_backup():
     _cleanup_old_backups(MAX_BACKUPS)
     return f"/static/backups/{backup_filename}"
 
-@app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
     if request.method == "POST":
@@ -1551,19 +1554,14 @@ def backup_manual():
 @app.route("/backup/restore", methods=["POST"])
 @owner_required
 def backup_restore():
-    """Restore data files from the most recent local backup zip."""
+    """Restore JSON data files from the most recent local backup zip."""
     backup_zip_path = None
-    try:
-        files = []
-        for fname in os.listdir(BACKUP_DIR):
-            if fname.startswith("backup_") and fname.endswith(".zip"):
-                fpath = os.path.join(BACKUP_DIR, fname)
-                files.append((os.path.getmtime(fpath), fpath))
-        if files:
-            files.sort(reverse=True)
-            backup_zip_path = files[0][1]
-    except Exception as exc:
-        log.warning("backup_restore: could not scan backups: %s", exc)
+    for days_ago in range(0, 7):
+        date_str = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        candidate = os.path.join(BACKUP_DIR, f"backup_{date_str}.zip")
+        if os.path.exists(candidate):
+            backup_zip_path = candidate
+            break
     if not backup_zip_path:
         return jsonify({"ok": False, "error": "Không tìm thấy bản sao lưu cục bộ"}), 404
     try:
@@ -1675,12 +1673,12 @@ def api_generate_token(album_id):
         except Exception as exc:
             log.warning("miniapp token verify exception: %s", exc)
 
-    if not valid:
-        return jsonify({"ok": False, "error": "initData không hợp lệ"}), 403
+ if not valid:
+ return jsonify({"ok": False, "error": "initData không hợp lệ"}), 403
 
-    db_cleanup_expired_tokens()
-    access_token = db_create_album_token(album_id)
-    return jsonify({"ok": True, "token": access_token})
+ db_cleanup_expired_tokens()
+ access_token = db_create_album_token(album_id)
+ return jsonify({"ok": True, "token": access_token})
 
 @app.route("/view/album/<album_id>")
 def view_album(album_id):
@@ -3528,20 +3526,11 @@ if BOT_TOKEN or db_get_bots():
  self._token_to_app: dict = {} # {token: ptb_app} — O(1) webhook dispatch
  self._loop: asyncio.AbstractEventLoop | None = None
  self._reload_event: asyncio.Event | None = None
- self._disabled_bot_ids: set[str] = set()
- self._disabled_tokens: set[str] = set()
 
  def notify_change(self):
  """Signal that bots.json has changed; triggers an immediate reload cycle."""
  if self._loop and self._reload_event and not self._loop.is_closed():
  self._loop.call_soon_threadsafe(self._reload_event.set)
-
- def disable_bot(self, bot_id: str | None = None, token: str | None = None):
- """Temporarily prevent a bot from being restarted after fatal auth failures."""
- if bot_id:
- self._disabled_bot_ids.add(bot_id)
- if token:
- self._disabled_tokens.add(token)
 
  def get_app_by_token(self, token: str):
  """Return the running PTB Application whose bot token matches, or None.
