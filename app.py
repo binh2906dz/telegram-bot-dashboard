@@ -360,22 +360,22 @@ def init_db():
     _migrate_json_to_db()
 
 def backup_db_to_bytes() -> bytes:
- """Safely copy the SQLite DB to bytes using SQLite backup API."""
- tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db")
- os.close(tmp_fd)
- try:
- src = sqlite3.connect(DB_FILE)
- dst = sqlite3.connect(tmp_path)
- src.backup(dst)
- src.close()
- dst.close()
- with open(tmp_path, "rb") as f:
- return f.read()
- finally:
- try:
- os.unlink(tmp_path)
- except Exception:
- pass
+    """Safely copy the SQLite DB to bytes using SQLite backup API."""
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db")
+    os.close(tmp_fd)
+    try:
+        src = sqlite3.connect(DB_FILE)
+        dst = sqlite3.connect(tmp_path)
+        src.backup(dst)
+        src.close()
+        dst.close()
+        with open(tmp_path, "rb") as f:
+            return f.read()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 def _migrate_json_to_db():
     """One-time migration: import data from JSON files into SQLite tables.
