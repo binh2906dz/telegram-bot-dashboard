@@ -54,30 +54,23 @@ def _load_dotenv_fallback(dotenv_path: str) -> None:
                 _key, _, _val = _line.partition("=")
                 _key = _key.strip()
                 _val = _val.strip()
-                # Strip a matched outer quote pair (e.g. "value" or 'value')
                 if len(_val) >= 2 and _val[0] == _val[-1] and _val[0] in ('"', "'"):
                     _val = _val[1:-1]
-                # Set if the key is absent OR the existing value is an empty string.
-                # Using explicit `== ''` (not `not os.environ.get()`) so that
-                # legitimate falsy-but-non-empty values such as '0' or 'false'
-                # are preserved while empty-string placeholders injected by a
-                # misconfigured systemd Environment= directive are overridden.
                 if _key and (_key not in os.environ or os.environ[_key] == "") and _val:
                     os.environ[_key] = _val
     except Exception as _exc:
-        # Log at debug level – never crash on .env parse failure
         logging.getLogger("app").debug("_load_dotenv_fallback: failed to parse %s: %s", dotenv_path, _exc)
 
 # Always run our own reliable parser first so the empty-string fix is applied
 # unconditionally regardless of whether python-dotenv is installed.
 _load_dotenv_fallback(_DOTENV_PATH)
 try:
- from dotenv import load_dotenv as _load_dotenv
- # override=False: python-dotenv will not touch vars already set by our
- # parser above (or by the real runtime environment).
- _load_dotenv(dotenv_path=_DOTENV_PATH, override=False)
+    from dotenv import load_dotenv as _load_dotenv
+    # override=False: python-dotenv will not touch vars already set by our
+    # parser above (or by the real runtime environment).
+    _load_dotenv(dotenv_path=_DOTENV_PATH, override=False)
 except ImportError:
- pass # python-dotenv not installed; our fallback above already handled it
+    pass # python-dotenv not installed; our fallback above already handled it
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
@@ -99,6 +92,7 @@ if not BOT_TOKEN and os.path.isfile(_DOTENV_PATH):
         "TELEGRAM_BOT_TOKEN, TOKEN, or BOT_TOKEN and that it is readable by the service user.",
         _DOTENV_PATH,
     )
+
 _admin_str = os.environ.get("ADMIN_CHAT_ID", os.environ.get("ADMIN_ID", ""))
 ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
@@ -122,20 +116,20 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024 # 50 MB
 _secret_key = os.environ.get("SECRET_KEY", "")
 if not _secret_key:
- _secret_key = os.urandom(24)
- log.warning(
- "SECRET_KEY not set – using a random key (sessions will not persist across restarts). "
- "Set SECRET_KEY env var in production!"
- )
+    _secret_key = os.urandom(24)
+    log.warning(
+        "SECRET_KEY not set – using a random key (sessions will not persist across restarts). "
+        "Set SECRET_KEY env var in production!"
+    )
 app.secret_key = _secret_key
 
 def csrf_token():
- """Return a stable per-session CSRF token for Jinja templates."""
- token = session.get("_csrf_token")
- if not token:
- token = secrets.token_hex(32)
- session["_csrf_token"] = token
- return token
+    """Return a stable per-session CSRF token for Jinja templates."""
+    token = session.get("_csrf_token")
+    if not token:
+        token = secrets.token_hex(32)
+        session["_csrf_token"] = token
+    return token
 
 app.jinja_env.globals["csrf_token"] = csrf_token
 
@@ -167,34 +161,34 @@ BACKUP_DIR = os.path.join(_APP_DIR, "static", "backups")
 
 # Ensure upload directories exist at startup
 for _d in (UPLOAD_IMAGES_DIR, UPLOAD_VIDEOS_DIR, BACKUP_DIR):
- os.makedirs(_d, exist_ok=True)
+    os.makedirs(_d, exist_ok=True)
 
 def load_json(file, default):
- try:
- with open(file, encoding="utf-8") as f:
- return json.load(f)
- except Exception as exc:
- log.error("load_json(%s) failed – returning default. Error: %s", file, exc)
- return default
+    try:
+        with open(file, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        log.error("load_json(%s) failed – returning default. Error: %s", file, exc)
+        return default
 
 def save_json(file, data):
- tmp_path = None
- try:
- dir_name = os.path.dirname(os.path.abspath(file))
- with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=dir_name, delete=False, suffix=".tmp") as tmp:
- json.dump(data, tmp, indent=2, ensure_ascii=False)
- tmp.flush()
- os.fsync(tmp.fileno())
- tmp_path = tmp.name
- os.replace(tmp_path, file)
- except Exception as exc:
- if tmp_path and os.path.exists(tmp_path):
- try:
- os.unlink(tmp_path)
- except OSError:
- pass
- log.error("save_json(%s) failed. Error: %s", file, exc)
- raise
+    tmp_path = None
+    try:
+        dir_name = os.path.dirname(os.path.abspath(file))
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=dir_name, delete=False, suffix=".tmp") as tmp:
+            json.dump(data, tmp, indent=2, ensure_ascii=False)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp_path = tmp.name
+        os.replace(tmp_path, file)
+    except Exception as exc:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        log.error("save_json(%s) failed. Error: %s", file, exc)
+        raise
 
 # ===== SQLITE DATABASE (for ID management, future Turso migration) =====
 
@@ -221,153 +215,149 @@ def get_db() -> sqlite3.Connection:
  return conn
 
 def init_db():
- """Create tables if they don't exist."""
- # Tracks whether the category_id column was just added (triggers one-time backfill below).
- _category_col_added = False
+    """Create tables if they don't exist."""
+    # Tracks whether the category_id column was just added (triggers one-time backfill below).
+    _category_col_added = False
 
- with get_db() as conn:
- # Enable WAL mode once for the entire DB file (persistent; subsequent
- # connections inherit it automatically). Do this before any DDL so
- # the schema changes themselves are written in WAL mode.
- result = conn.execute("PRAGMA journal_mode=WAL").fetchone()
- log.info("init_db: journal_mode set to %s", result[0] if result else "unknown")
+    with get_db() as conn:
+        # Enable WAL mode once for the entire DB file (persistent; subsequent
+        # connections inherit it automatically). Do this before any DDL so
+        # the schema changes themselves are written in WAL mode.
+        result = conn.execute("PRAGMA journal_mode=WAL").fetchone()
+        log.info("init_db: journal_mode set to %s", result[0] if result else "unknown")
 
- conn.execute('''
- CREATE TABLE IF NOT EXISTS telegram_ids (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- user_id TEXT UNIQUE NOT NULL,
- status TEXT NOT NULL DEFAULT 'unknown',
- created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
- updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
- )
- ''')
- conn.execute('''
- CREATE TABLE IF NOT EXISTS broadcast_logs (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- campaign_type TEXT NOT NULL DEFAULT 'ids',
- message TEXT,
- media_type TEXT,
- media_url TEXT,
- buttons_json TEXT,
- total_ids INTEGER DEFAULT 0,
- success_count INTEGER DEFAULT 0,
- fail_count INTEGER DEFAULT 0,
- bot_results_json TEXT,
- started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
- finished_at DATETIME
- )
- ''')
- conn.execute('''
- CREATE TABLE IF NOT EXISTS bot_analytics (
- bot_id TEXT PRIMARY KEY,
- starts_count INTEGER DEFAULT 0,
- messages_sent INTEGER DEFAULT 0,
- interactions_count INTEGER DEFAULT 0,
- replies_count INTEGER DEFAULT 0,
- updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
- )
- ''')
- # --- New tables replacing JSON files ---
- conn.execute('''
- CREATE TABLE IF NOT EXISTS albums (
- id TEXT PRIMARY KEY,
- data_json TEXT NOT NULL DEFAULT '{}'
- )
- ''')
- conn.execute('''
- CREATE TABLE IF NOT EXISTS bots_config (
- id TEXT PRIMARY KEY,
- data_json TEXT NOT NULL DEFAULT '{}',
- sort_order INTEGER DEFAULT 0
- )
- ''')
- conn.execute('''
- CREATE TABLE IF NOT EXISTS app_config (
- key TEXT PRIMARY KEY,
- value TEXT NOT NULL DEFAULT ''
- )
- ''')
- conn.execute('''
- CREATE TABLE IF NOT EXISTS subscribers (
- bot_id TEXT NOT NULL,
- user_id INTEGER NOT NULL,
- created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
- PRIMARY KEY (bot_id, user_id)
- )
- ''')
- conn.execute('''
- CREATE TABLE IF NOT EXISTS banned_users (
- user_id INTEGER PRIMARY KEY
- )
- ''')
- conn.execute('''
- CREATE TABLE IF NOT EXISTS album_tokens (
- token TEXT PRIMARY KEY,
- album_id TEXT NOT NULL,
- expires_at DATETIME NOT NULL
- )
- ''')
- conn.execute('''
- CREATE TABLE IF NOT EXISTS categories (
- id TEXT PRIMARY KEY,
- name TEXT NOT NULL,
- created_at DATETIME DEFAULT CURRENT_TIMESTAMP
- )
- ''')
+        conn.execute('''
+        CREATE TABLE IF NOT EXISTS telegram_ids (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT UNIQUE NOT NULL,
+            status TEXT NOT NULL DEFAULT 'unknown',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        conn.execute('''
+        CREATE TABLE IF NOT EXISTS broadcast_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_type TEXT NOT NULL DEFAULT 'ids',
+            message TEXT,
+            media_type TEXT,
+            media_url TEXT,
+            buttons_json TEXT,
+            total_ids INTEGER DEFAULT 0,
+            success_count INTEGER DEFAULT 0,
+            fail_count INTEGER DEFAULT 0,
+            bot_results_json TEXT,
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            finished_at DATETIME
+        )
+        ''')
+        conn.execute('''
+        CREATE TABLE IF NOT EXISTS bot_analytics (
+            bot_id TEXT PRIMARY KEY,
+            starts_count INTEGER DEFAULT 0,
+            messages_sent INTEGER DEFAULT 0,
+            interactions_count INTEGER DEFAULT 0,
+            replies_count INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        # --- New tables replacing JSON files ---
+        conn.execute('''
+        CREATE TABLE IF NOT EXISTS albums (
+            id TEXT PRIMARY KEY,
+            data_json TEXT NOT NULL DEFAULT '{}'
+        )
+        ''')
+        conn.execute('''
+        CREATE TABLE IF NOT EXISTS bots_config (
+            id TEXT PRIMARY KEY,
+            data_json TEXT NOT NULL DEFAULT '{}',
+            sort_order INTEGER DEFAULT 0
+        )
+        ''')
+        conn.execute('''
+        CREATE TABLE IF NOT EXISTS app_config (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT ''
+        )
+        ''')
+        conn.execute('''
+        CREATE TABLE IF NOT EXISTS subscribers (
+            bot_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (bot_id, user_id)
+        )
+        ''')
+        conn.execute('''
+        CREATE TABLE IF NOT EXISTS banned_users (
+            user_id INTEGER PRIMARY KEY
+        )
+        ''')
+        conn.execute('''
+        CREATE TABLE IF NOT EXISTS album_tokens (
+            token TEXT PRIMARY KEY,
+            album_id TEXT NOT NULL,
+            expires_at DATETIME NOT NULL
+        )
+        ''')
+        conn.execute('''
+        CREATE TABLE IF NOT EXISTS categories (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
 
- # --- Performance: add category_id shortcut column on albums ---
- # SQLite does not support "ADD COLUMN IF NOT EXISTS" before version 3.37,
- # so we attempt the ALTER and catch only the OperationalError that SQLite
- # raises when the column already exists ("duplicate column name").
- try:
- conn.execute("ALTER TABLE albums ADD COLUMN category_id TEXT")
- _category_col_added = True
- log.info("init_db: added category_id column to albums table")
- except sqlite3.OperationalError as _e:
- if "duplicate column name" in str(_e).lower():
- pass # column already exists — that's fine
- else:
- log.error("init_db: unexpected error adding category_id column: %s", _e)
+        # --- Performance: add category_id shortcut column on albums ---
+        # SQLite does not support "ADD COLUMN IF NOT EXISTS" before version 3.37,
+        # so we attempt the ALTER and catch only the OperationalError that SQLite
+        # raises when the column already exists ("duplicate column name").
+        try:
+            conn.execute("ALTER TABLE albums ADD COLUMN category_id TEXT")
+            _category_col_added = True
+            log.info("init_db: added category_id column to albums table")
+        except sqlite3.OperationalError as _e:
+            if "duplicate column name" in str(_e).lower():
+                pass # column already exists — that's fine
+            else:
+                log.error("init_db: unexpected error adding category_id column: %s", _e)
 
- # --- Performance indexes (all idempotent) ---
- # Speeds up category filtering for the bot's category_page handler
- conn.execute("CREATE INDEX IF NOT EXISTS idx_albums_category ON albums(category_id)")
- # Speeds up broadcast recipient queries (status filter)
- conn.execute("CREATE INDEX IF NOT EXISTS idx_telegram_ids_status ON telegram_ids(status)")
- # Speeds up per-bot subscriber lookups
- conn.execute("CREATE INDEX IF NOT EXISTS idx_subscribers_bot_id ON subscribers(bot_id)")
- # Speeds up expired-token cleanup
- conn.execute("CREATE INDEX IF NOT EXISTS idx_album_tokens_expires ON album_tokens(expires_at)")
+        # --- Performance indexes (all idempotent) ---
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_albums_category ON albums(category_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_telegram_ids_status ON telegram_ids(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_subscribers_bot_id ON subscribers(bot_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_album_tokens_expires ON album_tokens(expires_at)")
 
- conn.commit()
+        conn.commit()
 
- # One-time backfill: populate category_id column from JSON data_json for
- # rows that were inserted before this column existed.
- if _category_col_added:
- try:
- with get_db() as conn:
- rows = conn.execute(
- "SELECT id, data_json FROM albums WHERE category_id IS NULL"
- ).fetchall()
- updated = 0
- for row in rows:
- try:
- data = json.loads(row["data_json"])
- cat_id = data.get("category_id") if isinstance(data, dict) else None
- if cat_id is not None:
- conn.execute(
- "UPDATE albums SET category_id=? WHERE id=?",
- (cat_id, row["id"]),
- )
- updated += 1
- except Exception as row_exc:
- log.warning("init_db: skipped backfill for album %s: %s", row["id"], row_exc)
- conn.commit()
- log.info("init_db: backfilled category_id for %d albums", updated)
- except Exception as exc:
- log.warning("init_db: category_id backfill failed: %s", exc)
+    # One-time backfill: populate category_id column from JSON data_json for
+    # rows that were inserted before this column existed.
+    if _category_col_added:
+        try:
+            with get_db() as conn:
+                rows = conn.execute(
+                    "SELECT id, data_json FROM albums WHERE category_id IS NULL"
+                ).fetchall()
+                updated = 0
+                for row in rows:
+                    try:
+                        data = json.loads(row["data_json"])
+                        cat_id = data.get("category_id") if isinstance(data, dict) else None
+                        if cat_id is not None:
+                            conn.execute(
+                                "UPDATE albums SET category_id=? WHERE id=?",
+                                (cat_id, row["id"]),
+                            )
+                            updated += 1
+                    except Exception as row_exc:
+                        log.warning("init_db: skipped backfill for album %s: %s", row["id"], row_exc)
+                conn.commit()
+                log.info("init_db: backfilled category_id for %d albums", updated)
+        except Exception as exc:
+            log.warning("init_db: category_id backfill failed: %s", exc)
 
- _migrate_json_to_db()
+    _migrate_json_to_db()
 
 def backup_db_to_bytes() -> bytes:
  """Safely copy the SQLite DB to bytes using SQLite backup API."""
@@ -388,397 +378,395 @@ def backup_db_to_bytes() -> bytes:
  pass
 
 def _migrate_json_to_db():
- """One-time migration: import data from JSON files into SQLite tables.
+    """One-time migration: import data from JSON files into SQLite tables.
 
- Each section only runs when the corresponding table is empty, so it is
- safe to call on every startup — subsequent calls are effectively no-ops.
- """
- try:
- with get_db() as conn:
- # ---- albums ----
- count = conn.execute("SELECT COUNT(*) FROM albums").fetchone()[0]
- if count == 0 and os.path.isfile(ALBUMS_FILE):
- try:
- data = load_json(ALBUMS_FILE, {})
- for album_id, album_data in data.items():
- conn.execute(
- "INSERT OR IGNORE INTO albums (id, data_json) VALUES (?, ?)",
- (album_id, json.dumps(album_data, ensure_ascii=False)),
- )
- log.info("_migrate_json_to_db: migrated %d albums from %s", len(data), ALBUMS_FILE)
- except Exception as exc:
- log.warning("_migrate_json_to_db: albums migration failed: %s", exc)
+    Each section only runs when the corresponding table is empty, so it is
+    safe to call on every startup — subsequent calls are effectively no-ops.
+    """
+    try:
+        with get_db() as conn:
+            # ---- albums ----
+            count = conn.execute("SELECT COUNT(*) FROM albums").fetchone()[0]
+            if count == 0 and os.path.isfile(ALBUMS_FILE):
+                try:
+                    data = load_json(ALBUMS_FILE, {})
+                    for album_id, album_data in data.items():
+                        conn.execute(
+                            "INSERT OR IGNORE INTO albums (id, data_json) VALUES (?, ?)",
+                            (album_id, json.dumps(album_data, ensure_ascii=False)),
+                        )
+                    log.info("_migrate_json_to_db: migrated %d albums from %s", len(data), ALBUMS_FILE)
+                except Exception as exc:
+                    log.warning("_migrate_json_to_db: albums migration failed: %s", exc)
 
- # ---- bots_config ----
- count = conn.execute("SELECT COUNT(*) FROM bots_config").fetchone()[0]
- if count == 0 and os.path.isfile(BOTS_FILE):
- try:
- data = load_json(BOTS_FILE, [])
- for i, bot in enumerate(data):
- conn.execute(
- "INSERT OR IGNORE INTO bots_config (id, data_json, sort_order) VALUES (?, ?, ?)",
- (bot.get("id", str(i)), json.dumps(bot, ensure_ascii=False), i),
- )
- log.info("_migrate_json_to_db: migrated %d bots from %s", len(data), BOTS_FILE)
- except Exception as exc:
- log.warning("_migrate_json_to_db: bots migration failed: %s", exc)
+            # ---- bots_config ----
+            count = conn.execute("SELECT COUNT(*) FROM bots_config").fetchone()[0]
+            if count == 0 and os.path.isfile(BOTS_FILE):
+                try:
+                    data = load_json(BOTS_FILE, [])
+                    for i, bot in enumerate(data):
+                        conn.execute(
+                            "INSERT OR IGNORE INTO bots_config (id, data_json, sort_order) VALUES (?, ?, ?)",
+                            (bot.get("id", str(i)), json.dumps(bot, ensure_ascii=False), i),
+                        )
+                    log.info("_migrate_json_to_db: migrated %d bots from %s", len(data), BOTS_FILE)
+                except Exception as exc:
+                    log.warning("_migrate_json_to_db: bots migration failed: %s", exc)
 
- # ---- app_config (schedule config) ----
- row = conn.execute("SELECT 1 FROM app_config WHERE key='config'").fetchone()
- if row is None and os.path.isfile(CONFIG_FILE):
- try:
- data = load_json(CONFIG_FILE, {"hour": 0, "minute": 0})
- conn.execute(
- "INSERT OR IGNORE INTO app_config (key, value) VALUES ('config', ?)",
- (json.dumps(data, ensure_ascii=False),),
- )
- log.info("_migrate_json_to_db: migrated config from %s", CONFIG_FILE)
- except Exception as exc:
- log.warning("_migrate_json_to_db: config migration failed: %s", exc)
+            # ---- app_config (schedule config) ----
+            row = conn.execute("SELECT 1 FROM app_config WHERE key='config'").fetchone()
+            if row is None and os.path.isfile(CONFIG_FILE):
+                try:
+                    data = load_json(CONFIG_FILE, {"hour": 0, "minute": 0})
+                    conn.execute(
+                        "INSERT OR IGNORE INTO app_config (key, value) VALUES ('config', ?)",
+                        (json.dumps(data, ensure_ascii=False),),
+                    )
+                    log.info("_migrate_json_to_db: migrated config from %s", CONFIG_FILE)
+                except Exception as exc:
+                    log.warning("_migrate_json_to_db: config migration failed: %s", exc)
 
- # ---- messages flow ----
- row = conn.execute("SELECT 1 FROM app_config WHERE key='messages_flow'").fetchone()
- if row is None and os.path.isfile(MESSAGES_FILE):
- try:
- data = load_json(MESSAGES_FILE, {})
- if data:
- conn.execute(
- "INSERT OR IGNORE INTO app_config (key, value) VALUES ('messages_flow', ?)",
- (json.dumps(data, ensure_ascii=False),),
- )
- log.info("_migrate_json_to_db: migrated messages flow from %s", MESSAGES_FILE)
- except Exception as exc:
- log.warning("_migrate_json_to_db: messages migration failed: %s", exc)
+            # ---- messages flow ----
+            row = conn.execute("SELECT 1 FROM app_config WHERE key='messages_flow'").fetchone()
+            if row is None and os.path.isfile(MESSAGES_FILE):
+                try:
+                    data = load_json(MESSAGES_FILE, {})
+                    if data:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO app_config (key, value) VALUES ('messages_flow', ?)",
+                            (json.dumps(data, ensure_ascii=False),),
+                        )
+                    log.info("_migrate_json_to_db: migrated messages flow from %s", MESSAGES_FILE)
+                except Exception as exc:
+                    log.warning("_migrate_json_to_db: messages migration failed: %s", exc)
 
- # ---- slogans ----
- row = conn.execute("SELECT 1 FROM app_config WHERE key='slogans'").fetchone()
- if row is None and os.path.isfile(SLOGANS_FILE):
- try:
- data = load_json(SLOGANS_FILE, {"enabled": True, "items": []})
- conn.execute(
- "INSERT OR IGNORE INTO app_config (key, value) VALUES ('slogans', ?)",
- (json.dumps(data, ensure_ascii=False),),
- )
- log.info("_migrate_json_to_db: migrated slogans from %s", SLOGANS_FILE)
- except Exception as exc:
- log.warning("_migrate_json_to_db: slogans migration failed: %s", exc)
+            # ---- slogans ----
+            row = conn.execute("SELECT 1 FROM app_config WHERE key='slogans'").fetchone()
+            if row is None and os.path.isfile(SLOGANS_FILE):
+                try:
+                    data = load_json(SLOGANS_FILE, {"enabled": True, "items": []})
+                    conn.execute(
+                        "INSERT OR IGNORE INTO app_config (key, value) VALUES ('slogans', ?)",
+                        (json.dumps(data, ensure_ascii=False),),
+                    )
+                    log.info("_migrate_json_to_db: migrated slogans from %s", SLOGANS_FILE)
+                except Exception as exc:
+                    log.warning("_migrate_json_to_db: slogans migration failed: %s", exc)
 
- # ---- subscribers (global + per-bot) ----
- count = conn.execute("SELECT COUNT(*) FROM subscribers").fetchone()[0]
- if count == 0:
- # Global subscribers.json → bot_id='global'
- if os.path.isfile(SUBS_FILE):
- try:
- subs = load_json(SUBS_FILE, [])
- for uid in subs:
- conn.execute(
- "INSERT OR IGNORE INTO subscribers (bot_id, user_id) VALUES ('global', ?)",
- (int(uid),),
- )
- log.info("_migrate_json_to_db: migrated %d global subscribers", len(subs))
- except Exception as exc:
- log.warning("_migrate_json_to_db: global subscribers migration failed: %s", exc)
- # Per-bot subs_*.json
- for path in glob.glob(os.path.join(_APP_DIR, "subs_*.json")):
- bot_id = os.path.basename(path).removeprefix("subs_").removesuffix(".json")
- try:
- subs = load_json(path, [])
- for uid in subs:
- conn.execute(
- "INSERT OR IGNORE INTO subscribers (bot_id, user_id) VALUES (?, ?)",
- (bot_id, int(uid)),
- )
- log.info("_migrate_json_to_db: migrated %d subscribers for bot %s", len(subs), bot_id)
- except Exception as exc:
- log.warning("_migrate_json_to_db: subs migration for %s failed: %s", bot_id, exc)
+            # ---- subscribers (global + per-bot) ----
+            count = conn.execute("SELECT COUNT(*) FROM subscribers").fetchone()[0]
+            if count == 0:
+                if os.path.isfile(SUBS_FILE):
+                    try:
+                        subs = load_json(SUBS_FILE, [])
+                        for uid in subs:
+                            conn.execute(
+                                "INSERT OR IGNORE INTO subscribers (bot_id, user_id) VALUES ('global', ?)",
+                                (int(uid),),
+                            )
+                        log.info("_migrate_json_to_db: migrated %d global subscribers", len(subs))
+                    except Exception as exc:
+                        log.warning("_migrate_json_to_db: global subscribers migration failed: %s", exc)
+                for path in glob.glob(os.path.join(_APP_DIR, "subs_*.json")):
+                    bot_id = os.path.basename(path).removeprefix("subs_").removesuffix(".json")
+                    try:
+                        subs = load_json(path, [])
+                        for uid in subs:
+                            conn.execute(
+                                "INSERT OR IGNORE INTO subscribers (bot_id, user_id) VALUES (?, ?)",
+                                (bot_id, int(uid)),
+                            )
+                        log.info("_migrate_json_to_db: migrated %d subscribers for bot %s", len(subs), bot_id)
+                    except Exception as exc:
+                        log.warning("_migrate_json_to_db: subs migration for %s failed: %s", bot_id, exc)
 
- # ---- banned users ----
- count = conn.execute("SELECT COUNT(*) FROM banned_users").fetchone()[0]
- if count == 0 and os.path.isfile(BANNED_FILE):
- try:
- banned = load_json(BANNED_FILE, [])
- for uid in banned:
- conn.execute(
- "INSERT OR IGNORE INTO banned_users (user_id) VALUES (?)",
- (int(uid),),
- )
- log.info("_migrate_json_to_db: migrated %d banned users from %s", len(banned), BANNED_FILE)
- except Exception as exc:
- log.warning("_migrate_json_to_db: banned migration failed: %s", exc)
+            # ---- banned users ----
+            count = conn.execute("SELECT COUNT(*) FROM banned_users").fetchone()[0]
+            if count == 0 and os.path.isfile(BANNED_FILE):
+                try:
+                    banned = load_json(BANNED_FILE, [])
+                    for uid in banned:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO banned_users (user_id) VALUES (?)",
+                            (int(uid),),
+                        )
+                    log.info("_migrate_json_to_db: migrated %d banned users from %s", len(banned), BANNED_FILE)
+                except Exception as exc:
+                    log.warning("_migrate_json_to_db: banned migration failed: %s", exc)
 
- conn.commit()
- except Exception as exc:
- log.error("_migrate_json_to_db: unexpected error: %s", exc, exc_info=True)
+            conn.commit()
+    except Exception as exc:
+        log.error("_migrate_json_to_db: unexpected error: %s", exc, exc_info=True)
 
 # ===== DB HELPER FUNCTIONS (replacing JSON file read/write) =====
 
 def db_get_albums() -> dict:
- """Load all albums from SQLite. Returns dict keyed by album_id."""
- try:
- with get_db() as conn:
- rows = conn.execute("SELECT id, data_json FROM albums").fetchall()
- return {row["id"]: json.loads(row["data_json"]) for row in rows}
- except Exception as exc:
- log.error("db_get_albums failed: %s", exc)
- return {}
+    """Load all albums from SQLite. Returns dict keyed by album_id."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute("SELECT id, data_json FROM albums").fetchall()
+            return {row["id"]: json.loads(row["data_json"]) for row in rows}
+    except Exception as exc:
+        log.error("db_get_albums failed: %s", exc)
+        return {}
 
 def db_save_album(album_id: str, album_data: dict):
- """Insert or replace a single album in SQLite.
+    """Insert or replace a single album in SQLite.
 
- Also syncs the denormalized category_id column so category-based
- queries can use the index instead of scanning all JSON blobs.
- """
- cat_id = album_data.get("category_id") if isinstance(album_data, dict) else None
- with get_db() as conn:
- conn.execute(
- "INSERT OR REPLACE INTO albums (id, data_json, category_id) VALUES (?, ?, ?)",
- (album_id, json.dumps(album_data, ensure_ascii=False), cat_id),
- )
- conn.commit()
+    Also syncs the denormalized category_id column so category-based
+    queries can use the index instead of scanning all JSON blobs.
+    """
+    cat_id = album_data.get("category_id") if isinstance(album_data, dict) else None
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO albums (id, data_json, category_id) VALUES (?, ?, ?)",
+            (album_id, json.dumps(album_data, ensure_ascii=False), cat_id),
+        )
+        conn.commit()
 
 def db_get_albums_by_category(cat_id) -> dict:
- """Return only albums belonging to a given category (or uncategorized).
+    """Return only albums belonging to a given category (or uncategorized).
 
- Uses the indexed category_id column instead of loading all albums and
- filtering in Python — O(log n) instead of O(n).
+    Uses the indexed category_id column instead of loading all albums and
+    filtering in Python — O(log n) instead of O(n).
 
- Args:
- cat_id: category id string, or None / "_uncategorized" for albums
- that have no category assigned.
- Returns:
- dict keyed by album_id, same format as db_get_albums().
- """
- try:
- with get_db() as conn:
- if cat_id is None or cat_id == "_uncategorized":
- rows = conn.execute(
- "SELECT id, data_json FROM albums WHERE category_id IS NULL"
- ).fetchall()
- else:
- rows = conn.execute(
- "SELECT id, data_json FROM albums WHERE category_id=?",
- (cat_id,),
- ).fetchall()
- return {row["id"]: json.loads(row["data_json"]) for row in rows}
- except Exception as exc:
- log.error("db_get_albums_by_category failed: %s", exc)
- return {}
+    Args:
+        cat_id: category id string, or None / "_uncategorized" for albums
+            that have no category assigned.
+    Returns:
+        dict keyed by album_id, same format as db_get_albums().
+    """
+    try:
+        with get_db() as conn:
+            if cat_id is None or cat_id == "_uncategorized":
+                rows = conn.execute(
+                    "SELECT id, data_json FROM albums WHERE category_id IS NULL"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, data_json FROM albums WHERE category_id=?",
+                    (cat_id,),
+                ).fetchall()
+            return {row["id"]: json.loads(row["data_json"]) for row in rows}
+    except Exception as exc:
+        log.error("db_get_albums_by_category failed: %s", exc)
+        return {}
 
 def db_delete_album(album_id: str):
- """Delete an album from SQLite."""
- with get_db() as conn:
- conn.execute("DELETE FROM albums WHERE id=?", (album_id,))
- conn.commit()
+    """Delete an album from SQLite."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM albums WHERE id=?", (album_id,))
+        conn.commit()
 
 def db_get_categories() -> list:
- """Return all categories as list of dicts [{id, name, created_at}], sorted by name."""
- try:
- with get_db() as conn:
- rows = conn.execute(
- "SELECT id, name, created_at FROM categories ORDER BY name"
- ).fetchall()
- return [{"id": row["id"], "name": row["name"], "created_at": row["created_at"]} for row in rows]
- except Exception as exc:
- log.error("db_get_categories failed: %s", exc)
- return []
+    """Return all categories as list of dicts [{id, name, created_at}], sorted by name."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, name, created_at FROM categories ORDER BY name"
+            ).fetchall()
+            return [{"id": row["id"], "name": row["name"], "created_at": row["created_at"]} for row in rows]
+    except Exception as exc:
+        log.error("db_get_categories failed: %s", exc)
+        return []
 
 def db_save_category(cat_id: str, name: str):
- """Insert or replace a category."""
- with get_db() as conn:
- conn.execute(
- "INSERT OR REPLACE INTO categories (id, name) VALUES (?, ?)",
- (cat_id, name),
- )
- conn.commit()
+    """Insert or replace a category."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO categories (id, name) VALUES (?, ?)",
+            (cat_id, name),
+        )
+        conn.commit()
 
 def db_delete_category(cat_id: str):
- """Delete a category and remove category_id from its albums."""
- with get_db() as conn:
- conn.execute("DELETE FROM categories WHERE id=?", (cat_id,))
- try:
- rows = conn.execute("SELECT id, data_json FROM albums").fetchall()
- for row in rows:
- data = json.loads(row["data_json"])
- if isinstance(data, dict) and data.get("category_id") == cat_id:
- data["category_id"] = None
- conn.execute(
- "UPDATE albums SET data_json=?, category_id=NULL WHERE id=?",
- (json.dumps(data, ensure_ascii=False), row["id"]),
- )
- except Exception as exc:
- log.warning("db_delete_category: failed to clear album category_ids: %s", exc)
- conn.commit()
+    """Delete a category and remove category_id from its albums."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM categories WHERE id=?", (cat_id,))
+        try:
+            rows = conn.execute("SELECT id, data_json FROM albums").fetchall()
+            for row in rows:
+                data = json.loads(row["data_json"])
+                if isinstance(data, dict) and data.get("category_id") == cat_id:
+                    data["category_id"] = None
+                    conn.execute(
+                        "UPDATE albums SET data_json=?, category_id=NULL WHERE id=?",
+                        (json.dumps(data, ensure_ascii=False), row["id"]),
+                    )
+        except Exception as exc:
+            log.warning("db_delete_category: failed to clear album category_ids: %s", exc)
+        conn.commit()
 
 def db_get_bots() -> list:
- """Load bots config list from SQLite."""
- try:
- with get_db() as conn:
- rows = conn.execute(
- "SELECT data_json FROM bots_config ORDER BY sort_order"
- ).fetchall()
- return [json.loads(row["data_json"]) for row in rows]
- except Exception as exc:
- log.error("db_get_bots failed: %s", exc)
- return []
+    """Load bots config list from SQLite."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT data_json FROM bots_config ORDER BY sort_order"
+            ).fetchall()
+            return [json.loads(row["data_json"]) for row in rows]
+    except Exception as exc:
+        log.error("db_get_bots failed: %s", exc)
+        return []
 
 def db_save_bots(bots: list):
- """Replace the entire bots config list atomically."""
- with get_db() as conn:
- conn.execute("DELETE FROM bots_config")
- for i, bot in enumerate(bots):
- conn.execute(
- "INSERT INTO bots_config (id, data_json, sort_order) VALUES (?, ?, ?)",
- (bot.get("id", str(i)), json.dumps(bot, ensure_ascii=False), i),
- )
- conn.commit()
+    """Replace the entire bots config list atomically."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM bots_config")
+        for i, bot in enumerate(bots):
+            conn.execute(
+                "INSERT INTO bots_config (id, data_json, sort_order) VALUES (?, ?, ?)",
+                (bot.get("id", str(i)), json.dumps(bot, ensure_ascii=False), i),
+            )
+        conn.commit()
 
 def db_get_config() -> dict:
- """Load schedule config {hour, minute} from SQLite."""
- try:
- with get_db() as conn:
- row = conn.execute(
- "SELECT value FROM app_config WHERE key='config'"
- ).fetchone()
- if row:
- return json.loads(row["value"])
- return {"hour": 0, "minute": 0}
- except Exception as exc:
- log.error("db_get_config failed: %s", exc)
- return {"hour": 0, "minute": 0}
+    """Load schedule config {hour, minute} from SQLite."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key='config'"
+            ).fetchone()
+            if row:
+                return json.loads(row["value"])
+            return {"hour": 0, "minute": 0}
+    except Exception as exc:
+        log.error("db_get_config failed: %s", exc)
+        return {"hour": 0, "minute": 0}
 
 def db_save_config(cfg: dict):
- """Save schedule config to SQLite."""
- with get_db() as conn:
- conn.execute(
- "INSERT OR REPLACE INTO app_config (key, value) VALUES ('config', ?)",
- (json.dumps(cfg, ensure_ascii=False),),
- )
- conn.commit()
+    """Save schedule config to SQLite."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES ('config', ?)",
+            (json.dumps(cfg, ensure_ascii=False),),
+        )
+        conn.commit()
 
 def db_get_messages_flow_raw() -> dict:
- """Load raw messages flow dict from SQLite (no migration/defaults applied)."""
- try:
- with get_db() as conn:
- row = conn.execute(
- "SELECT value FROM app_config WHERE key='messages_flow'"
- ).fetchone()
- if row:
- return json.loads(row["value"])
- return {}
- except Exception as exc:
- log.error("db_get_messages_flow_raw failed: %s", exc)
- return {}
+    """Load raw messages flow dict from SQLite (no migration/defaults applied)."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key='messages_flow'"
+            ).fetchone()
+            if row:
+                return json.loads(row["value"])
+            return {}
+    except Exception as exc:
+        log.error("db_get_messages_flow_raw failed: %s", exc)
+        return {}
 
 def db_save_messages_flow(flow: dict):
- """Save messages flow to SQLite."""
- with get_db() as conn:
- conn.execute(
- "INSERT OR REPLACE INTO app_config (key, value) VALUES ('messages_flow', ?)",
- (json.dumps(flow, ensure_ascii=False),),
- )
- conn.commit()
+    """Save messages flow to SQLite."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES ('messages_flow', ?)",
+            (json.dumps(flow, ensure_ascii=False),),
+        )
+        conn.commit()
 
 def db_get_subscribers(bot_id: str) -> list:
- """Load subscriber user_id list for a given bot_id from SQLite."""
- db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
- try:
- with get_db() as conn:
- rows = conn.execute(
- "SELECT user_id FROM subscribers WHERE bot_id=?", (db_key,)
- ).fetchall()
- return [row["user_id"] for row in rows]
- except Exception as exc:
- log.error("db_get_subscribers(%s) failed: %s", bot_id, exc)
- return []
+    """Load subscriber user_id list for a given bot_id from SQLite."""
+    db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT user_id FROM subscribers WHERE bot_id=?", (db_key,)
+            ).fetchall()
+            return [row["user_id"] for row in rows]
+    except Exception as exc:
+        log.error("db_get_subscribers(%s) failed: %s", bot_id, exc)
+        return []
 
 def db_add_subscriber(bot_id: str, user_id: int):
- """Add a subscriber to SQLite (idempotent)."""
- db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
- with get_db() as conn:
- conn.execute(
- "INSERT OR IGNORE INTO subscribers (bot_id, user_id) VALUES (?, ?)",
- (db_key, user_id),
- )
- conn.commit()
+    """Add a subscriber to SQLite (idempotent)."""
+    db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO subscribers (bot_id, user_id) VALUES (?, ?)",
+            (db_key, user_id),
+        )
+        conn.commit()
 
 def db_remove_subscriber(bot_id: str, user_id: int):
- """Remove a subscriber from SQLite."""
- db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
- with get_db() as conn:
- conn.execute(
- "DELETE FROM subscribers WHERE bot_id=? AND user_id=?",
- (db_key, user_id),
- )
- conn.commit()
+    """Remove a subscriber from SQLite."""
+    db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM subscribers WHERE bot_id=? AND user_id=?",
+            (db_key, user_id),
+        )
+        conn.commit()
 
 def db_save_subscribers(bot_id: str, subs: list):
- """Atomically replace the subscriber list for a bot."""
- db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
- with get_db() as conn:
- conn.execute("DELETE FROM subscribers WHERE bot_id=?", (db_key,))
- for uid in subs:
- conn.execute(
- "INSERT INTO subscribers (bot_id, user_id) VALUES (?, ?)",
- (db_key, int(uid)),
- )
- conn.commit()
+    """Atomically replace the subscriber list for a bot."""
+    db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
+    with get_db() as conn:
+        conn.execute("DELETE FROM subscribers WHERE bot_id=?", (db_key,))
+        for uid in subs:
+            conn.execute(
+                "INSERT INTO subscribers (bot_id, user_id) VALUES (?, ?)",
+                (db_key, int(uid)),
+            )
+        conn.commit()
 
 def db_get_all_subscriber_ids() -> set:
- """Return the set of all subscriber user_ids (as strings) across all bots."""
- try:
- with get_db() as conn:
- rows = conn.execute("SELECT DISTINCT user_id FROM subscribers").fetchall()
- return {str(row["user_id"]) for row in rows}
- except Exception as exc:
- log.error("db_get_all_subscriber_ids failed: %s", exc)
- return set()
+    """Return the set of all subscriber user_ids (as strings) across all bots."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute("SELECT DISTINCT user_id FROM subscribers").fetchall()
+            return {str(row["user_id"]) for row in rows}
+    except Exception as exc:
+        log.error("db_get_all_subscriber_ids failed: %s", exc)
+        return set()
 
 def db_get_slogans() -> dict:
- """Load slogans config from SQLite."""
- try:
- with get_db() as conn:
- row = conn.execute(
- "SELECT value FROM app_config WHERE key='slogans'"
- ).fetchone()
- if row:
- return json.loads(row["value"])
- return {"enabled": True, "items": []}
- except Exception as exc:
- log.error("db_get_slogans failed: %s", exc)
- return {"enabled": True, "items": []}
+    """Load slogans config from SQLite."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key='slogans'"
+            ).fetchone()
+            if row:
+                return json.loads(row["value"])
+            return {"enabled": True, "items": []}
+    except Exception as exc:
+        log.error("db_get_slogans failed: %s", exc)
+        return {"enabled": True, "items": []}
 
 def db_save_slogans(data: dict):
- """Save slogans config to SQLite."""
- with get_db() as conn:
- conn.execute(
- "INSERT OR REPLACE INTO app_config (key, value) VALUES ('slogans', ?)",
- (json.dumps(data, ensure_ascii=False),),
- )
- conn.commit()
+    """Save slogans config to SQLite."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES ('slogans', ?)",
+            (json.dumps(data, ensure_ascii=False),),
+        )
+        conn.commit()
 
 def db_get_banned() -> list:
- """Load banned user_id list from SQLite."""
- try:
- with get_db() as conn:
- rows = conn.execute("SELECT user_id FROM banned_users").fetchall()
- return [row["user_id"] for row in rows]
- except Exception as exc:
- log.error("db_get_banned failed: %s", exc)
- return []
+    """Load banned user_id list from SQLite."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute("SELECT user_id FROM banned_users").fetchall()
+            return [row["user_id"] for row in rows]
+    except Exception as exc:
+        log.error("db_get_banned failed: %s", exc)
+        return []
 
 def db_add_ban(user_id: int):
- """Add a user to the ban list (idempotent)."""
- with get_db() as conn:
- conn.execute(
- "INSERT OR IGNORE INTO banned_users (user_id) VALUES (?)", (user_id,)
- )
- conn.commit()
+    """Add a user to the ban list (idempotent)."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO banned_users (user_id) VALUES (?)", (user_id,)
+        )
+        conn.commit()
 
 def db_remove_ban(user_id: int):
- """Remove a user from the ban list."""
- with get_db() as conn:
- conn.execute("DELETE FROM banned_users WHERE user_id=?", (user_id,))
- conn.commit()
+    """Remove a user from the ban list."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM banned_users WHERE user_id=?", (user_id,))
+        conn.commit()
 
 _DEFAULT_EXPIRED_WARNING = (
  "Liên kết đã hết hạn bảo mật (sau 24h). "
@@ -786,139 +774,217 @@ _DEFAULT_EXPIRED_WARNING = (
 )
 
 def db_get_expired_warning_message() -> str:
- """Return the expired-token warning message stored in app_config."""
- try:
- with get_db() as conn:
- row = conn.execute(
- "SELECT value FROM app_config WHERE key='expired_warning_message'"
- ).fetchone()
- if row:
- return row["value"]
- except Exception as exc:
- log.error("db_get_expired_warning_message failed: %s", exc)
- return _DEFAULT_EXPIRED_WARNING
+    """Return the expired-token warning message stored in app_config."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key='expired_warning_message'"
+            ).fetchone()
+            if row:
+                return row["value"]
+    except Exception as exc:
+        log.error("db_get_expired_warning_message failed: %s", exc)
+    return _DEFAULT_EXPIRED_WARNING
 
 def db_save_expired_warning_message(msg: str):
- """Persist the expired-token warning message in app_config."""
- with get_db() as conn:
- conn.execute(
- "INSERT OR REPLACE INTO app_config (key, value) VALUES ('expired_warning_message', ?)",
- (msg,),
- )
- conn.commit()
+    """Persist the expired-token warning message in app_config."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES ('expired_warning_message', ?)",
+            (msg,),
+        )
+        conn.commit()
 
 def db_create_album_token(album_id: str) -> str:
- """Generate a 24-hour access token for an album and store it in album_tokens."""
- token = secrets.token_urlsafe(32)
- expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
- with get_db() as conn:
- conn.execute(
- "INSERT INTO album_tokens (token, album_id, expires_at) VALUES (?, ?, ?)",
- (token, album_id, expires_at),
- )
- conn.commit()
- return token
+    """Generate a 24-hour access token for an album and store it in album_tokens."""
+    token = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO album_tokens (token, album_id, expires_at) VALUES (?, ?, ?)",
+            (token, album_id, expires_at),
+        )
+        conn.commit()
+    return token
 
 def db_validate_album_token(token: str, album_id: str) -> bool:
- """Return True if the token is valid and not expired for the given album_id."""
- try:
- with get_db() as conn:
- row = conn.execute(
- "SELECT expires_at FROM album_tokens WHERE token=? AND album_id=?",
- (token, album_id),
- ).fetchone()
- if not row:
- return False
- expires_at = datetime.fromisoformat(row["expires_at"])
- # Make timezone-aware if naive
- if expires_at.tzinfo is None:
- expires_at = expires_at.replace(tzinfo=timezone.utc)
- return datetime.now(timezone.utc) < expires_at
- except Exception as exc:
- log.error("db_validate_album_token failed: %s", exc)
- return False
+    """Return True if the token is valid and not expired for the given album_id."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT expires_at FROM album_tokens WHERE token=? AND album_id=?",
+                (token, album_id),
+            ).fetchone()
+            if not row:
+                return False
+            expires_at = datetime.fromisoformat(row["expires_at"])
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            return datetime.now(timezone.utc) < expires_at
+    except Exception as exc:
+        log.error("db_validate_album_token failed: %s", exc)
+        return False
 
 def db_cleanup_expired_tokens():
- """Remove expired tokens from the album_tokens table."""
- try:
- with get_db() as conn:
- conn.execute(
- "DELETE FROM album_tokens WHERE expires_at <= ?",
- (datetime.now(timezone.utc).isoformat(),),
- )
- conn.commit()
- except Exception as exc:
- log.error("db_cleanup_expired_tokens failed: %s", exc)
+    """Remove expired tokens from the album_tokens table."""
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "DELETE FROM album_tokens WHERE expires_at <= ?",
+                (datetime.now(timezone.utc).isoformat(),),
+            )
+            conn.commit()
+    except Exception as exc:
+        log.error("db_cleanup_expired_tokens failed: %s", exc)
 
 def _validate_telegram_init_data(init_data: str, bot_token: str) -> bool:
- """Verify Telegram WebApp initData using HMAC-SHA256 as per official docs."""
- import hmac as _hmac
- import hashlib as _hashlib
- from urllib.parse import parse_qsl as _parse_qsl
+    """Verify Telegram WebApp initData using HMAC-SHA256 as per official docs."""
+    import hmac as _hmac
+    import hashlib as _hashlib
+    from urllib.parse import parse_qsl as _parse_qsl
 
- try:
- params = dict(_parse_qsl(init_data, keep_blank_values=True))
- received_hash = params.pop("hash", "")
- if not received_hash:
- return False
- data_check_string = "\n".join(
- f"{k}={v}" for k, v in sorted(params.items())
- )
- secret_key = _hmac.new(b"WebAppData", bot_token.encode(), _hashlib.sha256).digest()
- computed_hash = _hmac.new(secret_key, data_check_string.encode(), _hashlib.sha256).hexdigest()
- return _hmac.compare_digest(computed_hash, received_hash)
- except Exception as exc:
- log.error("_validate_telegram_init_data failed: %s", exc)
- return False
+    try:
+        params = dict(_parse_qsl(init_data, keep_blank_values=True))
+        received_hash = params.pop("hash", "")
+        if not received_hash:
+            return False
+        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(params.items()))
+        secret_key = _hmac.new(b"WebAppData", bot_token.encode(), _hashlib.sha256).digest()
+        computed_hash = _hmac.new(secret_key, data_check_string.encode(), _hashlib.sha256).hexdigest()
+        return _hmac.compare_digest(computed_hash, received_hash)
+    except Exception as exc:
+        log.error("_validate_telegram_init_data failed: %s", exc)
+        return False
 
 def db_export_as_json() -> dict:
- """Export all DB-stored data as a dict mapping filename → JSON bytes.
- Used by the backup function to produce human-readable JSON exports."""
- result = {}
- try:
- albums = db_get_albums()
- result["albums.json"] = json.dumps(albums, indent=2, ensure_ascii=False).encode("utf-8")
- except Exception:
- pass
- try:
- bots = db_get_bots()
- result["bots.json"] = json.dumps(bots, indent=2, ensure_ascii=False).encode("utf-8")
- except Exception:
- pass
- try:
- cfg = db_get_config()
- result["config.json"] = json.dumps(cfg, indent=2, ensure_ascii=False).encode("utf-8")
- except Exception:
- pass
- try:
- flow = db_get_messages_flow_raw()
- result["messages.json"] = json.dumps(flow, indent=2, ensure_ascii=False).encode("utf-8")
- except Exception:
- pass
- try:
- slogans = db_get_slogans()
- result["slogans.json"] = json.dumps(slogans, indent=2, ensure_ascii=False).encode("utf-8")
- except Exception:
- pass
- try:
- # Group subscribers by bot_id
- with get_db() as conn:
- rows = conn.execute("SELECT bot_id, user_id FROM subscribers ORDER BY bot_id").fetchall()
- subs_by_bot: dict = {}
- for row in rows:
- subs_by_bot.setdefault(row["bot_id"], []).append(row["user_id"])
- global_subs = subs_by_bot.pop("global", [])
- result["subscribers.json"] = json.dumps(global_subs, indent=2, ensure_ascii=False).encode("utf-8")
- for bid, subs in subs_by_bot.items():
- result[f"subs_{bid}.json"] = json.dumps(subs, indent=2, ensure_ascii=False).encode("utf-8")
- except Exception:
- pass
- try:
- banned = db_get_banned()
- result["banned.json"] = json.dumps(banned, indent=2, ensure_ascii=False).encode("utf-8")
- except Exception:
- pass
- return result
+    """Export the current SQLite-backed state as a JSON-compatible dict."""
+    try:
+        result = {}
+        result["albums.json"] = db_get_albums()
+        result["bots.json"] = db_get_bots()
+        result["config.json"] = db_get_config()
+        result["messages.json"] = db_get_messages_flow()
+        result["slogans.json"] = db_get_slogans()
+        result["subscribers.json"] = sorted(db_get_subscribers("global"), key=str)
+        result["banned.json"] = db_get_banned()
+        return result
+    except Exception as exc:
+        log.error("db_export_as_json failed: %s", exc)
+        return {}
+
+# ===== LEGACY HELPERS =====
+
+def total_posts(albums):
+    return sum(len((a or {}).get("posts", [])) for a in albums.values())
+
+def subs_file(bot_id: str) -> str:
+    return os.path.join(_APP_DIR, f"subs_{bot_id}.json")
+
+def increment_bot_stat(bot_id: str, field: str, count: int = 1):
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO bot_analytics (bot_id, %s) VALUES (?, ?) ON CONFLICT(bot_id) DO UPDATE SET %s=%s+?" % (field, field, field),
+                (bot_id, count, count),
+            )
+            conn.commit()
+    except Exception as exc:
+        log.warning("increment_bot_stat failed: %s", exc)
+
+
+def get_all_analytics() -> list:
+    """Return analytics rows for all bots, merged with bot names from DB."""
+    bots_cfg = db_get_bots()
+    name_map = {b.get("id", ""): b.get("name", "?") for b in bots_cfg}
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT bot_id, starts_count, messages_sent, interactions_count, replies_count, updated_at FROM bot_analytics ORDER BY bot_id"
+            ).fetchall()
+            result = []
+            seen = set()
+            for row in rows:
+                seen.add(row["bot_id"])
+                result.append({
+                    "bot_id": row["bot_id"],
+                    "name": name_map.get(row["bot_id"], row["bot_id"]),
+                    "starts_count": row["starts_count"],
+                    "messages_sent": row["messages_sent"],
+                    "interactions_count": row["interactions_count"],
+                    "replies_count": row["replies_count"],
+                    "updated_at": row["updated_at"],
+                })
+            for bot in bots_cfg:
+                if bot.get("id", "") not in seen:
+                    result.append({
+                        "bot_id": bot.get("id", ""),
+                        "name": bot.get("name", "?"),
+                        "starts_count": 0,
+                        "messages_sent": 0,
+                        "interactions_count": 0,
+                        "replies_count": 0,
+                        "updated_at": None,
+                    })
+            return result
+    except Exception as exc:
+        log.error("get_all_analytics failed: %s", exc)
+        return []
+
+
+def increment_messages_sent(bot_id: str, count: int):
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO bot_analytics (bot_id, messages_sent) VALUES (?, ?) ON CONFLICT(bot_id) DO UPDATE SET messages_sent=messages_sent+?",
+                (bot_id, count, count),
+            )
+            conn.commit()
+    except Exception as exc:
+        log.warning("increment_messages_sent failed: %s", exc)
+
+
+def get_messages_flow() -> dict:
+    """Return messages flow with defaults guaranteed."""
+    flow = db_get_messages_flow_raw()
+    if not isinstance(flow, dict):
+        return {"start": {"text": "Chào mừng bạn! 👋", "buttons": []}}
+    if "start" not in flow:
+        flow["start"] = {"text": "Chào mừng bạn! 👋", "buttons": []}
+    return flow
+
+
+def _backup_files_to_zip(zf: zipfile.ZipFile):
+    """Add DB-exported JSON data to a backup zip file."""
+    for name, content in db_export_as_json().items():
+        zf.writestr(name, json.dumps(content, indent=2, ensure_ascii=False))
+
+
+def _cleanup_old_backups(keep: int = MAX_BACKUPS):
+    """Remove older backup zip files, keeping the newest `keep`."""
+    try:
+        files = sorted(
+            [os.path.join(BACKUP_DIR, f) for f in os.listdir(BACKUP_DIR) if f.startswith("backup_") and f.endswith(".zip")],
+            key=os.path.getmtime,
+            reverse=True,
+        )
+        for old in files[keep:]:
+            try:
+                os.remove(old)
+            except OSError:
+                pass
+    except Exception as exc:
+        log.warning("_cleanup_old_backups failed: %s", exc)
+
+
+def run_daily_backup():
+    """Package data into a timestamped zip in static/backups/."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    backup_filename = f"backup_{timestamp}.zip"
+    backup_path = os.path.join(BACKUP_DIR, backup_filename)
+    with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        _backup_files_to_zip(zf)
+    _cleanup_old_backups(MAX_BACKUPS)
+    return f"/static/backups/{backup_filename}"
 
 # Broadcast task state (module-level so it persists across requests)
 _broadcast_lock = threading.Lock()
@@ -954,409 +1020,357 @@ class _BotManagerStub:
 _bot_manager: _BotManagerStub = _BotManagerStub()
 
 def total_posts(albums):
- return sum(len(a.get("posts", [])) for a in albums.values() if isinstance(a, dict))
+    return sum(len(a.get("posts", [])) for a in albums.values() if isinstance(a, dict))
 
 def subs_file(bot_id: str) -> str:
- """Return per-bot subscriber file path, falling back to global file."""
- if not bot_id or bot_id == "env_default":
- return SUBS_FILE
- return os.path.join(_APP_DIR, f"subs_{bot_id}.json")
+    """Return per-bot subscriber file path, falling back to global file."""
+    if not bot_id or bot_id == "env_default":
+        return SUBS_FILE
+    return os.path.join(_APP_DIR, f"subs_{bot_id}.json")
 
 def increment_bot_stat(bot_id: str, field: str, count: int = 1):
- """Atomically increment a stat field in bot_analytics table."""
- valid_fields = ("starts_count", "messages_sent", "interactions_count", "replies_count")
- if field not in valid_fields or count <= 0:
- return
- # Static SQL per column — avoids dynamic SQL fragments (Bandit B608) while
- # keeping the same semantics as the previous f-string query.
- _sql = {
- "starts_count": (
- """INSERT INTO bot_analytics (bot_id, starts_count, updated_at)
- VALUES (?, ?, CURRENT_TIMESTAMP)
- ON CONFLICT(bot_id) DO UPDATE SET
- starts_count = starts_count + excluded.starts_count,
- updated_at = CURRENT_TIMESTAMP""",
- (bot_id, count),
- ),
- "messages_sent": (
- """INSERT INTO bot_analytics (bot_id, messages_sent, updated_at)
- VALUES (?, ?, CURRENT_TIMESTAMP)
- ON CONFLICT(bot_id) DO UPDATE SET
- messages_sent = messages_sent + excluded.messages_sent,
- updated_at = CURRENT_TIMESTAMP""",
- (bot_id, count),
- ),
- "interactions_count": (
- """INSERT INTO bot_analytics (bot_id, interactions_count, updated_at)
- VALUES (?, ?, CURRENT_TIMESTAMP)
- ON CONFLICT(bot_id) DO UPDATE SET
- interactions_count = interactions_count + excluded.interactions_count,
- updated_at = CURRENT_TIMESTAMP""",
- (bot_id, count),
- ),
- "replies_count": (
- """INSERT INTO bot_analytics (bot_id, replies_count, updated_at)
- VALUES (?, ?, CURRENT_TIMESTAMP)
- ON CONFLICT(bot_id) DO UPDATE SET
- replies_count = replies_count + excluded.replies_count,
- updated_at = CURRENT_TIMESTAMP""",
- (bot_id, count),
- ),
- }
- sql, params = _sql[field]
- try:
- with get_db() as conn:
- conn.execute(sql, params)
- conn.commit()
- except Exception as e:
- log.warning("increment_bot_stat failed for %s.%s: %s", bot_id, field, e)
+    """Atomically increment a stat field in bot_analytics table."""
+    valid_fields = ("starts_count", "messages_sent", "interactions_count", "replies_count")
+    if field not in valid_fields or count <= 0:
+        return
+    _sql = {
+        "starts_count": (
+            """INSERT INTO bot_analytics (bot_id, starts_count, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(bot_id) DO UPDATE SET
+            starts_count = starts_count + excluded.starts_count,
+            updated_at = CURRENT_TIMESTAMP""",
+            (bot_id, count),
+        ),
+        "messages_sent": (
+            """INSERT INTO bot_analytics (bot_id, messages_sent, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(bot_id) DO UPDATE SET
+            messages_sent = messages_sent + excluded.messages_sent,
+            updated_at = CURRENT_TIMESTAMP""",
+            (bot_id, count),
+        ),
+        "interactions_count": (
+            """INSERT INTO bot_analytics (bot_id, interactions_count, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(bot_id) DO UPDATE SET
+            interactions_count = interactions_count + excluded.interactions_count,
+            updated_at = CURRENT_TIMESTAMP""",
+            (bot_id, count),
+        ),
+        "replies_count": (
+            """INSERT INTO bot_analytics (bot_id, replies_count, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(bot_id) DO UPDATE SET
+            replies_count = replies_count + excluded.replies_count,
+            updated_at = CURRENT_TIMESTAMP""",
+            (bot_id, count),
+        ),
+    }
+    sql, params = _sql[field]
+    try:
+        with get_db() as conn:
+            conn.execute(sql, params)
+            conn.commit()
+    except Exception as e:
+        log.warning("increment_bot_stat failed for %s.%s: %s", bot_id, field, e)
 
 def get_all_analytics() -> list:
- """Return analytics rows for all bots, merged with bot names from DB."""
- bots_cfg = db_get_bots()
- name_map = {b.get("id", ""): b.get("name", "?") for b in bots_cfg}
- if BOT_TOKEN and "env_default" not in name_map:
- name_map["env_default"] = "Default Bot"
- try:
- with get_db() as conn:
- rows = conn.execute(
- "SELECT bot_id, starts_count, messages_sent, interactions_count, replies_count FROM bot_analytics"
- ).fetchall()
- analytics = []
- seen = set()
- for row in rows:
- bid = row["bot_id"]
- seen.add(bid)
- analytics.append({
- "bot_id": bid,
- "name": name_map.get(bid, bid),
- "starts_count": row["starts_count"],
- "messages_sent": row["messages_sent"],
- "interactions_count": row["interactions_count"],
- "replies_count": row["replies_count"],
- })
- # Add bots with no analytics yet
- for bid, bname in name_map.items():
- if bid not in seen:
- analytics.append({
- "bot_id": bid,
- "name": bname,
- "starts_count": 0,
- "messages_sent": 0,
- "interactions_count": 0,
- "replies_count": 0,
- })
- return analytics
- except Exception as e:
- log.warning("get_all_analytics failed: %s", e)
- return []
+    """Return analytics rows for all bots, merged with bot names from DB."""
+    bots_cfg = db_get_bots()
+    name_map = {b.get("id", ""): b.get("name", "?") for b in bots_cfg}
+    if BOT_TOKEN and "env_default" not in name_map:
+        name_map["env_default"] = "Default Bot"
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT bot_id, starts_count, messages_sent, interactions_count, replies_count FROM bot_analytics"
+            ).fetchall()
+            analytics = []
+            seen = set()
+            for row in rows:
+                bid = row["bot_id"]
+                seen.add(bid)
+                analytics.append({
+                    "bot_id": bid,
+                    "name": name_map.get(bid, bid),
+                    "starts_count": row["starts_count"],
+                    "messages_sent": row["messages_sent"],
+                    "interactions_count": row["interactions_count"],
+                    "replies_count": row["replies_count"],
+                })
+            for bid, bname in name_map.items():
+                if bid not in seen:
+                    analytics.append({
+                        "bot_id": bid,
+                        "name": bname,
+                        "starts_count": 0,
+                        "messages_sent": 0,
+                        "interactions_count": 0,
+                        "replies_count": 0,
+                    })
+            return analytics
+    except Exception as e:
+        log.warning("get_all_analytics failed: %s", e)
+        return []
 
 def increment_messages_sent(bot_id: str, count: int):
- """Increment the messages-sent counter for a bot in the analytics DB."""
- if count <= 0:
- return
- increment_bot_stat(bot_id, "messages_sent", count)
+    """Increment the messages-sent counter for a bot in the analytics DB."""
+    if count <= 0:
+        return
+    increment_bot_stat(bot_id, "messages_sent", count)
 
 _DEFAULT_ALBUM_END_NODE = {
- "text": "Bạn đã xem xong album! 😊\nNhấn nút bên dưới để quay lại danh sách.",
- "buttons": [{"label": "🔙 Quay lại danh sách Album", "type": "open_album_list", "value": "menu"}],
+    "text": "Bạn đã xem xong album! 😊\nNhấn nút bên dưới để quay lại danh sách.",
+    "buttons": [{"label": "🔙 Quay lại danh sách Album", "type": "open_album_list", "value": "menu"}],
 }
 
 def get_messages_flow() -> dict:
- """Load message flow from SQLite in node-based format.
- Automatically migrates from the old flat {start_text, buttons[]} format."""
- data = db_get_messages_flow_raw()
- # Detect old flat format (has "start_text" key) – may be encountered when
- # migrating from a JSON file that stored the old format.
- if isinstance(data, dict) and "start_text" in data:
- old_buttons = data.get("buttons", [])
- new_buttons = []
- for btn in old_buttons:
- label = str(btn.get("text", "")).strip()
- url = str(btn.get("url") or "").strip()
- cb = str(btn.get("callback_data") or "").strip()
- if label and url:
- new_buttons.append({"label": label, "type": "url", "value": url})
- elif label and cb:
- new_buttons.append({"label": label, "type": "node", "value": cb})
- flow = {"start": {"text": data.get("start_text", "Chào mừng bạn! 👋"), "buttons": new_buttons}}
- db_save_messages_flow(flow)
- return flow
- if not isinstance(data, dict) or not data:
- return {"start": {"text": "Chào mừng bạn! 👋", "buttons": []},
- "album_end": dict(_DEFAULT_ALBUM_END_NODE)}
- if "start" not in data:
- data["start"] = {"text": "Chào mừng bạn! 👋", "buttons": []}
- if "album_end" not in data:
- data["album_end"] = dict(_DEFAULT_ALBUM_END_NODE)
- return data
+    """Load message flow from SQLite in node-based format.
+    Automatically migrates from the old flat {start_text, buttons[]} format."""
+    data = db_get_messages_flow_raw()
+    if isinstance(data, dict) and "start_text" in data:
+        old_buttons = data.get("buttons", [])
+        new_buttons = []
+        for btn in old_buttons:
+            label = str(btn.get("text", "")).strip()
+            url = str(btn.get("url") or "").strip()
+            cb = str(btn.get("callback_data") or "").strip()
+            if label and url:
+                new_buttons.append({"label": label, "type": "url", "value": url})
+            elif label and cb:
+                new_buttons.append({"label": label, "type": "node", "value": cb})
+        flow = {"start": {"text": data.get("start_text", "Chào mừng bạn! 👋"), "buttons": new_buttons}}
+        db_save_messages_flow(flow)
+        return flow
+    if not isinstance(data, dict) or not data:
+        return {"start": {"text": "Chào mừng bạn! 👋", "buttons": []}, "album_end": dict(_DEFAULT_ALBUM_END_NODE)}
+    if "start" not in data:
+        data["start"] = {"text": "Chào mừng bạn! 👋", "buttons": []}
+    if "album_end" not in data:
+        data["album_end"] = dict(_DEFAULT_ALBUM_END_NODE)
+    return data
 
 def _backup_files_to_zip(zf: zipfile.ZipFile):
- """Write all data into a ZipFile: SQLite DB + JSON exports of every table."""
- # Export DB tables as human-readable JSON files
- for fname, data_bytes in db_export_as_json().items():
- zf.writestr(fname, data_bytes)
- # Include the raw SQLite database for a full binary restore
- if os.path.exists(DB_FILE):
- try:
- zf.writestr(os.path.basename(DB_FILE), backup_db_to_bytes())
- except Exception as e:
- log.warning(f"Could not backup SQLite DB: {e}")
-
-# ===== AUTH HELPERS =====
+    """Write all data into a ZipFile: SQLite DB + JSON exports of every table."""
+    for fname, data_bytes in db_export_as_json().items():
+        zf.writestr(fname, data_bytes)
+    if os.path.exists(DB_FILE):
+        try:
+            zf.writestr(os.path.basename(DB_FILE), backup_db_to_bytes())
+        except Exception as e:
+            log.warning(f"Could not backup SQLite DB: {e}")
 
 def login_required(f):
- @wraps(f)
- def decorated(*args, **kwargs):
- if not session.get("logged_in"):
- return redirect(url_for("login", next=request.path))
- return f(*args, **kwargs)
- return decorated
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login", next=request.path))
+        return f(*args, **kwargs)
+    return decorated
 
 def owner_required(f):
- @wraps(f)
- def decorated(*args, **kwargs):
- if not session.get("logged_in"):
- return redirect(url_for("login", next=request.path))
- if session.get("role") != "owner":
- return jsonify({"ok": False, "error": "Không có quyền thực hiện thao tác này"}), 403
- return f(*args, **kwargs)
- return decorated
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login", next=request.path))
+        if session.get("role") != "owner":
+            return jsonify({"ok": False, "error": "Không có quyền thực hiện thao tác này"}), 403
+        return f(*args, **kwargs)
+    return decorated
 
 # ===== LOCAL STORAGE HELPERS =====
 
 def save_file_locally(file_stream, filename: str, file_type: str) -> str:
- """Save an uploaded file to the local static/uploads directory.
+    """Save an uploaded file to the local static/uploads directory.
 
- Returns the URL path (e.g. /static/uploads/images/abc123.jpg).
- """
- ext = os.path.splitext(filename)[1].lower() or (".mp4" if file_type == "video" else ".jpg")
- unique_name = f"{uuid.uuid4().hex}{ext}"
- if file_type == "video":
- save_dir = UPLOAD_VIDEOS_DIR
- else:
- save_dir = UPLOAD_IMAGES_DIR
- save_path = os.path.join(save_dir, unique_name)
- with open(save_path, "wb") as f:
- f.write(file_stream.read())
- return f"/static/uploads/{'videos' if file_type == 'video' else 'images'}/{unique_name}"
+    Returns the URL path (e.g. /static/uploads/images/abc123.jpg).
+    """
+    ext = os.path.splitext(filename)[1].lower() or (".mp4" if file_type == "video" else ".jpg")
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    if file_type == "video":
+        save_dir = UPLOAD_VIDEOS_DIR
+    else:
+        save_dir = UPLOAD_IMAGES_DIR
+    save_path = os.path.join(save_dir, unique_name)
+    with open(save_path, "wb") as f:
+        f.write(file_stream.read())
+    return f"/static/uploads/{'videos' if file_type == 'video' else 'images'}/{unique_name}"
 
 def process_video_to_hls(input_video_path: str, output_dir: str) -> str:
- """Convert a video file to HLS format using FFmpeg.
+    """Convert a video file to HLS format using FFmpeg.
 
- Creates index.m3u8 and .ts segment files in output_dir.
- Returns the URL path to the .m3u8 playlist file, or raises RuntimeError on failure.
- """
- os.makedirs(output_dir, exist_ok=True)
- m3u8_path = os.path.join(output_dir, "index.m3u8")
- cmd = [
- "ffmpeg", "-y",
- "-i", input_video_path,
- "-profile:v", "baseline",
- "-level", "3.0",
- "-s", "640x360",
- "-start_number", "0",
- "-hls_time", "10",
- "-hls_list_size", "0",
- "-f", "hls",
- m3u8_path,
- ]
- try:
- subprocess.run(cmd, capture_output=True, check=True, timeout=300)
- except subprocess.CalledProcessError as exc:
- log.error(f"FFmpeg HLS conversion failed: {exc.stderr.decode(errors='replace')}")
- raise RuntimeError("FFmpeg conversion failed") from exc
- except FileNotFoundError:
- log.warning("ffmpeg not found – serving original video without HLS conversion")
- raise RuntimeError("ffmpeg not installed")
- # Construct URL from known components to avoid platform-specific path issues
- file_id = os.path.basename(output_dir)
- return f"/static/uploads/videos/{file_id}/index.m3u8"
+    Creates index.m3u8 and .ts segment files in output_dir.
+    Returns the URL path to the .m3u8 playlist file, or raises RuntimeError on failure.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    m3u8_path = os.path.join(output_dir, "index.m3u8")
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", input_video_path,
+        "-profile:v", "baseline",
+        "-level", "3.0",
+        "-s", "640x360",
+        "-start_number", "0",
+        "-hls_time", "10",
+        "-hls_list_size", "0",
+        "-f", "hls",
+        m3u8_path,
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, check=True, timeout=300)
+    except subprocess.CalledProcessError as exc:
+        log.error(f"FFmpeg HLS conversion failed: {exc.stderr.decode(errors='replace')}")
+        raise RuntimeError("FFmpeg conversion failed") from exc
+    except FileNotFoundError:
+        log.warning("ffmpeg not found – serving original video without HLS conversion")
+        raise RuntimeError("ffmpeg not installed")
+    file_id = os.path.basename(output_dir)
+    return f"/static/uploads/videos/{file_id}/index.m3u8"
 
-# Maximum number of backup files to keep on disk.
-# When a new backup is created, older files beyond this limit are deleted automatically.
 MAX_BACKUPS = 3
 
 def _cleanup_old_backups(keep: int = MAX_BACKUPS):
- """Keep only the `keep` most recent backup zip files; delete the rest."""
- try:
- files = []
- for fname in os.listdir(BACKUP_DIR):
- if fname.startswith("backup_") and fname.endswith(".zip"):
- fpath = os.path.join(BACKUP_DIR, fname)
- files.append((os.path.getmtime(fpath), fpath, fname))
- # Newest first
- files.sort(reverse=True)
- for _mtime, fpath, fname in files[keep:]:
- try:
- os.remove(fpath)
- log.info("Backup cleanup: deleted old %s", fname)
- except OSError as exc:
- log.warning("Backup cleanup: could not delete %s: %s", fname, exc)
- except Exception as exc:
- log.warning("Backup cleanup failed: %s", exc)
+    """Keep only the `keep` most recent backup zip files; delete the rest."""
+    try:
+        files = []
+        for fname in os.listdir(BACKUP_DIR):
+            if fname.startswith("backup_") and fname.endswith(".zip"):
+                fpath = os.path.join(BACKUP_DIR, fname)
+                files.append((os.path.getmtime(fpath), fpath, fname))
+        files.sort(reverse=True)
+        for _mtime, fpath, fname in files[keep:]:
+            try:
+                os.remove(fpath)
+                log.info("Backup cleanup: deleted old %s", fname)
+            except OSError as exc:
+                log.warning("Backup cleanup: could not delete %s: %s", fname, exc)
+    except Exception as exc:
+        log.warning("Backup cleanup failed: %s", exc)
 
 def run_daily_backup():
- """Package data into a timestamped zip in static/backups/ and keep only
- the MAX_BACKUPS most recent ones (older are auto-deleted)."""
- timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
- backup_filename = f"backup_{timestamp}.zip"
- backup_path = os.path.join(BACKUP_DIR, backup_filename)
+    """Package data into a timestamped zip in static/backups/ and keep only
+    the MAX_BACKUPS most recent ones (older are auto-deleted)."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    backup_filename = f"backup_{timestamp}.zip"
+    backup_path = os.path.join(BACKUP_DIR, backup_filename)
+    with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        _backup_files_to_zip(zf)
+    log.info("Backup saved locally: %s (%d bytes)", backup_path, os.path.getsize(backup_path))
+    _cleanup_old_backups(MAX_BACKUPS)
+    return f"/static/backups/{backup_filename}"
 
- # Build zip
- with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
- _backup_files_to_zip(zf)
-
- log.info("Backup saved locally: %s (%d bytes)", backup_path, os.path.getsize(backup_path))
-
- # Auto-cleanup: keep only the latest MAX_BACKUPS files
- _cleanup_old_backups(MAX_BACKUPS)
-
- return f"/static/backups/{backup_filename}"
-
-# ===== FLASK ROUTES =====
-
-@app.route("/login", methods=["GET", "POST"])
 def login():
- error = None
- if request.method == "POST":
- username = request.form.get("username", "").strip()
- password = request.form.get("password", "").strip()
- # Use constant-time comparison to prevent timing attacks
- is_owner = (secrets.compare_digest(username, OWNER_USER) and
- secrets.compare_digest(password, OWNER_PASS))
- is_manager = (secrets.compare_digest(username, MANAGER_USER) and
- secrets.compare_digest(password, MANAGER_PASS))
- if is_owner or is_manager:
- session["logged_in"] = True
- session["role"] = "owner" if is_owner else "manager"
- session["username"] = username
- # Validate next_url to prevent open redirect: only allow relative paths
- next_url = request.form.get("next", "") or request.args.get("next", "")
- if next_url and next_url.startswith("/") and not next_url.startswith("//"):
- return redirect(next_url)
- return redirect("/")
- else:
- error = "Sai tên đăng nhập hoặc mật khẩu!"
- return render_template("login.html", error=error)
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+        is_owner = (secrets.compare_digest(username, OWNER_USER) and
+                    secrets.compare_digest(password, OWNER_PASS))
+        is_manager = (secrets.compare_digest(username, MANAGER_USER) and
+                      secrets.compare_digest(password, MANAGER_PASS))
+        if is_owner or is_manager:
+            session["logged_in"] = True
+            session["role"] = "owner" if is_owner else "manager"
+            session["username"] = username
+            next_url = request.form.get("next", "") or request.args.get("next", "")
+            if next_url and next_url.startswith("/") and not next_url.startswith("//"):
+                return redirect(next_url)
+            return redirect("/")
+        else:
+            error = "Sai tên đăng nhập hoặc mật khẩu!"
+    return render_template("login.html", error=error)
 
 @app.route("/logout")
 def logout():
- session.clear()
- return redirect(url_for("login"))
+    session.clear()
+    return redirect(url_for("login"))
 
 @app.route("/")
 @login_required
 def index():
- all_albums = db_get_albums()
- subs = db_get_subscribers("global")
- bots = db_get_bots()
- messages_cfg = get_messages_flow()
- cfg = db_get_config()
- slogans = db_get_slogans()
- active_album = request.args.get("album", "")
- # ID stats from SQLite
- id_stats = {"total": 0, "active": 0, "blocked": 0, "invalid": 0, "unknown": 0}
- try:
- with get_db() as conn:
- for row in conn.execute(
- "SELECT status, COUNT(*) as cnt FROM telegram_ids GROUP BY status"
- ):
- id_stats[row["status"]] = row["cnt"]
- id_stats["total"] += row["cnt"]
- except Exception:
- pass
- # Paginate albums: 20 per page
- ALBUMS_PER_PAGE = 20
- sorted_keys = sorted(
- all_albums.keys(),
- key=lambda k: (all_albums[k].get("created_at", "") if isinstance(all_albums.get(k), dict) else "", k),
- reverse=True,
- )
- total_albums = len(sorted_keys)
- total_pages = max(1, (total_albums + ALBUMS_PER_PAGE - 1) // ALBUMS_PER_PAGE)
- try:
- page = max(1, min(int(request.args.get("page", 1)), total_pages))
- except (ValueError, TypeError):
- page = 1
- start = (page - 1) * ALBUMS_PER_PAGE
- end = start + ALBUMS_PER_PAGE
- paginated_keys = sorted_keys[start:end]
- albums = {k: all_albums[k] for k in paginated_keys}
- return render_template("index.html", albums=albums, subs=subs,
- active_album=active_album, total_posts=total_posts(all_albums),
- role=session.get("role", ""), username=session.get("username", ""),
- bots=bots, messages_cfg=messages_cfg, cfg=cfg, slogans=slogans,
- id_stats=id_stats, page=page, total_pages=total_pages,
- total_albums=total_albums,
- categories=db_get_categories(),
- expired_warning_message=db_get_expired_warning_message())
+    all_albums = db_get_albums()
+    subs = db_get_subscribers("global")
+    bots = db_get_bots()
+    messages_cfg = get_messages_flow()
+    cfg = db_get_config()
+    slogans = db_get_slogans()
+    active_album = request.args.get("album", "")
+    id_stats = {"total": 0, "active": 0, "blocked": 0, "invalid": 0, "unknown": 0}
+    try:
+        with get_db() as conn:
+            for row in conn.execute("SELECT status, COUNT(*) as cnt FROM telegram_ids GROUP BY status"):
+                id_stats[row["status"]] = row["cnt"]
+                id_stats["total"] += row["cnt"]
+    except Exception:
+        pass
+    ALBUMS_PER_PAGE = 20
+    sorted_keys = sorted(all_albums.keys(), key=lambda k: (all_albums[k].get("created_at", "") if isinstance(all_albums.get(k), dict) else "", k), reverse=True)
+    total_albums = len(sorted_keys)
+    total_pages = max(1, (total_albums + ALBUMS_PER_PAGE - 1) // ALBUMS_PER_PAGE)
+    try:
+        page = max(1, min(int(request.args.get("page", 1)), total_pages))
+    except (ValueError, TypeError):
+        page = 1
+    start = (page - 1) * ALBUMS_PER_PAGE
+    end = start + ALBUMS_PER_PAGE
+    paginated_keys = sorted_keys[start:end]
+    albums = {k: all_albums[k] for k in paginated_keys}
+    return render_template("index.html", albums=albums, subs=subs, active_album=active_album, total_posts=total_posts(all_albums), role=session.get("role", ""), username=session.get("username", ""), bots=bots, messages_cfg=messages_cfg, cfg=cfg, slogans=slogans, id_stats=id_stats, page=page, total_pages=total_pages, total_albums=total_albums, categories=db_get_categories(), expired_warning_message=db_get_expired_warning_message())
 
 # --- Album management ---
 
 @app.route("/albums/create", methods=["POST"])
 @login_required
 def create_album():
- title = request.form.get("title", "").strip()
- description = request.form.get("description", "").strip()
- category_id = request.form.get("category_id", "").strip() or None
- if not title:
- return "Missing title", 400
- album_id = f"album_{uuid.uuid4().hex[:8]}"
- db_save_album(album_id, {
- "title": title,
- "description": description,
- "category_id": category_id,
- "created_at": datetime.now(timezone.utc).isoformat(),
- "posts": [],
- })
- return redirect(f"/?album={album_id}")
+    title = request.form.get("title", "").strip()
+    description = request.form.get("description", "").strip()
+    category_id = request.form.get("category_id", "").strip() or None
+    if not title:
+        return "Missing title", 400
+    album_id = f"album_{uuid.uuid4().hex[:8]}"
+    db_save_album(album_id, {"title": title, "description": description, "category_id": category_id, "created_at": datetime.now(timezone.utc).isoformat(), "posts": []})
+    return redirect(f"/?album={album_id}")
 
 @app.route("/albums/<album_id>/delete", methods=["POST"])
 @owner_required
 def delete_album(album_id):
- db_delete_album(album_id)
- return redirect("/")
-
-# --- Category management ---
+    db_delete_album(album_id)
+    return redirect("/")
 
 @app.route("/categories", methods=["GET"])
 @login_required
 def get_categories_api():
- return jsonify(db_get_categories())
+    return jsonify(db_get_categories())
 
 @app.route("/categories/create", methods=["POST"])
 @login_required
 def create_category():
- name = request.form.get("name", "").strip()
- if not name:
- return "Missing name", 400
- cat_id = f"cat_{uuid.uuid4().hex[:8]}"
- db_save_category(cat_id, name)
- return redirect("/")
+    name = request.form.get("name", "").strip()
+    if not name:
+        return "Missing name", 400
+    cat_id = f"cat_{uuid.uuid4().hex[:8]}"
+    db_save_category(cat_id, name)
+    return redirect("/")
 
 @app.route("/categories/<cat_id>/delete", methods=["POST"])
 @owner_required
 def delete_category_route(cat_id):
- db_delete_category(cat_id)
- return redirect("/")
+    db_delete_category(cat_id)
+    return redirect("/")
 
 @app.route("/albums/<album_id>/category", methods=["POST"])
 @login_required
 def set_album_category(album_id):
- cat_id = request.form.get("category_id", "").strip() or None
- albums = db_get_albums()
- if album_id not in albums:
- return "Album not found", 404
- # Use the DB-verified key for the redirect to avoid open-redirect concerns
- safe_album_id = album_id
- album = albums[safe_album_id]
- if isinstance(album, dict):
- album["category_id"] = cat_id
- db_save_album(safe_album_id, album)
- return redirect(url_for("index", album=safe_album_id))
-
-# --- Post management ---
+    cat_id = request.form.get("category_id", "").strip() or None
+    albums = db_get_albums()
+    if album_id not in albums:
+        return "Album not found", 404
+    album = albums[album_id]
+    if isinstance(album, dict):
+        album["category_id"] = cat_id
+        db_save_album(album_id, album)
+    return redirect(url_for("index", album=album_id))
 
 @app.route("/albums/<album_id>/posts", methods=["POST"])
 @login_required
@@ -1366,11 +1380,7 @@ def add_post(album_id):
     if album_id not in albums:
         return "Album not found", 404
     media_items = []
-    # Accept both 'media' (new) and 'images' (legacy) field names
-    if "media" in request.files:
-        files = request.files.getlist("media")
-    else:
-        files = request.files.getlist("images")
+    files = request.files.getlist("media") if "media" in request.files else request.files.getlist("images")
     for f in files:
         if f and f.filename:
             try:
@@ -1384,35 +1394,24 @@ def add_post(album_id):
                     try:
                         url = process_video_to_hls(src_path, hls_dir)
                     except RuntimeError:
-                        pass # fall back to serving original video
+                        pass
                 media_items.append({"url": url, "type": item_type})
             except Exception as e:
                 log.error(f"Local upload failed: {e}")
-    post = {
-        "id": uuid.uuid4().hex,
-        "caption": caption,
-        "photos": media_items,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
+    post = {"id": uuid.uuid4().hex, "caption": caption, "photos": media_items, "created_at": datetime.now(timezone.utc).isoformat()}
     album = albums[album_id]
-    if "posts" not in album:
-        album["posts"] = []
-    album["posts"].append(post)
+    album.setdefault("posts", []).append(post)
     db_save_album(album_id, album)
     return redirect(f"/?album={album_id}")
 
 @app.route("/albums/<album_id>/posts/<post_id>/delete", methods=["POST"])
 @owner_required
 def delete_post(album_id, post_id):
- albums = db_get_albums()
- if album_id in albums:
- albums[album_id]["posts"] = [
- p for p in albums[album_id].get("posts", []) if p["id"] != post_id
- ]
- db_save_album(album_id, albums[album_id])
- return redirect(f"/?album={album_id}")
-
-# --- Legacy routes (kept for backward compatibility) ---
+    albums = db_get_albums()
+    if album_id in albums:
+        albums[album_id]["posts"] = [p for p in albums[album_id].get("posts", []) if p["id"] != post_id]
+        db_save_album(album_id, albums[album_id])
+    return redirect(f"/?album={album_id}")
 
 @app.route("/upload", methods=["POST"])
 @login_required
@@ -1423,12 +1422,7 @@ def upload():
         return "Missing album_id", 400
     albums = db_get_albums()
     if album_id not in albums:
-        albums[album_id] = {
-            "title": album_id,
-            "description": "",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "posts": [],
-        }
+        albums[album_id] = {"title": album_id, "description": "", "created_at": datetime.now(timezone.utc).isoformat(), "posts": []}
     photos = []
     for img in request.files.getlist("images"):
         if img and img.filename:
@@ -1437,24 +1431,18 @@ def upload():
                 item_type = "video" if mime.startswith("video/") else "image"
                 url = save_file_locally(img.stream, img.filename, item_type)
                 if item_type == "video":
-                    # Build HLS output dir from the saved file path
                     file_id = os.path.splitext(os.path.basename(url))[0]
                     hls_dir = os.path.join(UPLOAD_VIDEOS_DIR, file_id)
                     src_path = url.lstrip("/")
                     try:
                         url = process_video_to_hls(src_path, hls_dir)
                     except RuntimeError:
-                        pass # fall back to serving original video
+                        pass
                 photos.append({"url": url, "type": item_type})
             except Exception as e:
                 log.error(f"Local upload failed: {e}")
     if photos:
-        post = {
-            "id": uuid.uuid4().hex,
-            "caption": caption_text,
-            "photos": photos,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        post = {"id": uuid.uuid4().hex, "caption": caption_text, "photos": photos, "created_at": datetime.now(timezone.utc).isoformat()}
         albums[album_id].setdefault("posts", []).append(post)
         db_save_album(album_id, albums[album_id])
     return redirect("/")
@@ -1462,269 +1450,224 @@ def upload():
 @app.route("/delete/<album_id>")
 @owner_required
 def delete(album_id):
- db_delete_album(album_id)
- return redirect("/")
+    db_delete_album(album_id)
+    return redirect("/")
 
 @app.route("/backups", methods=["GET"])
 @owner_required
 def backups_list():
- """JSON list of all backup files on disk (newest first)."""
- items = []
- try:
- for fname in os.listdir(BACKUP_DIR):
- if fname.startswith("backup_") and fname.endswith(".zip"):
- fpath = os.path.join(BACKUP_DIR, fname)
- stat = os.stat(fpath)
- items.append({
- "filename": fname,
- "size": stat.st_size,
- "size_human": f"{stat.st_size / 1024:.1f} KB" if stat.st_size < 1024 * 1024 else f"{stat.st_size / 1024 / 1024:.1f} MB",
- "created_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
- "download_url": f"/backups/download/{fname}",
- })
- items.sort(key=lambda x: x["created_at"], reverse=True)
- except Exception as exc:
- log.error("backups_list failed: %s", exc)
- return jsonify({"ok": False, "error": "Lỗi đọc danh sách backup"}), 500
- return jsonify({"ok": True, "items": items, "max_backups": MAX_BACKUPS})
+    """JSON list of all backup files on disk (newest first)."""
+    items = []
+    try:
+        for fname in os.listdir(BACKUP_DIR):
+            if fname.startswith("backup_") and fname.endswith(".zip"):
+                fpath = os.path.join(BACKUP_DIR, fname)
+                stat = os.stat(fpath)
+                items.append({
+                    "filename": fname,
+                    "size": stat.st_size,
+                    "size_human": f"{stat.st_size / 1024:.1f} KB" if stat.st_size < 1024 * 1024 else f"{stat.st_size / 1024 / 1024:.1f} MB",
+                    "created_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    "download_url": f"/backups/download/{fname}",
+                })
+        items.sort(key=lambda x: x["created_at"], reverse=True)
+    except Exception as exc:
+        log.error("backups_list failed: %s", exc)
+        return jsonify({"ok": False, "error": "Lỗi đọc danh sách backup"}), 500
+    return jsonify({"ok": True, "items": items, "max_backups": MAX_BACKUPS})
 
 @app.route("/backups/download/<filename>", methods=["GET"])
 @owner_required
 def backups_download_file(filename):
- """Download a specific backup file by name (with path-traversal protection)."""
- # Strict whitelist: only files matching backup_YYYYMMDD_HHMMSS.zip
- if not re.fullmatch(r"backup_\d{8}_\d{6}\.zip", filename):
- return "Invalid filename", 400
- fpath = os.path.join(BACKUP_DIR, filename)
- if not os.path.isfile(fpath):
- return "Backup not found", 404
- try:
- with open(fpath, "rb") as fh:
- data = fh.read()
- except OSError as exc:
- log.error("backups_download_file read error: %s", exc)
- return "Read error", 500
- return Response(
- data,
- mimetype="application/zip",
- headers={"Content-Disposition": f"attachment; filename={filename}"},
- )
+    """Download a specific backup file by name (with path-traversal protection)."""
+    if not re.fullmatch(r"backup_\d{8}_\d{6}\.zip", filename):
+        return "Invalid filename", 400
+    fpath = os.path.join(BACKUP_DIR, filename)
+    if not os.path.isfile(fpath):
+        return "Backup not found", 404
+    try:
+        with open(fpath, "rb") as fh:
+            data = fh.read()
+    except OSError as exc:
+        log.error("backups_download_file read error: %s", exc)
+        return "Read error", 500
+    return Response(data, mimetype="application/zip", headers={"Content-Disposition": f"attachment; filename={filename}"})
 
 @app.route("/backups/<filename>/delete", methods=["POST"])
 @owner_required
 def backups_delete_file(filename):
- """Delete a specific backup file (owner only)."""
- if not re.fullmatch(r"backup_\d{8}_\d{6}\.zip", filename):
- return jsonify({"ok": False, "error": "Tên file không hợp lệ"}), 400
- fpath = os.path.join(BACKUP_DIR, filename)
- if not os.path.isfile(fpath):
- return jsonify({"ok": False, "error": "File không tồn tại"}), 404
- try:
- os.remove(fpath)
- log.info("Backup deleted via web: %s", filename)
- return jsonify({"ok": True})
- except OSError as exc:
- log.error("backups_delete_file failed: %s", exc)
- return jsonify({"ok": False, "error": "Lỗi xóa file"}), 500
+    """Delete a specific backup file (owner only)."""
+    if not re.fullmatch(r"backup_\d{8}_\d{6}\.zip", filename):
+        return jsonify({"ok": False, "error": "Tên file không hợp lệ"}), 400
+    fpath = os.path.join(BACKUP_DIR, filename)
+    if not os.path.isfile(fpath):
+        return jsonify({"ok": False, "error": "File không tồn tại"}), 404
+    try:
+        os.remove(fpath)
+        log.info("Backup deleted via web: %s", filename)
+        return jsonify({"ok": True})
+    except OSError as exc:
+        log.error("backups_delete_file failed: %s", exc)
+        return jsonify({"ok": False, "error": "Lỗi xóa file"}), 500
 
 @app.route("/healthz")
 def healthz():
- return "OK", 200
+    return "OK", 200
 
 @app.route("/stream/<file_id>")
 def stream_video(file_id):
- """Serve the HLS player page for a given video file_id."""
- # Validate file_id: only allow hex UUIDs (32 hex chars) to prevent path traversal
- import re as _re
- if not _re.fullmatch(r"[0-9a-f]{32}", file_id):
- return "Invalid file ID", 400
- hls_dir = os.path.join(UPLOAD_VIDEOS_DIR, file_id)
- if not os.path.isdir(hls_dir):
- return "Stream not found", 404
- m3u8_url = f"/static/uploads/videos/{file_id}/index.m3u8"
- return render_template("player.html", m3u8_url=m3u8_url)
+    """Serve the HLS player page for a given video file_id."""
+    if not re.fullmatch(r"[0-9a-f]{32}", file_id):
+        return "Invalid file ID", 400
+    hls_dir = os.path.join(UPLOAD_VIDEOS_DIR, file_id)
+    if not os.path.isdir(hls_dir):
+        return "Stream not found", 404
+    m3u8_url = f"/static/uploads/videos/{file_id}/index.m3u8"
+    return render_template("player.html", m3u8_url=m3u8_url)
 
 @app.route("/backup/download")
 @owner_required
 def backup_download():
- """Owner-only endpoint to download a manual backup of all JSON data files."""
- buf = io.BytesIO()
- with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
- _backup_files_to_zip(zf)
- buf.seek(0)
- timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
- return Response(
- buf.read(),
- mimetype="application/zip",
- headers={"Content-Disposition": f"attachment; filename=backup_{timestamp}.zip"},
- )
+    """Owner-only endpoint to download a manual backup of all JSON data files."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        _backup_files_to_zip(zf)
+    buf.seek(0)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return Response(buf.read(), mimetype="application/zip", headers={"Content-Disposition": f"attachment; filename=backup_{timestamp}.zip"})
 
 @app.route("/backup/manual", methods=["POST"])
 @owner_required
 def backup_manual():
- """Trigger a manual backup and save locally, returning the download URL."""
- try:
- url = run_daily_backup()
- return jsonify({"ok": True, "url": url})
- except Exception as e:
- log.error(f"Manual backup failed: {e}")
- return jsonify({"ok": False, "error": "Sao lưu thất bại. Vui lòng thử lại."}), 500
+    """Trigger a manual backup and save locally, returning the download URL."""
+    try:
+        url = run_daily_backup()
+        return jsonify({"ok": True, "url": url})
+    except Exception as e:
+        log.error(f"Manual backup failed: {e}")
+        return jsonify({"ok": False, "error": "Sao lưu thất bại. Vui lòng thử lại."}), 500
 
 @app.route("/backup/restore", methods=["POST"])
 @owner_required
 def backup_restore():
- """Restore JSON data files from the most recent local backup zip."""
- backup_zip_path = None
- for days_ago in range(0, 7):
- date_str = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%d")
- candidate = os.path.join(BACKUP_DIR, f"backup_{date_str}.zip")
- if os.path.exists(candidate):
- backup_zip_path = candidate
- break
-
- if not backup_zip_path:
- return jsonify({"ok": False, "error": "Không tìm thấy bản sao lưu cục bộ"}), 404
-
- try:
- db_basename = os.path.basename(DB_FILE)
-
- with zipfile.ZipFile(backup_zip_path, "r") as zf:
- for entry in zf.namelist():
- fname = os.path.basename(entry)
- if fname == db_basename:
- # Restore the raw SQLite DB file and reinitialise tables
- db_data = zf.read(entry)
- with open(DB_FILE, "wb") as f:
- f.write(db_data)
- init_db()
- continue
- # Restore JSON exports back into the DB (for backups that include
- # human-readable JSON exports alongside the binary DB file).
- try:
- content = json.loads(zf.read(entry).decode("utf-8"))
- except Exception:
- continue
- if fname == "albums.json" and isinstance(content, dict):
- for aid, adata in content.items():
- db_save_album(aid, adata)
- elif fname == "bots.json" and isinstance(content, list):
- db_save_bots(content)
- elif fname == "config.json" and isinstance(content, dict):
- db_save_config(content)
- elif fname == "messages.json" and isinstance(content, dict):
- db_save_messages_flow(content)
- elif fname == "slogans.json" and isinstance(content, dict):
- db_save_slogans(content)
- elif fname == "subscribers.json" and isinstance(content, list):
- db_save_subscribers("global", content)
- elif fname.startswith("subs_") and fname.endswith(".json") and isinstance(content, list):
- bot_id_key = fname.removeprefix("subs_").removesuffix(".json")
- db_save_subscribers(bot_id_key, content)
- elif fname in ("banned.json", "banned_users.json") and isinstance(content, list):
- with get_db() as conn:
- for uid in content:
- conn.execute(
- "INSERT OR IGNORE INTO banned_users (user_id) VALUES (?)", (int(uid),)
- )
- conn.commit()
-
- return jsonify({"ok": True})
- except Exception as e:
- log.error(f"Restore failed: {e}")
- return jsonify({"ok": False, "error": "Khôi phục thất bại. Vui lòng thử lại."}), 500
+    """Restore JSON data files from the most recent local backup zip."""
+    backup_zip_path = None
+    for days_ago in range(0, 7):
+        date_str = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        candidate = os.path.join(BACKUP_DIR, f"backup_{date_str}.zip")
+        if os.path.exists(candidate):
+            backup_zip_path = candidate
+            break
+    if not backup_zip_path:
+        return jsonify({"ok": False, "error": "Không tìm thấy bản sao lưu cục bộ"}), 404
+    try:
+        db_basename = os.path.basename(DB_FILE)
+        with zipfile.ZipFile(backup_zip_path, "r") as zf:
+            for entry in zf.namelist():
+                fname = os.path.basename(entry)
+                if fname == db_basename:
+                    db_data = zf.read(entry)
+                    with open(DB_FILE, "wb") as f:
+                        f.write(db_data)
+                    init_db()
+                    continue
+                try:
+                    content = json.loads(zf.read(entry).decode("utf-8"))
+                except Exception:
+                    continue
+                if fname == "albums.json" and isinstance(content, dict):
+                    for aid, adata in content.items():
+                        db_save_album(aid, adata)
+                elif fname == "bots.json" and isinstance(content, list):
+                    db_save_bots(content)
+                elif fname == "config.json" and isinstance(content, dict):
+                    db_save_config(content)
+                elif fname == "messages.json" and isinstance(content, dict):
+                    db_save_messages_flow(content)
+                elif fname == "slogans.json" and isinstance(content, dict):
+                    db_save_slogans(content)
+                elif fname == "subscribers.json" and isinstance(content, list):
+                    db_save_subscribers("global", content)
+                elif fname.startswith("subs_") and fname.endswith(".json") and isinstance(content, list):
+                    bot_id_key = fname.removeprefix("subs_").removesuffix(".json")
+                    db_save_subscribers(bot_id_key, content)
+                elif fname in ("banned.json", "banned_users.json") and isinstance(content, list):
+                    with get_db() as conn:
+                        for uid in content:
+                            conn.execute("INSERT OR IGNORE INTO banned_users (user_id) VALUES (?)", (int(uid),))
+                        conn.commit()
+        return jsonify({"ok": True})
+    except Exception as e:
+        log.error(f"Restore failed: {e}")
+        return jsonify({"ok": False, "error": "Khôi phục thất bại. Vui lòng thử lại."}), 500
 
 # ===== TELEGRAM WEBHOOK ROUTE =====
 
 @app.route("/webhook/<token_path>", methods=["POST"])
 def telegram_webhook(token_path):
- """Receive Telegram update POSTs and feed them to the matching PTB application.
-
- Telegram is configured (via set_webhook) to POST updates to
- ``/webhook/ ``. The token in the URL path acts as an implicit
- secret so only Telegram (which knows the token) can trigger this endpoint.
- """
- ptb_app = _bot_manager.get_app_by_token(token_path)
- if ptb_app is None:
- log.warning("telegram_webhook: no running bot found for token (length=%d)", len(token_path))
- return "Not found", 404
-
- update_data = request.get_json(force=True, silent=True)
- if not update_data:
- return "Bad request", 400
-
- bot_loop = _bot_manager.get_loop()
- if bot_loop is None or bot_loop.is_closed():
- log.warning("telegram_webhook: bot manager loop is not available")
- return "Service unavailable", 503
-
- try:
- from telegram import Update as _TGUpdate
- update = _TGUpdate.de_json(update_data, ptb_app.bot)
- # Fire-and-forget: schedule the coroutine on the bot event loop and
- # return 200 immediately without waiting for processing to finish.
- # This is the recommended Telegram webhook pattern — Telegram only
- # needs a fast ACK; the actual handler runs in the background.
- # An error callback logs any exception so we don't lose debug info.
- fut = asyncio.run_coroutine_threadsafe(ptb_app.process_update(update), bot_loop)
-
- def _log_background_exception(f):
- exc = f.exception()
- if exc:
- log.error("telegram_webhook process_update error (background): %s", exc, exc_info=exc)
-
- fut.add_done_callback(_log_background_exception)
- except Exception as exc:
- log.error("telegram_webhook dispatch error: %s", exc, exc_info=True)
-
- return "OK", 200
-
-# ===== TELEGRAM MINI APP BRIDGE ROUTES =====
+    """Receive Telegram update POSTs and feed them to the matching PTB application."""
+    ptb_app = _bot_manager.get_app_by_token(token_path)
+    if ptb_app is None:
+        log.warning("telegram_webhook: no running bot found for token (length=%d)", len(token_path))
+        return "Not found", 404
+    update_data = request.get_json(force=True, silent=True)
+    if not update_data:
+        return "Bad request", 400
+    bot_loop = _bot_manager.get_loop()
+    if bot_loop is None or bot_loop.is_closed():
+        log.warning("telegram_webhook: bot manager loop is not available")
+        return "Service unavailable", 503
+    try:
+        from telegram import Update as _TGUpdate
+        update = _TGUpdate.de_json(update_data, ptb_app.bot)
+        fut = asyncio.run_coroutine_threadsafe(ptb_app.process_update(update), bot_loop)
+        def _log_background_exception(f):
+            exc = f.exception()
+            if exc:
+                log.error("telegram_webhook process_update error (background): %s", exc, exc_info=exc)
+        fut.add_done_callback(_log_background_exception)
+    except Exception as exc:
+        log.error("telegram_webhook dispatch error: %s", exc, exc_info=True)
+    return "OK", 200
 
 @app.route("/miniapp/bridge/<album_id>")
 def miniapp_bridge(album_id):
- """Lightweight bridge page: validates Telegram initData, generates a 24-hour
- token and redirects the user to the external album view in their browser."""
- albums = db_get_albums()
- if album_id not in albums:
- return "Album không tồn tại", 404
- base_url = request.host_url.rstrip("/")
- return render_template("miniapp_bridge.html", album_id=album_id, base_url=base_url)
+    """Lightweight bridge page: validates Telegram initData, generates a 24-hour token."""
+    albums = db_get_albums()
+    if album_id not in albums:
+        return "Album không tồn tại", 404
+    base_url = request.host_url.rstrip("/")
+    return render_template("miniapp_bridge.html", album_id=album_id, base_url=base_url)
 
 @app.route("/api/generate_token/<album_id>", methods=["POST"])
 def api_generate_token(album_id):
- """Validate Telegram WebApp initData and return a 24-hour access token."""
- albums = db_get_albums()
- if album_id not in albums:
- return jsonify({"ok": False, "error": "Album không tồn tại"}), 404
-
- data = request.get_json(silent=True) or {}
- init_data = data.get("initData", "")
-
- if not init_data:
- return jsonify({"ok": False, "error": "Thiếu initData"}), 400
-
- # Multi-bot: verify initData against every configured token (env + DB).
- candidate_tokens = []
- if BOT_TOKEN:
- candidate_tokens.append(BOT_TOKEN.strip())
- for b in db_get_bots():
- t = (b.get("token") or "").strip()
- if t:
- candidate_tokens.append(t)
- seen = set()
- candidate_tokens = [t for t in candidate_tokens if not (t in seen or seen.add(t))]
-
- if not candidate_tokens:
- return jsonify({"ok": False, "error": "Không có bot token để xác thực initData"}), 500
-
- valid = False
- for t in candidate_tokens:
- try:
- if _validate_telegram_init_data(init_data, t):
- valid = True
- break
- except Exception as exc:
- log.warning("miniapp token verify exception: %s", exc)
+    """Validate Telegram WebApp initData and return a 24-hour access token."""
+    albums = db_get_albums()
+    if album_id not in albums:
+        return jsonify({"ok": False, "error": "Album không tồn tại"}), 404
+    data = request.get_json(silent=True) or {}
+    init_data = data.get("initData", "")
+    if not init_data:
+        return jsonify({"ok": False, "error": "Thiếu initData"}), 400
+    candidate_tokens = []
+    if BOT_TOKEN:
+        candidate_tokens.append(BOT_TOKEN.strip())
+    for b in db_get_bots():
+        t = (b.get("token") or "").strip()
+        if t:
+            candidate_tokens.append(t)
+    seen = set()
+    candidate_tokens = [t for t in candidate_tokens if not (t in seen or seen.add(t))]
+    if not candidate_tokens:
+        return jsonify({"ok": False, "error": "Không có bot token để xác thực initData"}), 500
+    valid = False
+    for t in candidate_tokens:
+        try:
+            if _validate_telegram_init_data(init_data, t):
+                valid = True
+                break
+        except Exception as exc:
+            log.warning("miniapp token verify exception: %s", exc)
 
  if not valid:
  return jsonify({"ok": False, "error": "initData không hợp lệ"}), 403
@@ -1751,73 +1694,53 @@ def view_album(album_id):
 
 @app.route("/view/catalog")
 def view_catalog():
- """Public catalog page – validates any non-expired token and renders all
- categories + albums. Generates a fresh per-album token so each link in
- the catalog passes view_album's strict token check."""
- token = request.args.get("token", "")
- warning_msg = db_get_expired_warning_message()
- if not token:
- return render_template("expired.html", message=warning_msg), 403
- try:
- with get_db() as conn:
- row = conn.execute(
- "SELECT expires_at FROM album_tokens WHERE token=?",
- (token,),
- ).fetchone()
- if not row:
- return render_template("expired.html", message=warning_msg), 403
- expires_at = datetime.fromisoformat(row["expires_at"])
- if expires_at.tzinfo is None:
- expires_at = expires_at.replace(tzinfo=timezone.utc)
- if datetime.now(timezone.utc) >= expires_at:
- return render_template("expired.html", message=warning_msg), 403
- except Exception as exc:
- log.error("view_catalog token check failed: %s", exc)
- return render_template("expired.html", message=warning_msg), 403
-
- albums_raw = db_get_albums()
- categories_raw = db_get_categories()
-
- # Sort categories by created_at DESC (newest month/category on top).
- # Fallback: sort by id desc if created_at missing.
- def _cat_key(c):
- return (c.get("created_at", "") if isinstance(c, dict) else "", c.get("id", "") if isinstance(c, dict) else "")
- categories = sorted(categories_raw, key=_cat_key, reverse=True)
-
- # Sort albums by created_at DESC (newest post on top in each category).
- # Use OrderedDict so Jinja iterates in this order.
- from collections import OrderedDict
- sorted_album_items = sorted(
- albums_raw.items(),
- key=lambda kv: (kv[1].get("created_at", "") if isinstance(kv[1], dict) else "", kv[0]),
- reverse=True,
- )
- albums = OrderedDict(sorted_album_items)
-
- # Issue a fresh 24h token for every album so the catalog links work
- album_tokens = {aid: db_create_album_token(aid) for aid in albums.keys()}
- return render_template(
- "public_catalog.html",
- categories=categories,
- albums=albums,
- album_tokens=album_tokens,
- token=token,
- )
+    """Public catalog page – validates any non-expired token and renders all categories + albums."""
+    token = request.args.get("token", "")
+    warning_msg = db_get_expired_warning_message()
+    if not token:
+        return render_template("expired.html", message=warning_msg), 403
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT expires_at FROM album_tokens WHERE token=?", (token,)).fetchone()
+            if not row:
+                return render_template("expired.html", message=warning_msg), 403
+            expires_at = datetime.fromisoformat(row["expires_at"])
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) >= expires_at:
+                return render_template("expired.html", message=warning_msg), 403
+    except Exception as exc:
+        log.error("view_catalog token check failed: %s", exc)
+        return render_template("expired.html", message=warning_msg), 403
+    albums_raw = db_get_albums()
+    categories_raw = db_get_categories()
+    def _cat_key(c):
+        return (c.get("created_at", "") if isinstance(c, dict) else "", c.get("id", "") if isinstance(c, dict) else "")
+    categories = sorted(categories_raw, key=_cat_key, reverse=True)
+    from collections import OrderedDict
+    sorted_album_items = sorted(
+        albums_raw.items(),
+        key=lambda kv: (kv[1].get("created_at", "") if isinstance(kv[1], dict) else "", kv[0]),
+        reverse=True,
+    )
+    albums = OrderedDict(sorted_album_items)
+    album_tokens = {aid: db_create_album_token(aid) for aid in albums.keys()}
+    return render_template("public_catalog.html", categories=categories, albums=albums, album_tokens=album_tokens, token=token)
 
 @app.route("/settings/expired_warning_message", methods=["POST"])
 @login_required
 def settings_expired_warning_message():
- """Save the expired-token warning message (admin-only)."""
- try:
- data = request.get_json(silent=True) or {}
- msg = data.get("message", "").strip()
- if not msg:
- return jsonify({"ok": False, "error": "Nội dung không được để trống"}), 400
- db_save_expired_warning_message(msg)
- return jsonify({"ok": True})
- except Exception as exc:
- log.error("settings_expired_warning_message failed: %s", exc)
- return jsonify({"ok": False, "error": "Lỗi server"}), 500
+    """Save the expired-token warning message (admin-only)."""
+    try:
+        data = request.get_json(silent=True) or {}
+        msg = data.get("message", "").strip()
+        if not msg:
+            return jsonify({"ok": False, "error": "Nội dung không được để trống"}), 400
+        db_save_expired_warning_message(msg)
+        return jsonify({"ok": True})
+    except Exception as exc:
+        log.error("settings_expired_warning_message failed: %s", exc)
+        return jsonify({"ok": False, "error": "Lỗi server"}), 500
 
 async def _async_run_ids_broadcast(
  bots: list, message: str, user_ids: list,
@@ -1856,92 +1779,107 @@ async def _async_run_ids_broadcast(
  stats_lock = asyncio.Lock()
  file_id_cache: dict = {"id": None}
 
- async def bot_worker(bot: dict) -> None:
- token = (bot.get("token") or "").strip()
- bot_id = bot.get("id", "")
- if not token:
- return
- retry_until = 0.0 # Event-loop clock time after which this bot's 429 cooldown ends
+async def _async_run_ids_broadcast(
+    bots: list, user_ids: list, message: str, media_type: str, media_url: str, buttons: list, camp_id,
+    media_bytes: bytes = None, media_filename: str = None,
+) -> None:
+    """Async broadcast to IDs using all bots concurrently."""
+    active_bots = [b for b in bots if (b.get("token") or "").strip()]
+    num_active = len(active_bots)
+    if num_active == 0:
+        with _broadcast_lock:
+            _broadcast_status["running"] = False
+        return
+    bot_res = {b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0} for b in bots}
+    uid_status_map = {uid: None for uid in user_ids}
+    uid_done_count = {uid: 0 for uid in user_ids}
+    stats_lock = asyncio.Lock()
+    file_id_cache = {"id": None}
 
- # 30s timeout accommodates multipart file uploads which are larger than plain JSON sends
- async with httpx.AsyncClient(timeout=30) as client:
- for uid in user_ids:
- # Wait out any active 429 cooldown for this bot
- now = asyncio.get_running_loop().time()
- if retry_until > now:
- await asyncio.sleep(retry_until - now)
-
- # Determine request parameters based on media source
- use_multipart = False
- if media_bytes:
- cached_fid = file_id_cache["id"]
- if cached_fid:
- endpoint, payload = _build_telegram_payload(uid, message, media_type, cached_fid, buttons)
- send_files = None
- send_data = None
- else:
- endpoint, send_files, send_data = _build_multipart_payload(
- uid, message, media_type, media_bytes, media_filename, buttons
- )
- payload = None
- use_multipart = True
- else:
- endpoint, payload = _build_telegram_payload(uid, message, media_type, media_url, buttons)
- send_files = None
- send_data = None
-
- if payload is None and not use_multipart:
- # No valid payload; classify as invalid without calling Telegram
- new_status: str = "invalid"
- else:
- api_url = f"https://api.telegram.org/bot{token}/{endpoint}"
- new_status = "invalid"
- while True: # Retry loop – only retries on 429
- try:
- if use_multipart:
- resp = await client.post(api_url, files=send_files, data=send_data)
- else:
- resp = await client.post(api_url, json=payload)
- if resp.status_code == 429:
- try:
- retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
- except Exception as e:
- log.warning("Failed to parse retry_after from 429 response: %s", e)
- retry_after = 5
- log.warning("Bot %s 429 – sleeping %ss", bot_id, retry_after)
- retry_until = asyncio.get_running_loop().time() + retry_after
- await asyncio.sleep(retry_after)
- continue # Retry the same uid
- rdata = resp.json()
- if resp.status_code == 200 and rdata.get("ok"):
- new_status = "active"
- if use_multipart and not file_id_cache["id"]:
- try:
- result = rdata.get("result", {})
- fid = None
- if media_type == "image":
- photos = result.get("photo", [])
- if photos:
- fid = photos[-1]["file_id"]
- elif media_type == "video":
- fid = result.get("video", {}).get("file_id")
- if fid:
- file_id_cache["id"] = fid
- except Exception as fe:
- log.warning("Could not extract file_id: %s", fe)
- elif resp.status_code == 403:
- new_status = "blocked"
- else:
- log.warning(
- "Telegram API error for uid %s via bot %s: status=%s body=%s",
- uid, bot_id, resp.status_code, resp.text[:200],
- )
- new_status = "invalid"
- break
- except Exception as e:
- log.warning("Failed to send message to %s via bot %s: %s", uid, bot_id, e)
- new_status = "invalid"
- break
+    async def bot_worker(bot: dict) -> None:
+        token = (bot.get("token") or "").strip()
+        bot_id = bot.get("id", "")
+        if not token:
+            return
+        retry_until = 0.0
+        async with httpx.AsyncClient(timeout=30) as client:
+            for uid in user_ids:
+                now = asyncio.get_running_loop().time()
+                if retry_until > now:
+                    await asyncio.sleep(retry_until - now)
+                use_multipart = False
+                if media_bytes:
+                    cached_fid = file_id_cache["id"]
+                    if cached_fid:
+                        endpoint, payload = _build_telegram_payload(uid, message, media_type, cached_fid, buttons)
+                        send_files = None
+                        send_data = None
+                    else:
+                        endpoint, send_files, send_data = _build_multipart_payload(uid, message, media_type, media_bytes, media_filename, buttons)
+                        payload = None
+                        use_multipart = True
+                else:
+                    endpoint, payload = _build_telegram_payload(uid, message, media_type, media_url, buttons)
+                    send_files = None
+                    send_data = None
+                if payload is None and not use_multipart:
+                    new_status = "invalid"
+                else:
+                    api_url = f"https://api.telegram.org/bot{token}/{endpoint}"
+                    new_status = "invalid"
+                    while True:
+                        try:
+                            resp = await client.post(api_url, files=send_files, data=send_data) if use_multipart else await client.post(api_url, json=payload)
+                            if resp.status_code == 429:
+                                try:
+                                    retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
+                                except Exception:
+                                    retry_after = 5
+                                retry_until = asyncio.get_running_loop().time() + retry_after
+                                await asyncio.sleep(retry_after)
+                                continue
+                            rdata = resp.json()
+                            if resp.status_code == 200 and rdata.get("ok"):
+                                new_status = "active"
+                                if use_multipart and not file_id_cache["id"]:
+                                    result = rdata.get("result", {})
+                                    fid = None
+                                    if media_type == "image":
+                                        photos = result.get("photo", [])
+                                        if photos:
+                                            fid = photos[-1]["file_id"]
+                                    elif media_type == "video":
+                                        fid = result.get("video", {}).get("file_id")
+                                    if fid:
+                                        file_id_cache["id"] = fid
+                            elif resp.status_code == 403:
+                                new_status = "blocked"
+                            else:
+                                new_status = "invalid"
+                            break
+                        except Exception:
+                            new_status = "invalid"
+                            break
+                async with stats_lock:
+                    prev = uid_status_map[uid]
+                    if new_status == "active" or (new_status == "blocked" and prev not in ("active",)) or (prev is None and new_status == "invalid"):
+                        uid_status_map[uid] = new_status
+                    bot_res[bot_id]["success" if new_status == "active" else "fail"] += 1
+                    uid_done_count[uid] += 1
+                    if uid_done_count[uid] >= num_active:
+                        resolved = uid_status_map[uid] or "invalid"
+                        with get_db() as conn:
+                            conn.execute("UPDATE telegram_ids SET status=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?", (resolved, uid))
+                            conn.commit()
+                        with _broadcast_lock:
+                            _broadcast_status["done"] += 1
+                            _broadcast_status[resolved if resolved in ("active", "blocked", "invalid") else "error"] += 1
+                            _broadcast_status["bot_results"] = {k: dict(v) for k, v in bot_res.items()}
+                await asyncio.sleep(0.04)
+    await asyncio.gather(*[bot_worker(bot) for bot in active_bots])
+    with _broadcast_lock:
+        _broadcast_status["running"] = False
+        _broadcast_status["bot_results"] = {k: dict(v) for k, v in bot_res.items()}
 
  # Merge this bot's result into the per-uid best status
  async with stats_lock:
@@ -2031,151 +1969,114 @@ async def _async_run_broadcast_all(
  # Deduplication: once any bot successfully delivers to a uid, other bots skip it
  delivered_uids: set = set()
 
- async def bot_worker(bot: dict) -> None:
- nonlocal total_success, total_fail, done_count
- token = (bot.get("token") or "").strip()
- bot_id = bot.get("id", "")
- if not token:
- return
- retry_until = 0.0 # event-loop time after which this bot's 429 cooldown ends
+async def _async_run_broadcast_all(
+    bots: list, user_ids: list, message: str,
+    media_type: str, media_url: str, buttons: list, camp_id,
+    media_bytes: bytes = None, media_filename: str = None,
+) -> None:
+    """Async broadcast to all user IDs using every configured bot."""
+    active_bots = [b for b in bots if (b.get("token") or "").strip()]
+    num_bots = len(active_bots)
+    if num_bots == 0:
+        with _broadcast_all_lock:
+            _broadcast_all_status["running"] = False
+        return
+    bot_res = {b.get("id", ""): {"name": b.get("name", "Bot"), "success": 0, "fail": 0} for b in bots}
+    uid_best = {uid: None for uid in user_ids}
+    uid_bot_count = {uid: 0 for uid in user_ids}
+    total_success = 0
+    total_fail = 0
+    done_count = 0
+    stats_lock = asyncio.Lock()
+    file_id_cache = {"id": None}
+    delivered_uids: set = set()
 
- # 30s timeout accommodates multipart file uploads
- async with httpx.AsyncClient(timeout=30) as client:
- for uid in user_ids:
- # Skip users already successfully delivered by another bot.
- # No lock needed for this read: asyncio is cooperative and
- # delivered_uids is only mutated inside stats_lock further below.
- if uid in delivered_uids:
- continue
-
- now = asyncio.get_running_loop().time()
- if retry_until > now:
- await asyncio.sleep(retry_until - now)
-
- # Build request parameters
- use_multipart = False
- if media_bytes:
- cached_fid = file_id_cache["id"]
- if cached_fid:
- endpoint, payload = _build_telegram_payload(uid, message, media_type, cached_fid, buttons)
- send_files = None
- send_data = None
- else:
- endpoint, send_files, send_data = _build_multipart_payload(
- uid, message, media_type, media_bytes, media_filename, buttons
- )
- payload = None
- use_multipart = True
- else:
- endpoint, payload = _build_telegram_payload(uid, message, media_type, media_url, buttons)
- send_files = None
- send_data = None
-
- bot_result = "invalid"
- if payload is not None or use_multipart:
- api_url = f"https://api.telegram.org/bot{token}/{endpoint}"
- while True:
- try:
- if use_multipart:
- resp = await client.post(api_url, files=send_files, data=send_data)
- else:
- resp = await client.post(api_url, json=payload)
- if resp.status_code == 429:
- try:
- retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
- except Exception:
- retry_after = 5
- log.warning("Bot %s 429 – sleeping %ss", bot_id, retry_after)
- retry_until = asyncio.get_running_loop().time() + retry_after
- await asyncio.sleep(retry_after)
- continue
- if resp.status_code == 200 and resp.json().get("ok"):
- bot_result = "active"
- if use_multipart and not file_id_cache["id"]:
- try:
- result = resp.json().get("result", {})
- fid = None
- if media_type == "image":
- photos = result.get("photo", [])
- if photos:
- fid = photos[-1]["file_id"]
- elif media_type == "video":
- fid = result.get("video", {}).get("file_id")
- if fid:
- file_id_cache["id"] = fid
- except Exception as fe:
- log.warning("Could not extract file_id: %s", fe)
- elif resp.status_code == 403:
- bot_result = "blocked"
- _mark_user_blocked(uid)
- else:
- log.warning(
- "Telegram error uid=%s bot=%s status=%s body=%s",
- uid, bot_id, resp.status_code, resp.text[:200],
- )
- bot_result = "invalid"
- break
- except Exception as e:
- log.warning("Send failed uid=%s bot=%s: %s", uid, bot_id, e)
- bot_result = "invalid"
- break
-
- # Update per-bot counters and merge per-uid best status
- async with stats_lock:
- if bot_result == "active":
- bot_res[bot_id]["success"] += 1
- # Mark as delivered so other bots skip this uid
- delivered_uids.add(uid)
- else:
- bot_res[bot_id]["fail"] += 1
-
- # active > blocked > invalid
- prev = uid_best[uid]
- if (
- bot_result == "active"
- or (bot_result == "blocked" and prev != "active")
- or prev is None
- ):
- uid_best[uid] = bot_result
-
- uid_bot_count[uid] += 1
- all_bots_tried = uid_bot_count[uid] >= num_bots
-
- if all_bots_tried:
- final_status = uid_best[uid] if uid_best[uid] is not None else "invalid"
- if final_status == "active":
- total_success += 1
- else:
- total_fail += 1
- done_count += 1
-
- snap = (done_count, total_success, total_fail, {k: dict(v) for k, v in bot_res.items()})
-
- with _broadcast_all_lock:
- _broadcast_all_status["done"] = snap[0]
- _broadcast_all_status["success"] = snap[1]
- _broadcast_all_status["fail"] = snap[2]
- _broadcast_all_status["bot_results"] = snap[3]
-
- # Proactive rate limit: ~25 msg/sec per bot
- await asyncio.sleep(0.04)
-
- await asyncio.gather(*[bot_worker(bot) for bot in active_bots])
-
- with _broadcast_all_lock:
- _broadcast_all_status["running"] = False
- _broadcast_all_status["bot_results"] = {k: dict(v) for k, v in bot_res.items()}
-
- if camp_id is not None:
- try:
- with get_db() as conn:
- conn.execute(
- "UPDATE broadcast_logs SET success_count=?, fail_count=?, bot_results_json=?, finished_at=CURRENT_TIMESTAMP WHERE id=?",
- (total_success, total_fail, json.dumps(bot_res), camp_id),
- )
- conn.commit()
- except Exception as e:
- log.warning("broadcast_logs update failed: %s", e)
+    async def bot_worker(bot: dict) -> None:
+        nonlocal total_success, total_fail, done_count
+        token = (bot.get("token") or "").strip()
+        bot_id = bot.get("id", "")
+        if not token:
+            return
+        retry_until = 0.0
+        async with httpx.AsyncClient(timeout=30) as client:
+            for uid in user_ids:
+                if uid in delivered_uids:
+                    continue
+                now = asyncio.get_running_loop().time()
+                if retry_until > now:
+                    await asyncio.sleep(retry_until - now)
+                use_multipart = False
+                if media_bytes:
+                    cached_fid = file_id_cache["id"]
+                    if cached_fid:
+                        endpoint, payload = _build_telegram_payload(uid, message, media_type, cached_fid, buttons)
+                        send_files = None
+                        send_data = None
+                    else:
+                        endpoint, send_files, send_data = _build_multipart_payload(uid, message, media_type, media_bytes, media_filename, buttons)
+                        payload = None
+                        use_multipart = True
+                else:
+                    endpoint, payload = _build_telegram_payload(uid, message, media_type, media_url, buttons)
+                    send_files = None
+                    send_data = None
+                bot_result = "invalid"
+                if payload is not None or use_multipart:
+                    api_url = f"https://api.telegram.org/bot{token}/{endpoint}"
+                    while True:
+                        try:
+                            resp = await client.post(api_url, files=send_files, data=send_data) if use_multipart else await client.post(api_url, json=payload)
+                            if resp.status_code == 429:
+                                retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
+                                retry_until = asyncio.get_running_loop().time() + retry_after
+                                await asyncio.sleep(retry_after)
+                                continue
+                            if resp.status_code == 200 and resp.json().get("ok"):
+                                bot_result = "active"
+                            elif resp.status_code == 403:
+                                bot_result = "blocked"
+                                _mark_user_blocked(uid)
+                            else:
+                                bot_result = "invalid"
+                            break
+                        except Exception:
+                            bot_result = "invalid"
+                            break
+                async with stats_lock:
+                    if bot_result == "active":
+                        bot_res[bot_id]["success"] += 1
+                        delivered_uids.add(uid)
+                    else:
+                        bot_res[bot_id]["fail"] += 1
+                    prev = uid_best[uid]
+                    if bot_result == "active" or (bot_result == "blocked" and prev != "active") or prev is None:
+                        uid_best[uid] = bot_result
+                    uid_bot_count[uid] += 1
+                    if uid_bot_count[uid] >= num_bots:
+                        final_status = uid_best[uid] if uid_best[uid] is not None else "invalid"
+                        if final_status == "active":
+                            total_success += 1
+                        else:
+                            total_fail += 1
+                        done_count += 1
+                        snap = (done_count, total_success, total_fail, {k: dict(v) for k, v in bot_res.items()})
+                        with _broadcast_all_lock:
+                            _broadcast_all_status["done"] = snap[0]
+                            _broadcast_all_status["success"] = snap[1]
+                            _broadcast_all_status["fail"] = snap[2]
+                            _broadcast_all_status["bot_results"] = snap[3]
+                await asyncio.sleep(0.04)
+    await asyncio.gather(*[bot_worker(bot) for bot in active_bots])
+    with _broadcast_all_lock:
+        _broadcast_all_status["running"] = False
+        _broadcast_all_status["bot_results"] = {k: dict(v) for k, v in bot_res.items()}
+    if camp_id is not None:
+        try:
+            with get_db() as conn:
+                conn.execute("UPDATE broadcast_logs SET success_count=?, fail_count=?, bot_results_json=?, finished_at=CURRENT_TIMESTAMP WHERE id=?", (total_success, total_fail, json.dumps(bot_res), camp_id))
+                conn.commit()
+        except Exception as e:
+            log.warning("broadcast_logs update failed: %s", e)
 
 @app.route("/broadcast", methods=["POST"])
 @login_required
@@ -2219,20 +2120,19 @@ def broadcast():
  if media_type == "none":
  media_type = _infer_media_type_from_filename(media_filename)
 
- if not message and media_type == "none":
- return jsonify({"ok": False, "error": "Vui lòng nhập nội dung tin nhắn hoặc chọn media"}), 400
- if media_type in ("image", "video") and not media_url and not media_bytes:
- return jsonify({"ok": False, "error": "Vui lòng nhập URL media hoặc tải lên tệp"}), 400
+    if not message and media_type == "none":
+        return jsonify({"ok": False, "error": "Vui lòng nhập nội dung tin nhắn hoặc chọn media"}), 400
+    if media_type in ("image", "video") and not media_url and not media_bytes:
+        return jsonify({"ok": False, "error": "Vui lòng nhập URL media hoặc tải lên tệp"}), 400
 
- # Parse buttons
- buttons = []
- if buttons_raw:
- try:
- buttons = _json.loads(buttons_raw)
- if not isinstance(buttons, list):
- buttons = []
- except Exception:
- return jsonify({"ok": False, "error": "buttons_json không hợp lệ"}), 400
+    buttons = []
+    if buttons_raw:
+        try:
+            buttons = _json.loads(buttons_raw)
+            if not isinstance(buttons, list):
+                buttons = []
+        except Exception:
+            return jsonify({"ok": False, "error": "buttons_json không hợp lệ"}), 400
 
  # Recipients: all subscribers (pressed /start) + active IDs from telegram_ids
  sub_ids: set = db_get_all_subscriber_ids()
