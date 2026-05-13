@@ -47,9 +47,7 @@ if [ -d "$APP_DIR/.git" ]; then
     echo "  Thư mục đã tồn tại — đang kéo bản mới nhất..."
     cd "$APP_DIR"
     git fetch origin
-    if git show-ref --verify --quiet "refs/heads/$REPO_BRANCH"; then
-        git checkout "$REPO_BRANCH"
-    fi
+    git checkout "$REPO_BRANCH"
     git pull origin "$REPO_BRANCH"
 else
     rm -rf "$APP_DIR"
@@ -168,7 +166,7 @@ After=network.target
 User=root
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
-Environment="PATH=$APP_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PATH=$APP_DIR/venv/bin"
 ExecStart=$APP_DIR/venv/bin/gunicorn -w 1 -b 127.0.0.1:$GUNICORN_PORT --timeout 120 app:app
 Restart=always
 RestartSec=5
