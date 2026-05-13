@@ -133,10 +133,6 @@ def csrf_token():
 
 app.jinja_env.globals["csrf_token"] = csrf_token
 
-@app.context_processor
-def inject_csrf_token():
-    return {"csrf_token": csrf_token}
-
 # ===== AUTH CONFIG =====
 OWNER_USER = os.environ.get("OWNER_USER", "admin")
 OWNER_PASS = os.environ.get("OWNER_PASS", "admin123")
@@ -1607,31 +1603,68 @@ def backup_restore():
 
 # ===== TELEGRAM WEBHOOK ROUTE =====
 
-@app.route("/webhook/<token_path>", methods=["POST"])
+@app.route("/webhook/<path:token_path>", methods=["POST"])
 def telegram_webhook(token_path):
-    """Receive Telegram update POSTs and feed them to the matching PTB application."""
-    ptb_app = _bot_manager.get_app_by_token(token_path)
-    if ptb_app is None:
-        log.warning("telegram_webhook: no running bot found for token (length=%d)", len(token_path))
-        return "Not found", 404
+    """Receive Telegram update POSTs and feed them to a matching PTB application.
+
+    Primary path: dispatch to a bot already running inside BotManager.
+    Fallback path: if the web process does not own the running bot instance,
+    process the update inline with a temporary PTB app loaded from DB config
+    so Telegram gets a 200 instead of 404.
+    """
     update_data = request.get_json(force=True, silent=True)
     if not update_data:
         return "Bad request", 400
-    bot_loop = _bot_manager.get_loop()
-    if bot_loop is None or bot_loop.is_closed():
-        log.warning("telegram_webhook: bot manager loop is not available")
-        return "Service unavailable", 503
+
+    ptb_app = _bot_manager.get_app_by_token(token_path)
+    if ptb_app is not None:
+        bot_loop = _bot_manager.get_loop()
+        if bot_loop is None or bot_loop.is_closed():
+            log.warning("telegram_webhook: bot manager loop is not available")
+            return "Service unavailable", 503
+        try:
+            from telegram import Update as _TGUpdate
+            update = _TGUpdate.de_json(update_data, ptb_app.bot)
+            fut = asyncio.run_coroutine_threadsafe(ptb_app.process_update(update), bot_loop)
+
+            def _log_background_exception(f):
+                exc = f.exception()
+                if exc:
+                    log.error("telegram_webhook process_update error (background): %s", exc, exc_info=exc)
+
+            fut.add_done_callback(_log_background_exception)
+        except Exception as exc:
+            log.error("telegram_webhook dispatch error: %s", exc, exc_info=True)
+        return "OK", 200
+
+    bot_cfg = next((b for b in db_get_bots() if (b.get("token") or "").strip() == token_path), None)
+    if bot_cfg is None:
+        log.warning("telegram_webhook: no bot config found for token (length=%d)", len(token_path))
+        return "Not found", 404
+
+    log.info("telegram_webhook: using temporary PTB app for token (length=%d)", len(token_path))
+    _aid_raw = bot_cfg.get("admin_id")
+    _aid = int(_aid_raw) if _aid_raw and str(_aid_raw).isdigit() else ADMIN_ID
+    temp_app = _build_ptb_app(token_path, _aid, bot_cfg.get("id", "webhook_temp"))
+
+    async def _process_inline():
+        await temp_app.initialize()
+        await temp_app.start()
+        try:
+            from telegram import Update as _TGUpdate
+            update = _TGUpdate.de_json(update_data, temp_app.bot)
+            await temp_app.process_update(update)
+        finally:
+            try:
+                await temp_app.stop()
+            finally:
+                await temp_app.shutdown()
+
     try:
-        from telegram import Update as _TGUpdate
-        update = _TGUpdate.de_json(update_data, ptb_app.bot)
-        fut = asyncio.run_coroutine_threadsafe(ptb_app.process_update(update), bot_loop)
-        def _log_background_exception(f):
-            exc = f.exception()
-            if exc:
-                log.error("telegram_webhook process_update error (background): %s", exc, exc_info=exc)
-        fut.add_done_callback(_log_background_exception)
+        asyncio.run(_process_inline())
     except Exception as exc:
-        log.error("telegram_webhook dispatch error: %s", exc, exc_info=True)
+        log.error("telegram_webhook inline dispatch error: %s", exc, exc_info=True)
+
     return "OK", 200
 
 @app.route("/miniapp/bridge/<album_id>")
