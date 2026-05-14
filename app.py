@@ -1684,9 +1684,10 @@ def telegram_webhook(token_path):
     ``/webhook/<bot_token>``.  The token in the URL path acts as an implicit
     secret so only Telegram (which knows the token) can trigger this endpoint.
     """
-    ptb_app = _bot_manager.get_app_by_token(token_path)
+    token_key = (token_path or "").strip()
+    ptb_app = _bot_manager.get_app_by_token(token_key)
     if ptb_app is None:
-        log.warning("telegram_webhook: no running bot found for token (length=%d)", len(token_path))
+        log.warning("telegram_webhook: no running bot found for token (length=%d)", len(token_key))
         return "Not found", 404
 
     update_data = request.get_json(force=True, silent=True)
@@ -3694,16 +3695,27 @@ if BOT_TOKEN or db_get_bots():
             log.info("BotManager._reload() called – reading bots from DB")
             bots_cfg = db_get_bots()
             log.info("BotManager._reload() – DB contains %d bot entry/entries", len(bots_cfg))
+            # Rows with empty/missing token must not block falling back to BOT_TOKEN:
+            # previously `if not bots_cfg and BOT_TOKEN` was false when the table
+            # had placeholder rows, so no PTB app ran but Telegram still POSTed webhooks.
+            _with_token = [b for b in bots_cfg if (b.get("token") or "").strip()]
+            _skipped = len(bots_cfg) - len(_with_token)
+            if _skipped:
+                log.warning(
+                    "BotManager._reload() – %d bot row(s) have empty/missing token (skipped)",
+                    _skipped,
+                )
+            bots_cfg = _with_token
             if not bots_cfg and BOT_TOKEN:
                 log.info(
-                    "BotManager._reload() – bots DB is empty; falling back to "
+                    "BotManager._reload() – no usable bot in DB; falling back to "
                     "BOT_TOKEN env var (token length=%d)", len(BOT_TOKEN)
                 )
                 bots_cfg = [{"id": "env_default", "name": "Default Bot",
                               "token": BOT_TOKEN, "admin_id": ADMIN_ID}]
             elif not bots_cfg and not BOT_TOKEN:
                 log.warning(
-                    "BotManager._reload() – bots DB is empty AND BOT_TOKEN is unset; "
+                    "BotManager._reload() – no bots with tokens in DB AND BOT_TOKEN is unset; "
                     "no bots to start. Set TOKEN/BOT_TOKEN in .env or add a bot via the web UI."
                 )
 
