@@ -216,7 +216,7 @@
           {% if bots %}
           <div class="table-responsive">
             <table class="table table-dark table-borderless data-table mb-0" id="botsTable">
-              <thead><tr><th class="ps-3">Tên Bot</th><th>Token</th><th>Admin ID</th><th>Trạng thái</th><th>Auto-Responder</th><th>Subscribers</th><th>▶ Start</th><th>📤 Gửi</th><th>🖱 Click</th><th>💬 Phản hồi</th><th class="text-center">⌨</th><th style="width:60px;"></th></tr></thead>
+              <thead><tr><th class="ps-3">Tên Bot</th><th>Token</th><th>Admin ID</th><th>Trạng thái</th><th>Auto-Responder</th><th>Subscribers</th><th>▶ Start</th><th>📤 Gửi</th><th>🖱 Click</th><th>💬 Phản hồi</th><th class="text-center text-nowrap" title="Nút bàn phím trả lời (Reply) trên Telegram">Bàn phím</th><th style="width:60px;"></th></tr></thead>
               <tbody>
                 {% for bot in bots %}
                 <tr id="bot-row-{{ bot.id }}">
@@ -250,7 +250,7 @@
                   <td id="bot-msgs-{{ bot.id }}">&#8212;</td>
                   <td id="bot-interactions-{{ bot.id }}">&#8212;</td>
                   <td id="bot-replies-{{ bot.id }}">&#8212;</td>
-                  <td class="text-center">{% if role == 'owner' %}<button type="button" class="btn btn-sm btn-outline-info" onclick="openReplyMenuEditor('{{ bot.id }}')" title="Bàn phím trả lời (Reply menu)"><i class="bi bi-keyboard"></i></button>{% else %}<span class="text-muted" style="font-size:.75rem;">&#8212;</span>{% endif %}</td>
+                  <td class="text-center">{% if role in ('owner', 'manager') %}<button type="button" class="btn btn-sm btn-outline-info" onclick="openReplyMenuEditor('{{ bot.id }}')" title="Chỉnh bàn phím menu Telegram (Reply keyboard)"><i class="bi bi-keyboard"></i><span class="d-none d-md-inline ms-1">Menu phím</span></button>{% else %}<span class="text-muted" style="font-size:.75rem;">&#8212;</span>{% endif %}</td>
                   <td>{% if role == 'owner' %}<button class="btn btn-sm btn-outline-danger" onclick="doDeleteBot('{{ bot.id }}', '{{ bot.name }}', this)"><i class="bi bi-trash3"></i></button>{% endif %}</td>
                 </tr>
                 {% endfor %}
@@ -263,6 +263,9 @@
         </div>
         <div class="dash-card-body pt-2" style="border-top:1px solid var(--border-color);">
           <div style="font-size:.76rem;color:#666;"><i class="bi bi-info-circle me-1"></i>Bot mới thêm vào sẽ <strong>tự động bắt đầu polling</strong> trong vòng 30 giây, không cần khởi động lại server.</div>
+          {% if bots and role in ('owner', 'manager') %}
+          <div class="mt-2 p-2 rounded" style="font-size:.78rem;color:#aaa;background:rgba(77,159,255,.08);border:1px solid rgba(77,159,255,.2);"><i class="bi bi-keyboard me-1" style="color:var(--accent);"></i><strong>Bàn phím Telegram:</strong> cột <strong>Bàn phím</strong> — bấm <strong>Menu phím</strong> để thêm/sửa các nút trả lời nhanh (JSON). Bật <code>enabled: true</code> và lưu; member gửi lại <code>/start</code> trên Telegram để thấy nút.</div>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -1200,9 +1203,18 @@ async function openReplyMenuEditor(botId) {
   ta.value = '{"enabled":false,"prompt":"👇 Chọn một tùy chọn","ref_param_prefix":"REF","rows":[]}';
   try {
     const res = await fetch('/bots/' + encodeURIComponent(botId) + '/reply_menu', { credentials: 'same-origin' });
-    const data = await res.json();
-    if (data.ok && data.menu) ta.value = JSON.stringify(data.menu, null, 2);
-    else if (!data.ok) showToast('&#10060; ' + (data.error || '?'), 'error');
+    const ct = res.headers.get('content-type') || '';
+    let data = {};
+    if (ct.indexOf('application/json') !== -1) {
+      try { data = await res.json(); } catch (_) {}
+    }
+    if (res.ok && data.ok && data.menu) {
+      ta.value = JSON.stringify(data.menu, null, 2);
+    } else if (!res.ok) {
+      showToast('&#10060; ' + (data.error || ('Lỗi tải cấu hình (HTTP ' + res.status + '). Đăng nhập lại nếu hết phiên.')), 'error');
+    } else if (!data.ok) {
+      showToast('&#10060; ' + (data.error || '?'), 'error');
+    }
   } catch (e) {
     showToast('&#10060; Lỗi: ' + e.message, 'error');
   }
@@ -1211,8 +1223,15 @@ async function openReplyMenuEditor(botId) {
 async function loadReplyMenuSample() {
   try {
     const res = await fetch('/bots/reply_menu_sample', { credentials: 'same-origin' });
-    const data = await res.json();
-    if (!data.ok || !data.menu) { showToast('&#10060; ' + (data.error || 'Không tải được mẫu'), 'error'); return; }
+    const ct = res.headers.get('content-type') || '';
+    let data = {};
+    if (ct.indexOf('application/json') !== -1) {
+      try { data = await res.json(); } catch (_) {}
+    }
+    if (!res.ok || !data.ok || !data.menu) {
+      showToast('&#10060; ' + (data.error || ('Không tải được mẫu (HTTP ' + res.status + ')')), 'error');
+      return;
+    }
     document.getElementById('replyMenuJson').value = JSON.stringify(data.menu, null, 2);
     showToast('&#9989; Đã nạp JSON mẫu (chỉnh sửa trước khi Lưu)', 'success');
   } catch (e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
@@ -1232,12 +1251,16 @@ async function saveReplyMenu(btn) {
       credentials: 'same-origin',
       body: JSON.stringify(parsed)
     });
-    const data = await res.json();
-    if (data.ok && data.menu) {
+    const ct = res.headers.get('content-type') || '';
+    let data = {};
+    if (ct.indexOf('application/json') !== -1) {
+      try { data = await res.json(); } catch (_) {}
+    }
+    if (res.ok && data.ok && data.menu) {
       document.getElementById('replyMenuJson').value = JSON.stringify(data.menu, null, 2);
       showToast('&#9989; Đã lưu bàn phím menu (áp dụng cho /start và nút ngay lập tức)', 'success');
     } else {
-      showToast('&#10060; ' + (data.error || '?'), 'error');
+      showToast('&#10060; ' + (data.error || ('Lưu thất bại (HTTP ' + res.status + ')')), 'error');
     }
   } catch (e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = orig; }

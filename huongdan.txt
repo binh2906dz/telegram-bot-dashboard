@@ -147,6 +147,10 @@ b68e8e7 P2: CSRF protection, SECRET_KEY warnings, webhook allowed_updates, weak 
 --------------------------------------------------------------------------------
 10) NHAT KY THAY DOI (moi nhat o duoi cung — ghi sau moi dot chinh sua)
 --------------------------------------------------------------------------------
+[2026-05-14] Web reply menu: API reply_menu + reply_menu_sample dung login_required
+  (owner + manager); cot "Bàn phím", nut "Menu phím", huong dan trong Quan ly Bot;
+  fetch bao loi JSON/HTTP. File: app.py, templates/index.html.
+
 [2026-05-14] docs: huongdan.txt muc (9) them dong hash 2046f30 cho tinh nang reply
   keyboard (commit 046f871).
 
@@ -154,9 +158,9 @@ b68e8e7 P2: CSRF protection, SECRET_KEY warnings, webhook allowed_updates, weak 
   reply_menu.py (normalize + mau JSON), PTB: sau /start gui them prompt + ReplyKeyboardMarkup
   neu enabled; unified_text_handler xu ly nhan nut truoc album-title match;
   loai hanh dong: text, ref_link, url, webapp, remove_keyboard, stats, stats_admin
-  (+ owner_only). Web: cot nut ban phim trong Quan ly Bot, modal JSON, GET/POST
-  /bots/<id>/reply_menu + GET /bots/reply_menu_sample (owner). Xoa bot xoa luon
-  menu. File: app.py, reply_menu.py, templates/index.html.
+  (+ owner_only). Web: cot "Bàn phím" + modal JSON, GET/POST /bots/<id>/reply_menu
+  + GET /bots/reply_menu_sample (dang nhap dashboard). Xoa bot xoa luon menu.
+  File: app.py, reply_menu.py, templates/index.html.
 
 [2026-05-14] Dong bo muc (9) + them dong nhat ky cho commit f50e262 (commit 7f058fc).
 

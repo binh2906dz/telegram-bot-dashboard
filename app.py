@@ -2824,14 +2824,14 @@ def toggle_bot_responder(bot_id):
 
 
 @app.route("/bots/reply_menu_sample", methods=["GET"])
-@owner_required
+@login_required
 def bot_reply_menu_sample():
-    """Example menu JSON for the dashboard editor."""
+    """Example menu JSON for the dashboard editor (owner + manager)."""
     return jsonify({"ok": True, "menu": SAMPLE_REPLY_MENU})
 
 
 @app.route("/bots/<bot_id>/reply_menu", methods=["GET", "POST"])
-@owner_required
+@login_required
 def bot_reply_menu_api(bot_id):
     """Get or save per-bot Telegram reply keyboard menu (JSON)."""
     bots = db_get_bots()
