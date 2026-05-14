@@ -106,15 +106,20 @@ _admin_str = os.environ.get("ADMIN_CHAT_ID", os.environ.get("ADMIN_ID", ""))
 ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
 WEBHOOK_URL = (
-    # Precedence: WEBHOOK_URL (explicit override) → BASE_URL / APP_BASE_URL / DOMAIN
-    # (common deployment aliases) → built-in production domain.
-    # Set WEBHOOK_URL (or any alias) in your .env file to point to your server.
+    # Precedence: WEBHOOK_URL (explicit override) → BASE_URL / APP_BASE_URL / DOMAIN.
+    # No hard-coded fallback domain — wrong default breaks other deployments and can
+    # point webhooks at someone else's host. Set at least DOMAIN or APP_BASE_URL in .env.
     os.environ.get("WEBHOOK_URL")
     or os.environ.get("BASE_URL")
     or os.environ.get("APP_BASE_URL")
     or os.environ.get("DOMAIN")
-    or "https://ngeyhsvge683874.online"
+    or ""
 ).rstrip("/")
+if not WEBHOOK_URL:
+    log.warning(
+        "WEBHOOK_URL is empty after resolving env (WEBHOOK_URL, BASE_URL, APP_BASE_URL, DOMAIN). "
+        "Telegram webhooks will not be registered until you set one of these in .env."
+    )
 
 # WEBHOOK_UPDATE_TIMEOUT was previously used to block the Flask worker until
 # PTB finished processing an update.  The webhook handler now uses fire-and-
@@ -3772,6 +3777,13 @@ if BOT_TOKEN or db_get_bots():
                     continue
                 if bot_id in self._running_apps:
                     log.debug("BotManager._reload() – bot %s already running, skipping", bot_id)
+                    continue
+                if not (WEBHOOK_URL or "").strip():
+                    log.error(
+                        "BotManager._reload() – WEBHOOK_URL is empty; cannot register Telegram webhook. "
+                        "Set DOMAIN, APP_BASE_URL, BASE_URL, or WEBHOOK_URL in .env. Skipping bot id=%s.",
+                        bot_id,
+                    )
                     continue
                 log.info(
                     "BotManager._reload() – starting bot id=%s name=%s (token length=%d)",

@@ -175,7 +175,8 @@
             {% if img_list %}
               <div class="post-images count-{{ [img_list|length, 4]|min }}">
                 {% for item in img_list %}
-                  {% set src = item.url | replace("/static/uploads/", "/media/") | replace("http://", "https://") %}
+                  {# Dùng đúng đường dẫn lưu trong DB (/static/uploads/...) — khớp Nginx alias + Flask static #}
+                  {% set src = item.url | replace("http://", "https://") %}
                   
                   <img src="{{ src | replace('http://', 'https://') }}" alt="" loading="lazy">
                 {% endfor %}
@@ -184,7 +185,7 @@
 
             {# Videos #}
             {% for item in vid_list %}
-              {% set src = item.url | replace("/static/uploads/", "/media/") | replace("http://", "https://") %}
+              {% set src = item.url | replace("http://", "https://") %}
               {% if src.endswith('.m3u8') %}
                 {# HLS: link to stream player #}
                 {% set file_id = src.split('/')[-2] %}

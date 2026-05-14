@@ -6,12 +6,16 @@
 set -e
 
 REPO_URL="https://github.com/binh2906dz/telegram-bot-dashboard.git"
-REPO_BRANCH="setup-local-streaming"
+# Ghi đè trước khi chạy: export REPO_BRANCH=my-branch
+REPO_BRANCH="${REPO_BRANCH:-main}"
 APP_DIR="/root/telegram-bot-dashboard"
-DOMAIN="ngeyhsvge683874.online"
+# Chỉ hostname (không gồm https://), ví dụ: example.com — ghi đè: export DOMAIN=example.com
+DOMAIN="${DOMAIN:-ngeyhsvge683874.online}"
 GUNICORN_PORT="5000"
 SERVICE_NAME="bot"
 
+echo "Cấu hình clone: REPO_BRANCH=$REPO_BRANCH | DOMAIN (hostname)=$DOMAIN | APP_DIR=$APP_DIR"
+echo "  (Ghi đè: export REPO_BRANCH=... DOMAIN=ten-mien.com trước khi chạy script)"
 echo "=================================================================="
 echo "🚀 BẮT ĐẦU CÀI ĐẶT HỆ THỐNG WEB DASHBOARD LÊN MÁY CHỦ"
 echo "=================================================================="
