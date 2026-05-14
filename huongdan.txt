@@ -234,6 +234,12 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
   ngày giữ một bản mới nhất. Tên file backup theo giờ `Asia/Ho_Chi_Minh`. File: app.py,
   templates/index.html. (commit 4e9e553).
 
+[2026-05-14] UI dashboard + login: theme “pro VIP” — nền mesh gradient cố định, topbar/sidebar
+  glass mạnh hơn, nav active/hover, thẻ stat/dash-card nâng + stagger nhẹ, bảng hover accent,
+  nút accent shimmer, toast gradient + slide-in, lightbox blur; `prefers-reduced-motion` tắt
+  hiệu ứng. Trang login: orb nền, thẻ glass, nút đăng nhập gradient + shimmer. Chỉ CSS/HTML
+  style, không đổi route/JS logic.
+
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
 ================================================================================
