@@ -135,7 +135,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
-e144d76 docs: huongdan nhật ký + git log cho 3f2db93 (theme sáng, reply menu)
+6a2f1fa docs: huongdan nhật ký + git log cho 3f2db93 (theme sáng, reply menu)
 3f2db93 feat(ui): light dashboard theme; reply menu inline category/menu + form wiring
 af4ac0a feat: reply keyboard dedicated page, global config sync all bots
 3e4495e fix: web reply menu for manager + clearer Bots table
@@ -162,7 +162,7 @@ inline_category (chọn danh mục + __uncategorized), chữ nút inline tuỳ c
 đọc/ghi category_id và button_label đúng loại; mẫu JSON thêm hàng ví dụ menu +
 danh mục. Bot: webapp dùng button_label; xử lý inline_menu / inline_category;
 index truyền reply_menu_categories. File: templates/index.html, templates/login.html,
-reply_menu.py, app.py (commit 3f2db93; nhật ký/docs: e144d76).
+reply_menu.py, app.py (commits 3f2db93, 6a2f1fa).
 
 [2026-05-14] Bàn phím Telegram (web): trang riêng sidebar "Bàn phím Telegram", form
   hàng/nút/chức năng (không cần JSON). Cấu hình chung: app_config key
