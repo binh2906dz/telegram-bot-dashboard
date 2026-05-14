@@ -3798,7 +3798,14 @@ if BOT_TOKEN or db_get_bots():
                     log.info("BotManager._reload() – calling start() for bot %s", bot_id)
                     await ptb.start()
                     webhook_endpoint = f"{WEBHOOK_URL}/webhook/{token}"
-                    log.info("BotManager._reload() – registering webhook for bot %s: %s", bot_id, webhook_endpoint)
+                    # Never log full webhook URL — it embeds the bot token in the path.
+                    log.info(
+                        "BotManager._reload() – registering webhook for bot_id=%s name=%s base=%s token_len=%d",
+                        bot_id,
+                        cfg_entry.get("name", "?"),
+                        WEBHOOK_URL,
+                        len(token),
+                    )
                     await ptb.bot.set_webhook(
                         url=webhook_endpoint,
                         allowed_updates=["message", "callback_query"],
@@ -3807,7 +3814,13 @@ if BOT_TOKEN or db_get_bots():
                     self._running_apps[bot_id] = ptb
                     # Maintain O(1) token→app index for webhook dispatch
                     self._token_to_app[token] = ptb
-                    log.info("✅ Bot %s (%s) webhook registered at %s", bot_id, cfg_entry.get("name", "?"), webhook_endpoint)
+                    log.info(
+                        "✅ Bot %s (%s) webhook registered (base=%s token_len=%d)",
+                        bot_id,
+                        cfg_entry.get("name", "?"),
+                        WEBHOOK_URL,
+                        len(token),
+                    )
                 except Exception as exc:
                     log.error(
                         "Failed to start bot %s (%s): %s",

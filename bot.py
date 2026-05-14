@@ -1,3 +1,13 @@
+"""Standalone Telegram bot (single TOKEN from environment).
+
+Production with the web dashboard: use Gunicorn + app.py only.  BotManager inside
+app.py registers webhooks, shares data.db, and powers the admin UI.  Run this file
+only for local debugging or a deliberate second process — not alongside the normal
+VPS systemd stack unless you understand duplicate-bot risks.
+
+PaaS entrypoints may use start.sh / Procfile (Gunicorn + run_bot.py); Ubuntu VPS
+systemd installs should follow setup_vps.sh (Gunicorn only).
+"""
 import json, os, asyncio, datetime, sqlite3, re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, WebAppInfo
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes

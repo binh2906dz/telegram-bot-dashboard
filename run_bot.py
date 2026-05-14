@@ -1,3 +1,9 @@
+"""Optional bot runner used by start.sh / some PaaS Procfiles.
+
+Typical Ubuntu VPS + systemd uses only ``gunicorn app:app`` (BotManager starts
+inside the worker).  Do not enable this script there unless you intend a second
+bot process — it can fight over the same bot-manager lock / SQLite.
+"""
 import time
 import logging
 

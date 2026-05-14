@@ -236,44 +236,7 @@
     <footer>— Hết album —</footer>
   </div>
 
-
-
-<script>
-document.addEventListener("DOMContentLoaded", function() {
-    const origin = window.location.protocol + "//" + window.location.host;
-    
-    // Xử lý ảnh
-    const images = document.querySelectorAll('.lazy-load-image');
-    images.forEach(img => {
-        let src = img.getAttribute('data-src');
-        if (!src) return;
-        // Đảm bảo là đường dẫn tuyệt đối và là HTTPS
-        if (src.startsWith('/')) src = origin + src;
-        src = src.replace('http://', 'https://');
-        
-        // Thêm tham số timestamp để phá cache trình duyệt cũ
-        const finalUrl = src + (src.includes('?') ? '&' : '?') + 't=' + new Date().getTime();
-        
-        // Ép tải ảnh
-        img.onerror = function() { console.error("Lỗi tải ảnh:", finalUrl); };
-        img.src = finalUrl;
-    });
-
-    // Xử lý Video
-    const videos = document.querySelectorAll('.lazy-load-video');
-    videos.forEach(source => {
-        let src = source.getAttribute('data-src');
-        if (!src) return;
-        if (src.startsWith('/')) src = origin + src;
-        src = src.replace('http://', 'https://');
-        
-        source.src = src;
-        const videoTag = source.parentElement;
-        if (videoTag) videoTag.load();
-    });
-});
-</script>
-
+  {# Ảnh/video dùng src trực tiếp ở trên; block lazy-load cũ (.lazy-load-*) không khớp DOM và đã gỡ. #}
 
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>

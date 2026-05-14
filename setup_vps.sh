@@ -2,6 +2,10 @@
 # =============================================================================
 # setup_vps.sh — Cài đặt hoàn chỉnh Web Stack cho Telegram Bot Dashboard
 # Dán toàn bộ script này vào Termius rồi nhấn Enter.
+#
+# Deploy model: systemd runs ONLY ``gunicorn app:app`` (BotManager + Flask in one worker).
+# That differs from start.sh / Procfile (PaaS), which may also spawn ``run_bot.py``.
+# On this VPS path, do not add run_bot.py on top unless you know why.
 # =============================================================================
 set -e
 
