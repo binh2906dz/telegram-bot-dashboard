@@ -13,6 +13,9 @@ data.db-journal
 data.db-wal
 data.db-shm
 
+# Gunicorn bot-manager inter-process lock (runtime)
+telegram_bot_manager.lock
+
 # Backups & uploads
 static/backups/
 static/uploads/
