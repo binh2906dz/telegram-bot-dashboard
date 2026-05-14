@@ -135,6 +135,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+af4ac0a feat: reply keyboard dedicated page, global config sync all bots
 3e4495e fix: web reply menu for manager + clearer Bots table
 046f871 docs: huongdan (9) them hash reply keyboard (2046f30)
 1275daf docs: huongdan nhật ký (10) sau push reply keyboard
