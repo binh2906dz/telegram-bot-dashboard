@@ -953,35 +953,62 @@ def db_get_all_subscriber_ids() -> set:
         return set()
 
 
-def db_count_reachable_recipients_for_bot(bot_id: str) -> int:
-    """Count unique user_ids this bot would target like web broadcast: subscribers for
-    this bot (fallback to 'global' if none) merged with telegram_ids.status='active'."""
+def db_count_subscribers_for_bot(bot_id: str) -> int:
+    """Distinct /start users stored for this bot_id in subscribers (fallback 'global' if none)."""
     db_key = "global" if not bot_id or bot_id == "env_default" else str(bot_id).strip()
     if not db_key:
         db_key = "global"
     try:
         with get_db() as conn:
-            rows = list(
-                conn.execute(
-                    "SELECT user_id FROM subscribers WHERE bot_id=?",
-                    (db_key,),
-                ).fetchall()
-            )
-            if not rows and db_key != "global":
-                rows = list(
-                    conn.execute(
-                        "SELECT user_id FROM subscribers WHERE bot_id='global'",
-                    ).fetchall()
-                )
-            combined: set[str] = {str(r["user_id"]) for r in rows}
-            for row in conn.execute(
-                "SELECT user_id FROM telegram_ids WHERE status = 'active'",
-            ).fetchall():
-                combined.add(str(row["user_id"]))
-        return len(combined)
+            key = db_key
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT user_id) AS c FROM subscribers WHERE bot_id=?",
+                (key,),
+            ).fetchone()
+            n = int(row["c"] or 0) if row else 0
+            if n == 0 and key != "global":
+                row = conn.execute(
+                    "SELECT COUNT(DISTINCT user_id) AS c FROM subscribers WHERE bot_id='global'",
+                ).fetchone()
+                n = int(row["c"] or 0) if row else 0
+        return n
     except Exception as exc:
-        log.error("db_count_reachable_recipients_for_bot(%s) failed: %s", bot_id, exc)
+        log.error("db_count_subscribers_for_bot(%s) failed: %s", bot_id, exc)
         return 0
+
+
+def db_list_subscriber_ids_for_bot(
+    bot_id: str, limit: int = 1000, offset: int = 0
+) -> tuple[list[str], int]:
+    """Return (page of user_id strings, total distinct count) for this bot's subscribers (global fallback)."""
+    db_key = "global" if not bot_id or bot_id == "env_default" else str(bot_id).strip()
+    if not db_key:
+        db_key = "global"
+    try:
+        with get_db() as conn:
+            key = db_key
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT user_id) AS c FROM subscribers WHERE bot_id=?",
+                (key,),
+            ).fetchone()
+            total = int(row["c"] or 0) if row else 0
+            if total == 0 and key != "global":
+                key = "global"
+                row = conn.execute(
+                    "SELECT COUNT(DISTINCT user_id) AS c FROM subscribers WHERE bot_id='global'",
+                ).fetchone()
+                total = int(row["c"] or 0) if row else 0
+            rows = conn.execute(
+                """
+                SELECT user_id FROM subscribers WHERE bot_id=?
+                GROUP BY user_id ORDER BY user_id LIMIT ? OFFSET ?
+                """,
+                (key, int(limit), int(offset)),
+            ).fetchall()
+        return [str(r["user_id"]) for r in rows], total
+    except Exception as exc:
+        log.error("db_list_subscriber_ids_for_bot(%s) failed: %s", bot_id, exc)
+        return [], 0
 
 
 def db_get_slogans() -> dict:
@@ -2922,8 +2949,8 @@ def reply_menu_global_api():
 def bots_health():
     """Return health status and per-bot stats for all bots in the database.
 
-    subs_count: unique recipients this bot would include when broadcasting like the web
-    flow — per-bot /start list (fallback global) plus all telegram_ids with status active.
+    subs_count: distinct users who pressed /start for this bot (SQLite subscribers for
+    bot_id, falling back to 'global' rows if the bot has no dedicated rows).
     """
     bots_list = db_get_bots()
     # Load analytics from DB
@@ -2954,7 +2981,7 @@ def bots_health():
                 "id": bot_id,
                 "status": status,
                 "auto_responder": bot.get("auto_responder", True),
-                "subs_count": db_count_reachable_recipients_for_bot(bot_id),
+                "subs_count": db_count_subscribers_for_bot(bot_id),
                 "messages_sent": a.get("messages_sent", 0),
                 "starts_count": a.get("starts_count", 0),
                 "interactions_count": a.get("interactions_count", 0),
@@ -2986,6 +3013,31 @@ def get_bot_token(bot_id):
     if not bot:
         return jsonify({"ok": False, "error": "Bot không tồn tại"}), 404
     return jsonify({"ok": True, "token": bot.get("token", "")})
+
+
+@app.route("/bots/<bot_id>/subscribers", methods=["GET"])
+@owner_required
+def bot_subscribers_api(bot_id: str):
+    """List subscriber user_ids for one bot (owner). Paginated; max 2000 per page."""
+    bots = db_get_bots()
+    if not any(b.get("id") == bot_id for b in bots):
+        return jsonify({"ok": False, "error": "Bot không tồn tại"}), 404
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        per_page = max(1, min(50000, int(request.args.get("per_page", 12000))))
+    except (TypeError, ValueError):
+        page, per_page = 1, 1000
+    offset = (page - 1) * per_page
+    ids, total = db_list_subscriber_ids_for_bot(bot_id, limit=per_page, offset=offset)
+    return jsonify({
+        "ok": True,
+        "bot_id": bot_id,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "ids": ids,
+        "has_more": page * per_page < total,
+    })
 
 
 def _get_all_active_bots() -> list:

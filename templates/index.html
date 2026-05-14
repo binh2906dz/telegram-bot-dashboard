@@ -411,7 +411,7 @@
           {% if bots %}
           <div class="table-responsive">
             <table class="table table-hover align-middle table-borderless data-table mb-0" id="botsTable">
-              <thead><tr><th class="ps-3">Tên Bot</th><th>Token</th><th>Admin ID</th><th>Trạng thái</th><th>Auto-Responder</th><th>Subscribers</th><th>▶ Start</th><th>📤 Gửi</th><th>🖱 Click</th><th>💬 Phản hồi</th><th style="width:60px;"></th></tr></thead>
+              <thead><tr><th class="ps-3">Tên Bot</th><th>Token</th><th>Admin ID</th><th>Trạng thái</th><th>Auto-Responder</th><th title="Số người đã /start với đúng bot này (bảng subscribers; mỗi bot khác nhau). Bấm biểu tượng danh sách để xem User ID.">Subscribers</th><th>▶ Start</th><th>📤 Gửi</th><th>🖱 Click</th><th>💬 Phản hồi</th><th style="width:60px;"></th></tr></thead>
               <tbody>
                 {% for bot in bots %}
                 <tr id="bot-row-{{ bot.id }}">
@@ -440,7 +440,12 @@
                     </span>
                     {% endif %}
                   </td>
-                  <td id="bot-subs-{{ bot.id }}">&#8212;</td>
+                  <td class="text-nowrap">
+                    <span id="bot-subs-{{ bot.id }}">&#8212;</span>
+                    {% if role == 'owner' %}
+                    <button type="button" class="btn btn-sm btn-link text-secondary p-0 ms-1 align-baseline" title="Xem danh sách User ID đã /start bot này" data-bot-id="{{ bot.id }}" data-bot-name="{{ bot.name|e }}" onclick="showBotSubscriberIdsModal(this)"><i class="bi bi-card-list"></i></button>
+                    {% endif %}
+                  </td>
                   <td id="bot-starts-{{ bot.id }}">&#8212;</td>
                   <td id="bot-msgs-{{ bot.id }}">&#8212;</td>
                   <td id="bot-interactions-{{ bot.id }}">&#8212;</td>
@@ -1216,6 +1221,22 @@
 </div>
 
 <!-- Add Bot Modal -->
+<div class="modal fade" id="botSubsModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="botSubsModalTitle">Subscriber IDs</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-2" id="botSubsModalMeta"></p>
+        <pre class="small mb-2 p-2 rounded border bg-light" id="botSubsModalBody" style="max-height:55vh;overflow:auto;white-space:pre-wrap;word-break:break-all;"></pre>
+        <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="botSubsLoadMoreBtn" onclick="loadMoreBotSubscriberIds()">Tải thêm ID…</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="addBotModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
@@ -1399,7 +1420,7 @@ async function loadBotHealth(btn) {
       const interEl = document.getElementById('bot-interactions-' + bot.id);
       const repEl = document.getElementById('bot-replies-' + bot.id);
       if (statusEl) { const icons={LIVE:'&#128994;',BAN:'&#128308;',ERROR:'&#128992;'},cls={LIVE:'status-live',BAN:'status-ban',ERROR:'status-error'}; statusEl.innerHTML='<span class="'+( cls[bot.status]||'status-error')+'">'+( icons[bot.status]||'&#128992;')+' '+bot.status+'</span>'; }
-      if (subsEl) subsEl.textContent = bot.subs_count ?? '—';
+      if (subsEl) subsEl.textContent = (bot.subs_count != null && bot.subs_count !== '') ? String(bot.subs_count) : '—';
       if (msgsEl) msgsEl.textContent = bot.messages_sent ?? '—';
       if (startsEl) startsEl.textContent = bot.starts_count ?? '—';
       if (interEl) interEl.textContent = bot.interactions_count ?? '—';
@@ -1408,6 +1429,67 @@ async function loadBotHealth(btn) {
     if (btn) showToast('&#9989; Đã cập nhật trạng thái bot!', 'success');
   } catch(e) { if (btn) showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { if (btn) { btn.disabled = false; btn.innerHTML = origHtml; } }
+}
+var _botSubsPager = { botId: '', name: '', page: 1, perPage: 12000, append: false };
+async function fetchBotSubsPage() {
+  var meta = document.getElementById('botSubsModalMeta');
+  var body = document.getElementById('botSubsModalBody');
+  var moreBtn = document.getElementById('botSubsLoadMoreBtn');
+  var bid = _botSubsPager.botId;
+  var p = _botSubsPager.page;
+  var pp = _botSubsPager.perPage;
+  const res = await fetch('/bots/' + encodeURIComponent(bid) + '/subscribers?page=' + p + '&per_page=' + pp, { credentials: 'same-origin' });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  var lines = (data.ids || []).join('\n');
+  if (_botSubsPager.append && body) {
+    body.textContent = (body.textContent ? body.textContent + '\n' : '') + (lines || '');
+  } else if (body) {
+    body.textContent = lines || '(Trống)';
+  }
+  if (meta) {
+    var nShown = (p - 1) * pp + (data.ids || []).length;
+    meta.textContent = 'Tổng ' + (data.total || 0) + ' User ID — đã hiển thị ' + Math.min(nShown, data.total || 0) + ' dòng.';
+    if (moreBtn) {
+      if (data.has_more) { moreBtn.classList.remove('d-none'); } else { moreBtn.classList.add('d-none'); }
+    }
+  }
+}
+async function showBotSubscriberIdsModal(el) {
+  _botSubsPager.botId = el.getAttribute('data-bot-id') || '';
+  _botSubsPager.name = el.getAttribute('data-bot-name') || _botSubsPager.botId;
+  _botSubsPager.page = 1;
+  _botSubsPager.append = false;
+  var title = document.getElementById('botSubsModalTitle');
+  var meta = document.getElementById('botSubsModalMeta');
+  var body = document.getElementById('botSubsModalBody');
+  var moreBtn = document.getElementById('botSubsLoadMoreBtn');
+  if (title) title.textContent = 'User ID đã /start — ' + _botSubsPager.name;
+  if (meta) meta.textContent = 'Đang tải...';
+  if (body) body.textContent = '';
+  if (moreBtn) { moreBtn.classList.add('d-none'); moreBtn.disabled = false; }
+  var mEl = document.getElementById('botSubsModal');
+  if (!mEl) return;
+  bootstrap.Modal.getOrCreateInstance(mEl).show();
+  try {
+    await fetchBotSubsPage();
+  } catch (e) {
+    if (meta) meta.textContent = '';
+    if (body) body.textContent = 'Lỗi: ' + e.message;
+  }
+}
+async function loadMoreBotSubscriberIds() {
+  var moreBtn = document.getElementById('botSubsLoadMoreBtn');
+  if (moreBtn) moreBtn.disabled = true;
+  _botSubsPager.page += 1;
+  _botSubsPager.append = true;
+  try {
+    await fetchBotSubsPage();
+  } catch (e) {
+    showToast('&#10060; ' + e.message, 'error');
+  } finally {
+    if (moreBtn) moreBtn.disabled = false;
+  }
 }
 async function toggleAutoResponder(botId, checkbox) {
   const label = document.getElementById('ar-label-' + botId);

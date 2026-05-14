@@ -209,10 +209,14 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
 [2026-05-14] fix(ui): logo topbar dùng màu accent cố định nếu trình duyệt không hỗ trợ
   chữ gradient (background-clip: text). File: templates/index.html (818c82f).
 
-[2026-05-14] Quản lý Bot — API /bots/health: cột `subs_count` đếm theo phương án B — số
-  `user_id` duy nhất = (subscribers của `bot_id` đó, nếu rỗng thì fallback `global`) ∪
-  (`telegram_ids` có `status='active'`), cùng logic tập nhận như broadcast trên web.
-  Thêm `db_count_reachable_recipients_for_bot`. File: app.py (commit 7423bef).
+[2026-05-14] Quản lý Bot — `subs_count` trong /bots/health: chỉ đếm `subscribers` theo
+  `bot_id` (nếu không có bản ghi thì fallback `global`), không cộng `telegram_ids` active
+  (tránh mọi bot cùng một con số lớn). Thêm GET /bots/<bot_id>/subscribers (owner, phân
+  trang per_page tối đa 50000, mặc định 12000) và nút trên bảng bot để xem danh sách
+  User ID. File: app.py, templates/index.html.
+
+[2026-05-14] (đã thay) Trước đây ghi nhận phương án B cộng union với telegram_ids — đã
+  bỏ vì làm Subscribers gần như giống nhau giữa các bot.
 
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
