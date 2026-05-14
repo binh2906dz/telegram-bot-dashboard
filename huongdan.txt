@@ -135,7 +135,8 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
-7423bef fix(bots): subs_count = reachable IDs per bot (subs ∪ active telegram_ids)
+cf1c360 fix(bots): subs_count chi bang subscribers theo bot; GET /bots/<id>/subscribers + modal
+7423bef fix(bots): subs_count = reachable IDs per bot (subs ∪ active telegram_ids) — da thay boi cf1c360
 818c82f fix(ui): brand text fallback khi trình duyệt không clip gradient
 30af0af docs: huongdan chỉnh hash commit UI (6ee8a54)
 6ee8a54 feat(ui): premium layout — sidebar flow, Jakarta font, scoped nav active
@@ -217,6 +218,8 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
 
 [2026-05-14] (đã thay) Trước đây ghi nhận phương án B cộng union với telegram_ids — đã
   bỏ vì làm Subscribers gần như giống nhau giữa các bot.
+
+[2026-05-14] docs: dong bo muc (9) git log sau push fix subscribers (commit cf1c360).
 
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
