@@ -132,7 +132,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
-feat: reply keyboard menu JSON + dashboard + bot_reply_menus table (xem git log main)
+2046f30 feat: reply keyboard menu JSON + dashboard + bot_reply_menus table
 74974ca docs: huongdan nhật ký cho 7f058fc
 7f058fc docs: sync huongdan git log + nhật ký f50e262
 f50e262 docs: enforce read-then-log workflow in huongdan.txt + Cursor rule
