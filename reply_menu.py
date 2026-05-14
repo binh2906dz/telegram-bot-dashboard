@@ -11,7 +11,9 @@ Action types:
                   {ref_link}, {bot_username})
   ref_link      — body (intro), bonus_text; appends invite link
   url           — body, url, optional button_label
-  webapp        — body, album_id (Mini App bridge)
+  webapp        — body, album_id (Mini App bridge), optional button_label
+  inline_menu   — body + optional button_label → nút inline mở menu danh mục/album (callback menu)
+  inline_category — body, category_id (id danh mục hoặc __uncategorized), optional button_label
   remove_keyboard — optional body; hides reply keyboard
   stats         — public aggregate stats for this bot
   stats_admin   — same as /stats command (owner_only enforced)
@@ -32,10 +34,30 @@ DEFAULT_REPLY_MENU: dict[str, Any] = {
 }
 
 _ALLOWED_CELL_KEYS = frozenset(
-    {"label", "type", "body", "url", "album_id", "owner_only", "bonus_text", "button_label"}
+    {
+        "label",
+        "type",
+        "body",
+        "url",
+        "album_id",
+        "category_id",
+        "owner_only",
+        "bonus_text",
+        "button_label",
+    }
 )
 _ALLOWED_TYPES = frozenset(
-    {"text", "ref_link", "url", "webapp", "remove_keyboard", "stats", "stats_admin"}
+    {
+        "text",
+        "ref_link",
+        "url",
+        "webapp",
+        "inline_menu",
+        "inline_category",
+        "remove_keyboard",
+        "stats",
+        "stats_admin",
+    }
 )
 
 # Sample shown in dashboard ("Tải mẫu") — owner can edit freely after load.
@@ -51,6 +73,10 @@ SAMPLE_REPLY_MENU: dict[str, Any] = {
         [
             {"label": "📊 Thống kê bot", "type": "stats", "body": "📊 Thống kê bot"},
             {"label": "🎁 Code & Link", "type": "url", "body": "🎁 Nhận code tại đây:", "url": "https://t.me", "button_label": "Mở link"},
+        ],
+        [
+            {"label": "📂 Menu album", "type": "inline_menu", "body": "Chọn danh mục hoặc album trong menu bên dưới:", "button_label": "📂 Mở menu"},
+            {"label": "📋 Chưa phân loại", "type": "inline_category", "body": "Album không gắn danh mục:", "category_id": "__uncategorized", "button_label": "Xem album"},
         ],
     ],
 }
@@ -77,7 +103,17 @@ def _sanitize_cell(cell: dict[str, Any]) -> dict[str, Any] | None:
     if typ not in _ALLOWED_TYPES:
         typ = "text"
     out: dict[str, Any] = {"label": label, "type": typ}
-    if typ in ("text", "ref_link", "url", "webapp", "remove_keyboard", "stats", "stats_admin"):
+    if typ in (
+        "text",
+        "ref_link",
+        "url",
+        "webapp",
+        "inline_menu",
+        "inline_category",
+        "remove_keyboard",
+        "stats",
+        "stats_admin",
+    ):
         body = cell.get("body")
         if body is not None:
             out["body"] = str(body)
@@ -89,6 +125,17 @@ def _sanitize_cell(cell: dict[str, Any]) -> dict[str, Any] | None:
             out["button_label"] = str(cell.get("button_label")).strip()
     if typ == "webapp":
         out["album_id"] = str(cell.get("album_id", "")).strip()
+        if cell.get("button_label"):
+            out["button_label"] = str(cell.get("button_label")).strip()
+    if typ == "inline_menu" and cell.get("button_label"):
+        out["button_label"] = str(cell.get("button_label")).strip()
+    if typ == "inline_category":
+        cid = str(cell.get("category_id", "")).strip()
+        if not cid:
+            return None
+        out["category_id"] = cid
+        if cell.get("button_label"):
+            out["button_label"] = str(cell.get("button_label")).strip()
     if typ == "stats_admin":
         out["owner_only"] = True
     elif cell.get("owner_only"):

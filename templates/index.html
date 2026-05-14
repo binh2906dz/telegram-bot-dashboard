@@ -9,85 +9,170 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
   <style>
     :root {
-      --accent: #ff5e00; --accent-light: #ff8533;
-      --card-bg: #1a1d23; --sidebar-bg: #13151a;
-      --sidebar-width: 240px; --topbar-height: 56px;
-      --body-bg: #0f1117; --border-color: #2a2d35;
+      --accent: #e85d04;
+      --accent-light: #ff7a2e;
+      --accent-soft: rgba(232, 93, 4, 0.12);
+      --text-primary: #1c2333;
+      --text-muted: #5c6578;
+      --card-bg: #ffffff;
+      --sidebar-bg: #ffffff;
+      --sidebar-width: 240px;
+      --topbar-height: 56px;
+      --body-bg: #eef1f6;
+      --border-color: #dde2eb;
     }
     *, *::before, *::after { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
-    body { background: var(--body-bg); color: #e0e0e0; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; }
-    .topbar { height: var(--topbar-height); background: var(--sidebar-bg); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; padding: 0 16px; gap: 12px; position: fixed; top: 0; left: 0; right: 0; z-index: 1050; }
+    body {
+      background: var(--body-bg);
+      color: var(--text-primary);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      height: var(--topbar-height);
+      background: var(--sidebar-bg);
+      border-bottom: 1px solid var(--border-color);
+      box-shadow: 0 1px 0 rgba(28, 35, 51, 0.04);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1050;
+    }
     .topbar .brand { font-size: 1.1rem; font-weight: 700; color: var(--accent); white-space: nowrap; margin-right: auto; }
-    .sidebar-toggle { background: none; border: none; color: #ccc; font-size: 1.4rem; cursor: pointer; padding: 2px 6px; border-radius: 6px; }
-    .sidebar-toggle:hover { background: rgba(255,255,255,.06); }
+    .sidebar-toggle { background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer; padding: 2px 6px; border-radius: 8px; }
+    .sidebar-toggle:hover { background: var(--body-bg); color: var(--text-primary); }
     .layout { display: flex; flex: 1; margin-top: var(--topbar-height); overflow: hidden; }
-    .sidebar { width: var(--sidebar-width); min-width: var(--sidebar-width); background: var(--sidebar-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; height: calc(100vh - var(--topbar-height)); position: fixed; top: var(--topbar-height); left: 0; z-index: 1040; transition: transform .25s ease; overflow-y: auto; }
+    .sidebar {
+      width: var(--sidebar-width);
+      min-width: var(--sidebar-width);
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border-color);
+      box-shadow: 2px 0 12px rgba(28, 35, 51, 0.04);
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - var(--topbar-height));
+      position: fixed;
+      top: var(--topbar-height);
+      left: 0;
+      z-index: 1040;
+      transition: transform .25s ease;
+      overflow-y: auto;
+    }
     .sidebar.collapsed { transform: translateX(calc(-1 * var(--sidebar-width))); }
-    .nav-section-label { font-size: .68rem; text-transform: uppercase; color: #555; font-weight: 700; letter-spacing: 1px; padding: 16px 16px 6px; }
-    .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; cursor: pointer; font-size: .9rem; color: #aaa; border-left: 3px solid transparent; user-select: none; transition: background .15s, color .15s; }
-    .nav-item:hover { background: rgba(255,255,255,.04); color: #e0e0e0; }
-    .nav-item.active { color: var(--accent); background: rgba(255,94,0,.08); border-left-color: var(--accent); }
+    .nav-section-label { font-size: .68rem; text-transform: uppercase; color: #94a3b8; font-weight: 700; letter-spacing: 1px; padding: 16px 16px 6px; }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      cursor: pointer;
+      font-size: .9rem;
+      color: #475569;
+      border-left: 3px solid transparent;
+      user-select: none;
+      transition: background .15s, color .15s;
+    }
+    .nav-item:hover { background: #f1f5f9; color: var(--text-primary); }
+    .nav-item.active { color: var(--accent); background: var(--accent-soft); border-left-color: var(--accent); font-weight: 600; }
     .nav-item i { font-size: 1rem; width: 20px; text-align: center; }
     .sidebar-footer { margin-top: auto; padding: 12px 16px; border-top: 1px solid var(--border-color); }
-    .main-content { flex: 1; margin-left: var(--sidebar-width); transition: margin-left .25s ease; overflow-y: auto; height: calc(100vh - var(--topbar-height)); padding: 24px 20px; }
+    .main-content {
+      flex: 1;
+      margin-left: var(--sidebar-width);
+      transition: margin-left .25s ease;
+      overflow-y: auto;
+      height: calc(100vh - var(--topbar-height));
+      padding: 24px 20px;
+    }
     .main-content.expanded { margin-left: 0; }
     .section-page { display: none; }
     .section-page.active { display: block; }
     .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
-    .page-title { font-size: 1.2rem; font-weight: 700; color: #fff; }
+    .page-title { font-size: 1.2rem; font-weight: 700; color: var(--text-primary); }
     .page-title i { color: var(--accent); margin-right: 8px; }
-    .stat-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 18px 20px; display: flex; align-items: center; gap: 14px; transition: transform .15s, box-shadow .15s; }
-    .stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(0,0,0,.4); }
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 18px 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: transform .15s, box-shadow .15s;
+      box-shadow: 0 1px 3px rgba(28, 35, 51, 0.06);
+    }
+    .stat-card:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(28, 35, 51, 0.1); }
     .stat-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; flex-shrink: 0; }
-    .stat-icon.orange { background: rgba(255,94,0,.15); color: var(--accent); }
-    .stat-icon.blue   { background: rgba(0,120,255,.15); color: #4d9fff; }
-    .stat-icon.green  { background: rgba(0,200,83,.15);  color: #00c853; }
-    .stat-icon.red    { background: rgba(244,67,54,.15);  color: #f44336; }
-    .stat-icon.purple { background: rgba(156,39,176,.15); color: #ce93d8; }
-    .stat-icon.yellow { background: rgba(255,193,7,.15);  color: #ffc107; }
-    .stat-value { font-size: 1.7rem; font-weight: 700; line-height: 1.1; }
-    .stat-label { font-size: .76rem; color: #888; margin-top: 2px; }
-    .dash-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; overflow: hidden; }
-    .dash-card-header { padding: 14px 18px; background: rgba(255,255,255,.03); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-    .dash-card-title { font-size: .9rem; font-weight: 600; color: #ccc; text-transform: uppercase; letter-spacing: .6px; }
+    .stat-icon.orange { background: var(--accent-soft); color: var(--accent); }
+    .stat-icon.blue   { background: rgba(59, 130, 246, 0.12); color: #2563eb; }
+    .stat-icon.green  { background: rgba(34, 197, 94, 0.12); color: #16a34a; }
+    .stat-icon.red    { background: rgba(239, 68, 68, 0.12); color: #dc2626; }
+    .stat-icon.purple { background: rgba(168, 85, 247, 0.12); color: #9333ea; }
+    .stat-icon.yellow { background: rgba(234, 179, 8, 0.15); color: #ca8a04; }
+    .stat-value { font-size: 1.7rem; font-weight: 700; line-height: 1.1; color: var(--text-primary); }
+    .stat-label { font-size: .76rem; color: var(--text-muted); margin-top: 2px; }
+    .dash-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; overflow: hidden; box-shadow: 0 1px 3px rgba(28, 35, 51, 0.05); }
+    .dash-card-header { padding: 14px 18px; background: #f8fafc; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+    .dash-card-title { font-size: .9rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .6px; }
     .dash-card-body { padding: 16px 18px; }
     .btn-accent { background: var(--accent); color: #fff; border: none; font-weight: 600; }
     .btn-accent:hover { background: var(--accent-light); color: #fff; }
-    .data-table th { font-size: .75rem; text-transform: uppercase; color: #777; font-weight: 600; }
-    .data-table td { font-size: .85rem; vertical-align: middle; }
+    .data-table th { font-size: .75rem; text-transform: uppercase; color: #64748b; font-weight: 600; border-bottom: 1px solid var(--border-color); }
+    .data-table td { font-size: .85rem; vertical-align: middle; border-color: #f1f5f9; }
+    .table.data-table tbody tr:hover { background: #f8fafc; }
     .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 20px; font-size: .72rem; font-weight: 600; }
-    .status-active  { background: rgba(0,200,83,.15); color: #00c853; }
-    .status-blocked { background: rgba(244,67,54,.15); color: #f44336; }
-    .status-invalid { background: rgba(255,152,0,.15); color: #ff9800; }
-    .status-unknown { background: rgba(150,150,150,.15); color: #999; }
-    .status-live  { color: #00c853; font-weight: 700; font-size: .82rem; }
-    .status-ban   { color: #f44336; font-weight: 700; font-size: .82rem; }
-    .status-error { color: #ff9800; font-weight: 700; font-size: .82rem; }
-    .form-control, .form-control:focus, .form-select, .form-select:focus { background: #0f1117; border-color: var(--border-color); color: #e0e0e0; }
-    .form-control:focus, .form-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,94,0,.12); }
+    .status-active  { background: rgba(34, 197, 94, 0.12); color: #16a34a; }
+    .status-blocked { background: rgba(239, 68, 68, 0.12); color: #dc2626; }
+    .status-invalid { background: rgba(234, 179, 8, 0.15); color: #b45309; }
+    .status-unknown { background: rgba(100, 116, 139, 0.12); color: #64748b; }
+    .status-live  { color: #16a34a; font-weight: 700; font-size: .82rem; }
+    .status-ban   { color: #dc2626; font-weight: 700; font-size: .82rem; }
+    .status-error { color: #d97706; font-weight: 700; font-size: .82rem; }
+    .form-control, .form-control:focus, .form-select, .form-select:focus {
+      background: #fff;
+      border-color: var(--border-color);
+      color: var(--text-primary);
+    }
+    .form-control:focus, .form-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
     textarea.form-control { resize: vertical; }
-    .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; }
+    .modal-content { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; box-shadow: 0 20px 50px rgba(28, 35, 51, 0.15); }
     .modal-header { border-bottom: 1px solid var(--border-color); }
+    .modal-title { color: var(--text-primary); }
     .modal-footer { border-top: 1px solid var(--border-color); }
-    .drop-zone { border: 2px dashed var(--border-color); border-radius: 10px; padding: 24px; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; background: rgba(255,255,255,.02); position: relative; }
-    .drop-zone:hover, .drop-zone.dragover { border-color: var(--accent); background: rgba(255,94,0,.05); }
+    .drop-zone { border: 2px dashed var(--border-color); border-radius: 10px; padding: 24px; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; background: #f8fafc; position: relative; }
+    .drop-zone:hover, .drop-zone.dragover { border-color: var(--accent); background: var(--accent-soft); }
     .preview-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .preview-grid img { width: 70px; height: 70px; object-fit: cover; border-radius: 6px; }
     .photo-thumb { width: 80px; height: 80px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border-color); cursor: pointer; transition: transform .15s; }
     .photo-thumb:hover { transform: scale(1.05); }
     .album-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; overflow: hidden; transition: box-shadow .15s; margin-bottom: 16px; }
-    .album-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.5); }
-    .album-card.active-album { border-color: var(--accent); }
-    .bot-token-mask { font-family: monospace; letter-spacing: .5px; color: #aaa; font-size: .78rem; }
-    .progress { background: rgba(255,255,255,.06); height: 8px; }
-    .empty-state { text-align: center; padding: 40px 20px; color: #555; }
-    .empty-state i { font-size: 2.5rem; display: block; margin-bottom: 12px; }
-    .config-tabs .nav-link { color: #aaa; border: none; border-bottom: 2px solid transparent; background: none; padding: 10px 18px; font-size: .88rem; font-weight: 500; border-radius: 0; }
-    .config-tabs .nav-link.active { color: var(--accent); border-bottom-color: var(--accent); }
-    .config-tabs .nav-link:hover { color: #e0e0e0; background: rgba(255,255,255,.03); }
-    .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1039; }
+    .album-card:hover { box-shadow: 0 8px 24px rgba(28, 35, 51, 0.08); }
+    .album-card.active-album { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+    .bot-token-mask { font-family: monospace; letter-spacing: .5px; color: var(--text-muted); font-size: .78rem; }
+    .progress { background: #e2e8f0; height: 8px; }
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); }
+    .empty-state i { font-size: 2.5rem; display: block; margin-bottom: 12px; color: #cbd5e1; }
+    .config-tabs .nav-link { color: #64748b; border: none; border-bottom: 2px solid transparent; background: none; padding: 10px 18px; font-size: .88rem; font-weight: 500; border-radius: 0; }
+    .config-tabs .nav-link.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+    .config-tabs .nav-link:hover { color: var(--text-primary); background: #f1f5f9; }
+    .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.35); z-index: 1039; }
     .sidebar-overlay.show { display: block; }
+    .rm-row-block { background: var(--card-bg) !important; border-color: var(--border-color) !important; }
+    .rm-row-label { color: var(--accent); font-size: .9rem; }
+    .rm-cell-block {
+      min-width: 260px;
+      max-width: 100%;
+      flex: 1 1 260px;
+      border: 1px solid var(--border-color) !important;
+      background: #f8fafc !important;
+    }
     @media (max-width: 768px) {
       .sidebar { transform: translateX(calc(-1 * var(--sidebar-width))); }
       .sidebar.mobile-open { transform: translateX(0); }
@@ -133,7 +218,7 @@
     <div class="nav-item" id="nav-config" onclick="showSection('config')"><i class="bi bi-gear-fill"></i> Cấu hình Bot</div>
     <div class="nav-section-label">Hệ thống</div>
     <div class="nav-item" id="nav-system" onclick="showSection('system')"><i class="bi bi-shield-fill"></i> Backup &amp; Hệ thống</div>
-    <div class="sidebar-footer"><div style="font-size:.72rem; color:#555;"><i class="bi bi-database me-1"></i>SQLite · Cloudinary · APScheduler</div></div>
+    <div class="sidebar-footer"><div class="text-muted" style="font-size:.72rem;"><i class="bi bi-database me-1"></i>SQLite · Cloudinary · APScheduler</div></div>
   </nav>
 
   <!-- Main Content -->
@@ -216,7 +301,7 @@
         <div class="dash-card-body p-0">
           {% if bots %}
           <div class="table-responsive">
-            <table class="table table-dark table-borderless data-table mb-0" id="botsTable">
+            <table class="table table-hover align-middle table-borderless data-table mb-0" id="botsTable">
               <thead><tr><th class="ps-3">Tên Bot</th><th>Token</th><th>Admin ID</th><th>Trạng thái</th><th>Auto-Responder</th><th>Subscribers</th><th>▶ Start</th><th>📤 Gửi</th><th>🖱 Click</th><th>💬 Phản hồi</th><th style="width:60px;"></th></tr></thead>
               <tbody>
                 {% for bot in bots %}
@@ -317,13 +402,16 @@
             <li><strong>Văn bản</strong> — bot gửi đúng đoạn chữ bạn nhập (có thể dùng <code>{user_id}</code> <code>{username}</code> <code>{ref_link}</code> …).</li>
             <li><strong>Link mời bạn</strong> — thêm dòng link Telegram mời có mã người dùng.</li>
             <li><strong>Mở link web</strong> — tin + một nút mở URL.</li>
-            <li><strong>Mini App (album)</strong> — chọn album trong danh sách → nút mở Mini App.</li>
+            <li><strong>Mini App (album)</strong> — chọn album → nút mở Mini App (có thể đổi chữ nút).</li>
+            <li><strong>Menu danh mục (inline)</strong> — gửi tin + một nút bấm mở đúng menu chọn danh mục/album như nút trong kịch bản bot.</li>
+            <li><strong>Mở một danh mục (inline)</strong> — chọn danh mục (hoặc &quot;Chưa phân loại&quot;) → nút mở danh sách album trong danh mục đó.</li>
             <li><strong>Ẩn bàn phím</strong> — gỡ hàng nút reply (có thể kèm lời nhắn).</li>
             <li><strong>Thống kê (mọi người)</strong> / <strong>Thống kê admin</strong> — số liệu bot; bản admin chỉ admin Telegram của bot mới xem được.</li>
           </ul>
         </div>
       </div>
       <script type="application/json" id="rmAlbumsJson">{{ reply_menu_albums | tojson }}</script>
+      <script type="application/json" id="rmCategoriesJson">{{ reply_menu_categories | tojson }}</script>
       <script type="application/json" id="rmSampleJson">{{ reply_menu_sample | tojson }}</script>
     </div>
 
@@ -353,7 +441,7 @@
         <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-table me-2" style="color:var(--accent);"></i>Hiệu suất từng Bot</span></div>
         <div class="dash-card-body p-0">
           <div class="table-responsive">
-            <table class="table table-dark table-borderless data-table mb-0" id="analyticsTable">
+            <table class="table table-hover align-middle table-borderless data-table mb-0" id="analyticsTable">
               <thead>
                 <tr>
                   <th class="ps-3">Tên Bot</th>
@@ -878,7 +966,7 @@
 <div class="modal fade" id="broadcastModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
     <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-megaphone-fill me-2" style="color:#00c853;"></i>Gửi Thông Báo All &#128226;</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-megaphone-fill me-2" style="color:#00c853;"></i>Gửi Thông Báo All &#128226;</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <div class="mb-3">
           <label class="form-label fw-semibold"><i class="bi bi-chat-left-text me-1" style="color:var(--accent);"></i>Nội dung tin nhắn</label>
@@ -919,7 +1007,7 @@
 <div class="modal fade" id="broadcastAllModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
     <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-broadcast me-2" style="color:#ce93d8;"></i>Broadcast All (Active IDs)</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-broadcast me-2" style="color:#ce93d8;"></i>Broadcast All (Active IDs)</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <div class="mb-3">
           <label class="form-label fw-semibold"><i class="bi bi-chat-left-text me-1" style="color:var(--accent);"></i>Nội dung tin nhắn</label>
@@ -960,7 +1048,7 @@
 <div class="modal fade" id="categoryModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-tags me-2" style="color:#4d9fff;"></i>Quản lý Danh mục (Album lớn)</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-tags me-2" style="color:#4d9fff;"></i>Quản lý Danh mục (Album lớn)</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <form action="/categories/create" method="post" class="mb-4">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -996,7 +1084,7 @@
     <div class="modal-content">
       <form action="/albums/create" method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-        <div class="modal-header"><h5 class="modal-title"><i class="bi bi-folder-plus me-2" style="color:var(--accent);"></i>Tạo Album mới</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <div class="modal-header"><h5 class="modal-title"><i class="bi bi-folder-plus me-2" style="color:var(--accent);"></i>Tạo Album mới</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
           <div class="mb-3"><label class="form-label fw-semibold">Tên Album <span class="text-danger">*</span></label><input name="title" class="form-control" placeholder="VD: Album tháng 4" required autofocus></div>
           
@@ -1022,7 +1110,7 @@
 <div class="modal fade" id="addBotModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-robot me-2" style="color:var(--accent);"></i>Thêm Bot mới</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-robot me-2" style="color:var(--accent);"></i>Thêm Bot mới</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <div class="mb-3"><label class="form-label fw-semibold">Tên Bot <span class="text-danger">*</span></label><input id="botName" class="form-control" placeholder="VD: Bot VIP 2" required></div>
         <div class="mb-3"><label class="form-label fw-semibold">Token <span class="text-danger">*</span></label><input id="botToken" class="form-control" placeholder="123456:ABCdef..."></div>
@@ -1037,7 +1125,7 @@
 <div class="modal fade" id="flowNodeModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
     <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-pencil-square me-2" style="color:var(--accent);"></i>Chỉnh sửa: <code id="fnModalNodeId" class="text-warning ms-1"></code></h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-pencil-square me-2" style="color:var(--accent);"></i>Chỉnh sửa: <code id="fnModalNodeId" class="text-warning ms-1"></code></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <input type="hidden" id="fnNodeId">
         <div class="mb-3"><label class="form-label fw-semibold"><i class="bi bi-chat-left-text me-1" style="color:var(--accent);"></i>Nội dung tin nhắn</label><textarea id="fnNodeText" class="form-control" rows="5" placeholder="Nhập nội dung..."></textarea></div>
@@ -1056,7 +1144,7 @@
 <div class="modal fade" id="addNodeModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-plus-square me-2" style="color:var(--accent);"></i>Thêm Kịch bản mới</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-plus-square me-2" style="color:var(--accent);"></i>Thêm Kịch bản mới</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <div class="mb-2"><label class="form-label fw-semibold">ID Kịch bản <span class="text-danger">*</span></label><input id="newNodeId" class="form-control font-monospace" placeholder="VD: bang_gia, khuyen_mai" required><div class="form-text text-muted">Chỉ dùng chữ thường, số và dấu _ hoặc -</div></div>
       </div>
@@ -1069,7 +1157,7 @@
 <div class="modal fade" id="sloganModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title" id="sloganModalTitle"><i class="bi bi-chat-quote me-2" style="color:var(--accent);"></i>Thêm Slogan</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header"><h5 class="modal-title" id="sloganModalTitle"><i class="bi bi-chat-quote me-2" style="color:var(--accent);"></i>Thêm Slogan</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <input type="hidden" id="sloganEditIndex" value="-1">
         <div class="mb-3"><label class="form-label fw-semibold">Nội dung <span class="text-danger">*</span></label><textarea id="sloganText" class="form-control" rows="3" placeholder="VD: &#128640; NƠI BÓNG TỐI BẮT ĐẦU..."></textarea></div>
@@ -1231,11 +1319,16 @@ async function toggleAutoResponder(botId, checkbox) {
 }
 /* ====== REPLY KEYBOARD (global — all bots) ====== */
 var _rmAlbums = [];
+var _rmCats = [];
 var _rmSample = {};
 try {
   var _rmElA = document.getElementById('rmAlbumsJson');
   if (_rmElA && _rmElA.textContent) _rmAlbums = JSON.parse(_rmElA.textContent);
 } catch (e1) { _rmAlbums = []; }
+try {
+  var _rmElC = document.getElementById('rmCategoriesJson');
+  if (_rmElC && _rmElC.textContent) _rmCats = JSON.parse(_rmElC.textContent);
+} catch (e3) { _rmCats = []; }
 try {
   var _rmElS = document.getElementById('rmSampleJson');
   if (_rmElS && _rmElS.textContent) _rmSample = JSON.parse(_rmElS.textContent);
@@ -1243,10 +1336,20 @@ try {
 var _rmState = { enabled: false, prompt: '', ref_param_prefix: 'REF', rows: [] };
 
 function rmDefaultCell() {
-  return { label: '', type: 'text', body: '', url: '', album_id: '', bonus_text: '', button_label: 'Mở liên kết', owner_only: false };
+  return { label: '', type: 'text', body: '', url: '', album_id: '', category_id: '', bonus_text: '', button_label: '', owner_only: false };
 }
 function rmTypeLabels() {
-  return { text: 'Văn bản trả lời', ref_link: 'Link mời bạn', url: 'Mở link web', webapp: 'Mini App (album)', remove_keyboard: 'Ẩn bàn phím', stats: 'Thống kê (mọi người)', stats_admin: 'Thống kê admin' };
+  return {
+    text: 'Văn bản trả lời',
+    ref_link: 'Link mời bạn',
+    url: 'Mở link web',
+    webapp: 'Mini App (album)',
+    inline_menu: 'Menu danh mục (inline)',
+    inline_category: 'Mở danh mục (inline)',
+    remove_keyboard: 'Ẩn bàn phím',
+    stats: 'Thống kê (mọi người)',
+    stats_admin: 'Thống kê admin',
+  };
 }
 function rmSelectTypeHtml(cur) {
   var labs = rmTypeLabels();
@@ -1261,16 +1364,31 @@ function rmAlbumSelectHtml(curId) {
   });
   return h;
 }
+function rmCatSelectHtml(curId) {
+  var h = '<option value="">-- Chọn danh mục --</option>';
+  h += '<option value="__uncategorized"'+(String(curId)==='__uncategorized'?' selected':'')+'>📋 Chưa phân loại</option>';
+  _rmCats.forEach(function(c) {
+    var id = String(c.id != null ? c.id : '');
+    h += '<option value="'+escapeHtml(id)+'"'+(String(curId)===id?' selected':'')+'>'+escapeHtml(String(c.name||id))+'</option>';
+  });
+  return h;
+}
 function rmCellBlockHtml(cell, ri, ci) {
   var t = cell.type || 'text';
   var showBonus = t === 'ref_link';
   var showUrl = t === 'url';
-  var showAlbum = t === 'webapp';
+  var showWebapp = t === 'webapp';
+  var showInlineMenu = t === 'inline_menu';
+  var showInlineCat = t === 'inline_category';
+  var showBtnLbl = showUrl || showWebapp || showInlineMenu || showInlineCat;
   var ownerHtml = (t === 'stats_admin')
     ? '<div class="form-check rm-block-owner small mb-0"><input class="form-check-input" type="checkbox" checked disabled id="rmow_'+ri+'_'+ci+'"><label class="form-check-label" for="rmow_'+ri+'_'+ci+'">Chỉ admin bot (bắt buộc)</label></div>'
     : '<div class="form-check rm-block-owner small mb-0"><input class="form-check-input rm-inp-owner" type="checkbox" '+(cell.owner_only?'checked':'')+' id="rmow_'+ri+'_'+ci+'"><label class="form-check-label" for="rmow_'+ri+'_'+ci+'">Chỉ admin bot Telegram mới bấm được</label></div>';
+  var btnLblRow = showBtnLbl
+    ? '<div class="mb-2 rm-extra-btnlbl"><label class="form-label small text-muted mb-0">Chữ trên nút inline (tuỳ chọn)</label><input class="form-control form-control-sm rm-inp-btnlbl" value="'+escapeHtml(cell.button_label||'')+'" placeholder="VD: 📂 Mở menu, 🔥 Xem ngay…"></div>'
+    : '';
   return (
-    '<div class="rm-cell-block p-3 rounded flex-grow-1" style="min-width:260px;max-width:100%;border:1px solid var(--border-color);background:rgba(0,0,0,.2);">' +
+    '<div class="rm-cell-block p-3 rounded flex-grow-1">' +
     '<div class="d-flex justify-content-between gap-2 mb-2">' +
     '<input class="form-control form-control-sm rm-inp-label" placeholder="Tên hiển thị trên nút *" value="'+escapeHtml(cell.label||'')+'" style="min-width:0;">' +
     '<button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" onclick="rmRemoveCell('+ri+','+ci+')" title="Xóa nút"><i class="bi bi-x-lg"></i></button></div>' +
@@ -1278,9 +1396,10 @@ function rmCellBlockHtml(cell, ri, ci) {
     '<select class="form-select form-select-sm mb-2 rm-inp-type" onchange="rmOnTypeChange('+ri+','+ci+',this.value)">'+rmSelectTypeHtml(t)+'</select>' +
     '<div class="mb-2"><label class="form-label small text-muted mb-0">Nội dung / lời mở đầu</label><textarea class="form-control form-control-sm rm-inp-body" rows="2" placeholder="Nhập nội dung tin nhắn...">'+escapeHtml(cell.body||'')+'</textarea></div>' +
     (showBonus ? '<div class="mb-2"><label class="form-label small text-muted mb-0">Dòng phụ (ví dụ mô tả thưởng)</label><textarea class="form-control form-control-sm rm-inp-bonus" rows="2">'+escapeHtml(cell.bonus_text||'')+'</textarea></div>' : '') +
-    (showUrl ? '<div class="mb-2"><label class="form-label small text-muted mb-0">URL (https://...)</label><input class="form-control form-control-sm rm-inp-url" value="'+escapeHtml(cell.url||'')+'" placeholder="https://"></div>'+
-    '<div class="mb-2"><label class="form-label small text-muted mb-0">Chữ trên nút mở link</label><input class="form-control form-control-sm rm-inp-btnlbl" value="'+escapeHtml(cell.button_label||'')+'" placeholder="Mở liên kết"></div>' : '') +
-    (showAlbum ? '<div class="mb-2"><label class="form-label small text-muted mb-0">Album</label><select class="form-select form-select-sm rm-inp-album">'+rmAlbumSelectHtml(cell.album_id||'')+'</select></div>' : '') +
+    (showUrl ? '<div class="mb-2"><label class="form-label small text-muted mb-0">URL (https://...)</label><input class="form-control form-control-sm rm-inp-url" value="'+escapeHtml(cell.url||'')+'" placeholder="https://"></div>' : '') +
+    (showWebapp ? '<div class="mb-2"><label class="form-label small text-muted mb-0">Album</label><select class="form-select form-select-sm rm-inp-album">'+rmAlbumSelectHtml(cell.album_id||'')+'</select></div>' : '') +
+    (showInlineCat ? '<div class="mb-2"><label class="form-label small text-muted mb-0">Danh mục</label><select class="form-select form-select-sm rm-inp-cat">'+rmCatSelectHtml(cell.category_id||'')+'</select><div class="form-text" style="font-size:.72rem;">Chọn &quot;Chưa phân loại&quot; = album không gắn danh mục.</div></div>' : '') +
+    btnLblRow +
     ownerHtml +
     '</div>'
   );
@@ -1307,11 +1426,19 @@ function rmSnapFromDom() {
       var bn = cellEl.querySelector('.rm-inp-bonus');
       if (bn) c.bonus_text = bn.value;
       var u = cellEl.querySelector('.rm-inp-url');
-      if (u) c.url = u.value.trim();
+      if (u && type === 'url') c.url = u.value.trim();
       var bl = cellEl.querySelector('.rm-inp-btnlbl');
-      if (bl) c.button_label = bl.value.trim();
+      if (bl && (type === 'url' || type === 'webapp' || type === 'inline_menu' || type === 'inline_category')) {
+        var bvl = bl.value.trim();
+        if (bvl) c.button_label = bvl;
+      }
       var al = cellEl.querySelector('.rm-inp-album');
-      if (al) c.album_id = al.value.trim();
+      if (al && type === 'webapp') c.album_id = al.value.trim();
+      var catEl = cellEl.querySelector('.rm-inp-cat');
+      if (catEl && type === 'inline_category') {
+        var cid = catEl.value.trim();
+        if (cid) c.category_id = cid;
+      }
       var ow = cellEl.querySelector('.rm-inp-owner');
       if (type === 'stats_admin') c.owner_only = true;
       else if (ow) c.owner_only = !!ow.checked;
@@ -1333,8 +1460,8 @@ function rmRender() {
   var rows = (_rmState.rows && _rmState.rows.length) ? _rmState.rows : [];
   var html = '';
   rows.forEach(function(row, ri) {
-    html += '<div class="rm-row-block border rounded p-3 mb-3" style="border-color:var(--border-color)!important;background:rgba(0,0,0,.12);">';
-    html += '<div class="d-flex justify-content-between align-items-center mb-2"><span class="fw-semibold" style="color:var(--accent);">Hàng '+(ri+1)+'</span><button type="button" class="btn btn-sm btn-outline-danger" onclick="rmRemoveRow('+ri+')"><i class="bi bi-trash"></i> Xóa hàng</button></div>';
+    html += '<div class="rm-row-block border rounded p-3 mb-3">';
+    html += '<div class="d-flex justify-content-between align-items-center mb-2"><span class="fw-semibold rm-row-label">Hàng '+(ri+1)+'</span><button type="button" class="btn btn-sm btn-outline-danger" onclick="rmRemoveRow('+ri+')"><i class="bi bi-trash"></i> Xóa hàng</button></div>';
     html += '<div class="d-flex flex-wrap gap-2 rm-cells-row">';
     row.forEach(function(cell, ci) { html += rmCellBlockHtml(cell, ri, ci); });
     html += '</div><button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="rmAddCell('+ri+')"><i class="bi bi-plus-lg"></i> Thêm nút vào hàng này</button></div>';
@@ -1558,7 +1685,7 @@ async function loadIdList(page) {
       container.innerHTML = '<div class="empty-state py-4"><i class="bi bi-people"></i><p>Chưa có ID nào.' + (statusFilter ? ' (bộ lọc: ' + statusFilter + ')' : '') + '</p></div>'; return;
     }
     const statusMap = { active: '<span class="status-badge status-active">&#9989; Active</span>', blocked: '<span class="status-badge status-blocked">&#128683; Blocked</span>', invalid: '<span class="status-badge status-invalid">&#10060; Invalid</span>', unknown: '<span class="status-badge status-unknown">&#9634; Unknown</span>' };
-    let html = '<div class="table-responsive"><table class="table table-dark table-borderless data-table mb-0"><thead><tr><th class="ps-3">User ID</th><th>Trạng thái</th><th>Cập nhật</th></tr></thead><tbody>';
+    let html = '<div class="table-responsive"><table class="table table-hover align-middle table-borderless data-table mb-0"><thead><tr><th class="ps-3">User ID</th><th>Trạng thái</th><th>Cập nhật</th></tr></thead><tbody>';
     data.items.forEach(function(item) {
       const badge = statusMap[item.status] || item.status;
       const updated = item.updated_at ? item.updated_at.substring(0,10) : '&#8212;';
@@ -1588,7 +1715,7 @@ async function doClearIds(statusFilter) {
 function _renderBotResultsTable(botResults, containerId) {
   const container = document.getElementById(containerId);
   if (!container || !botResults || Object.keys(botResults).length === 0) return;
-  let html = '<table class="table table-dark table-borderless mb-0" style="font-size:.76rem;"><thead><tr><th>Bot</th><th class="text-success">&#9989; Thành công</th><th class="text-danger">&#10060; Thất bại</th></tr></thead><tbody>';
+  let html = '<table class="table table-hover table-borderless mb-0" style="font-size:.76rem;"><thead><tr><th>Bot</th><th class="text-success">&#9989; Thành công</th><th class="text-danger">&#10060; Thất bại</th></tr></thead><tbody>';
   for (const [botId, res] of Object.entries(botResults)) {
     html += '<tr><td><i class="bi bi-robot me-1" style="color:var(--accent);"></i>' + escapeHtml(res.name || botId) + '</td><td class="text-success">' + (res.success || 0) + '</td><td class="text-danger">' + (res.fail || 0) + '</td></tr>';
   }
@@ -1700,7 +1827,7 @@ async function loadBackupsList() {
     var data = await res.json();
     if (!data.ok) { container.innerHTML = '<div class="alert alert-warning py-2 mb-0">' + (data.error || 'Lỗi') + '</div>'; return; }
     if (!data.items || data.items.length === 0) { container.innerHTML = '<div class="text-muted text-center py-3">Chưa có bản sao lưu.</div>'; return; }
-    var html = '<div class="table-responsive"><table class="table table-sm table-dark table-hover mb-0" style="font-size:.85rem;"><thead><tr><th>#</th><th>Tên file</th><th>Kích thước</th><th>Thời gian</th><th class="text-end">Hành động</th></tr></thead><tbody>';
+    var html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0" style="font-size:.85rem;"><thead><tr><th>#</th><th>Tên file</th><th>Kích thước</th><th>Thời gian</th><th class="text-end">Hành động</th></tr></thead><tbody>';
     data.items.forEach(function(item, idx) {
       var dt = new Date(item.created_at);
       var dateStr = dt.toLocaleString('vi-VN', {timeZone: 'Asia/Ho_Chi_Minh', hour12: false});

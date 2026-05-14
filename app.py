@@ -1636,6 +1636,7 @@ def index():
                            categories=db_get_categories(),
                            expired_warning_message=db_get_expired_warning_message(),
                            reply_menu_albums=reply_menu_albums,
+                           reply_menu_categories=db_get_categories(),
                            reply_menu_sample=SAMPLE_REPLY_MENU)
 
 
@@ -3822,7 +3823,31 @@ if BOT_TOKEN or db_get_bots():
                         await update.message.reply_text("⚠️ Album không tồn tại.")
                         return
                     bridge_url = f"{_base_url}/miniapp/bridge/{album_id}"
-                    kb = [[InlineKeyboardButton("🔥 Xem ngay", web_app=WebAppInfo(url=bridge_url))]]
+                    btn_lbl = (_ex(action.get("button_label")) or "🔥 Xem ngay").strip() or "🔥 Xem ngay"
+                    kb = [[InlineKeyboardButton(btn_lbl, web_app=WebAppInfo(url=bridge_url))]]
+                    await update.message.reply_text(body, reply_markup=InlineKeyboardMarkup(kb))
+                    return
+                if typ == "inline_menu":
+                    body = (_ex(action.get("body")) or "📂 Chọn danh mục hoặc album:").strip()
+                    bl = (_ex(action.get("button_label")) or "📂 Mở danh mục & album").strip() or "📂 Mở danh mục & album"
+                    kb = [[InlineKeyboardButton(bl, callback_data="menu")]]
+                    await update.message.reply_text(body, reply_markup=InlineKeyboardMarkup(kb))
+                    return
+                if typ == "inline_category":
+                    body = (_ex(action.get("body")) or "📁 Chọn album trong danh mục:").strip()
+                    raw_cid = str(action.get("category_id", "")).strip()
+                    low = raw_cid.lower()
+                    if low in ("__uncategorized", "uncategorized", "_uncategorized"):
+                        cb = "cat__uncategorized"
+                        dbtn = (_ex(action.get("button_label")) or "📋 Album chưa phân loại").strip() or "📋 Album chưa phân loại"
+                    else:
+                        cats = await asyncio.to_thread(db_get_categories)
+                        if not any(str(c.get("id")) == raw_cid for c in cats):
+                            await update.message.reply_text("⚠️ Danh mục không tồn tại.")
+                            return
+                        cb = f"cat_{raw_cid}"
+                        dbtn = (_ex(action.get("button_label")) or "📂 Mở danh mục").strip() or "📂 Mở danh mục"
+                    kb = [[InlineKeyboardButton(dbtn, callback_data=cb)]]
                     await update.message.reply_text(body, reply_markup=InlineKeyboardMarkup(kb))
                     return
                 if typ == "remove_keyboard":
