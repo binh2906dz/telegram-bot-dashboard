@@ -983,7 +983,7 @@
               <div class="alert alert-warning py-2" style="font-size:.85rem;">⚠️ Chỉ tài khoản <strong>Owner</strong> mới có quyền sao lưu &amp; tải backup.</div>
               {% endif %}
               <div style="font-size:.78rem;color:#666;padding:10px;background:rgba(255,255,255,.03);border-radius:8px;">
-                <i class="bi bi-clock-fill me-1" style="color:var(--accent);"></i><strong>Tự động:</strong> mỗi ngày lúc <strong>0:01 sáng (Giờ Việt Nam)</strong> — giữ tối đa <strong>3 bản</strong>, bản cũ nhất tự động xóa.
+                <i class="bi bi-clock-fill me-1" style="color:var(--accent);"></i><strong>Tự động:</strong> mỗi ngày lúc <strong>0:01 sáng (Giờ Việt Nam)</strong> — giữ tối đa <strong>3 ngày</strong> (mỗi ngày một bản mới nhất; bản cũ hơn tự xóa).
               </div>
             </div>
           </div>
@@ -2028,7 +2028,7 @@ async function loadBackupsList() {
       html += '<td class="text-end"><a href="' + item.download_url + '" class="btn btn-sm btn-outline-primary me-1" download><i class="bi bi-download"></i> Tải</a>';
       html += '<button class="btn btn-sm btn-outline-danger" onclick="deleteBackupFile(\'' + item.filename + '\', this)"><i class="bi bi-trash"></i></button></td></tr>';
     });
-    html += '</tbody></table></div><div class="text-muted mt-2" style="font-size:.78rem;">Tối đa <strong>' + data.max_backups + ' bản</strong>, bản cũ nhất tự động xóa khi backup mới.</div>';
+    html += '</tbody></table></div><div class="text-muted mt-2" style="font-size:.78rem;">Tối đa <strong>' + data.max_backups + ' ngày</strong> (mỗi ngày một bản), bản trùng cùng ngày hoặc ngày cũ hơn tự động gỡ.</div>';
     container.innerHTML = html;
   } catch(e) {
     container.innerHTML = '<div class="alert alert-danger py-2 mb-0">Lỗi: ' + e.message + '</div>';

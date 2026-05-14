@@ -10,10 +10,13 @@ import secrets
 import sqlite3
 import tempfile
 import threading
+import contextlib
+from collections import defaultdict
 import zipfile
 import urllib.request
 from urllib.parse import urlparse
-from datetime import datetime, timezone, timedelta, time as dt_time
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, request, redirect, render_template, jsonify, Response, session, url_for, make_response
 from flask_limiter import Limiter
@@ -289,6 +292,10 @@ BACKUP_DIR = os.path.join(_APP_DIR, "static", "backups")
 # Ensure upload directories exist at startup
 for _d in (UPLOAD_IMAGES_DIR, UPLOAD_VIDEOS_DIR, BACKUP_DIR):
     os.makedirs(_d, exist_ok=True)
+
+# Vietnam timezone (backup naming, retention, APScheduler)
+_VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+SCHED_BACKUP_LAST_VN_DAY_KEY = "scheduled_backup_last_vn_day"
 
 
 def load_json(file, default):
@@ -864,6 +871,29 @@ def db_save_config(cfg: dict):
         conn.execute(
             "INSERT OR REPLACE INTO app_config (key, value) VALUES ('config', ?)",
             (json.dumps(cfg, ensure_ascii=False),),
+        )
+        conn.commit()
+
+
+def db_get_scheduled_backup_last_vn_day() -> str:
+    """YYYY-MM-DD in Asia/Ho_Chi_Minh — last calendar day an APScheduler auto-backup completed."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key=?",
+                (SCHED_BACKUP_LAST_VN_DAY_KEY,),
+            ).fetchone()
+        return (row["value"] or "").strip() if row else ""
+    except Exception as exc:
+        log.error("db_get_scheduled_backup_last_vn_day failed: %s", exc)
+        return ""
+
+
+def db_set_scheduled_backup_last_vn_day(day_yyyy_mm_dd: str) -> None:
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)",
+            (SCHED_BACKUP_LAST_VN_DAY_KEY, day_yyyy_mm_dd),
         )
         conn.commit()
 
@@ -1530,35 +1560,65 @@ def process_video_to_hls(input_video_path: str, output_dir: str) -> str:
     return f"/static/uploads/videos/{file_id}/index.m3u8"
 
 
-# Maximum number of backup files to keep on disk.
-# When a new backup is created, older files beyond this limit are deleted automatically.
+# Maximum number of distinct Vietnam **calendar days** for which a backup zip is kept.
+# After each backup, same-day duplicates are removed (newest kept), then older days
+# beyond this count are deleted.
 MAX_BACKUPS = 3
 
 
-def _cleanup_old_backups(keep: int = MAX_BACKUPS):
-    """Keep only the `keep` most recent backup zip files; delete the rest."""
+def _cleanup_old_backups_vn_calendar(keep_days: int = MAX_BACKUPS):
+    """Keep at most ``keep_days`` distinct Vietnam-local calendar days of backup zips.
+
+    Groups files in BACKUP_DIR by the Vietnam calendar day of their mtime.  Within
+    each calendar day only the newest file (by mtime, then filename) is kept.
+    Deletes backups from older calendar days beyond the newest ``keep_days`` days.
+    """
     try:
         files = []
         for fname in os.listdir(BACKUP_DIR):
-            if fname.startswith("backup_") and fname.endswith(".zip"):
-                fpath = os.path.join(BACKUP_DIR, fname)
-                files.append((os.path.getmtime(fpath), fpath, fname))
-        # Newest first
-        files.sort(reverse=True)
-        for _mtime, fpath, fname in files[keep:]:
+            if not fname.startswith("backup_") or not fname.endswith(".zip"):
+                continue
+            if not re.fullmatch(r"backup_\d{8}_\d{6}\.zip", fname):
+                continue
+            fpath = os.path.join(BACKUP_DIR, fname)
+            mtime = os.path.getmtime(fpath)
+            instant_vn = datetime.fromtimestamp(mtime, tz=_VN_TZ)
+            vn_day = instant_vn.date()
+            files.append((vn_day, mtime, fpath, fname))
+        if not files:
+            return
+        by_day = defaultdict(list)
+        for vn_day, mtime, fpath, fname in files:
+            by_day[vn_day].append((mtime, fpath, fname))
+        best_path_by_day: dict = {}
+        for vn_day, items in by_day.items():
+            best_mtime, best_path, best_fname = max(items, key=lambda t: (t[0], t[2]))
+            best_path_by_day[vn_day] = best_path
+            for mtime, fpath, fname in items:
+                if fpath != best_path:
+                    try:
+                        os.remove(fpath)
+                        log.info("Backup cleanup: removed same-day duplicate %s", fname)
+                    except OSError as exc:
+                        log.warning("Backup cleanup: could not delete %s: %s", fname, exc)
+        sorted_days = sorted(best_path_by_day.keys(), reverse=True)
+        for old_day in sorted_days[keep_days:]:
+            p = best_path_by_day[old_day]
             try:
-                os.remove(fpath)
-                log.info("Backup cleanup: deleted old %s", fname)
+                os.remove(p)
+                log.info("Backup cleanup: removed backup for calendar day %s (keep=%s days)", old_day, keep_days)
             except OSError as exc:
-                log.warning("Backup cleanup: could not delete %s: %s", fname, exc)
+                log.warning("Backup cleanup: could not delete %s: %s", p, exc)
     except Exception as exc:
         log.warning("Backup cleanup failed: %s", exc)
 
 
 def run_daily_backup():
-    """Package data into a timestamped zip in static/backups/ and keep only
-    the MAX_BACKUPS most recent ones (older are auto-deleted)."""
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    """Package data into a timestamped zip in static/backups/ and enforce retention.
+
+    Timestamp in the filename uses **Vietnam** wall clock so names match local expectations.
+    """
+    timestamp = datetime.now(_VN_TZ).strftime("%Y%m%d_%H%M%S")
     backup_filename = f"backup_{timestamp}.zip"
     backup_path = os.path.join(BACKUP_DIR, backup_filename)
 
@@ -1568,8 +1628,7 @@ def run_daily_backup():
 
     log.info("Backup saved locally: %s (%d bytes)", backup_path, os.path.getsize(backup_path))
 
-    # Auto-cleanup: keep only the latest MAX_BACKUPS files
-    _cleanup_old_backups(MAX_BACKUPS)
+    _cleanup_old_backups_vn_calendar(MAX_BACKUPS)
 
     return f"/static/backups/{backup_filename}"
 
@@ -1895,7 +1954,7 @@ def backups_list():
                     "filename": fname,
                     "size": stat.st_size,
                     "size_human": f"{stat.st_size / 1024:.1f} KB" if stat.st_size < 1024 * 1024 else f"{stat.st_size / 1024 / 1024:.1f} MB",
-                    "created_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    "created_at": datetime.fromtimestamp(stat.st_mtime, tz=_VN_TZ).isoformat(),
                     "download_url": f"/backups/download/{fname}",
                 })
         items.sort(key=lambda x: x["created_at"], reverse=True)
@@ -1973,7 +2032,7 @@ def backup_download():
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         _backup_files_to_zip(zf)
     buf.seek(0)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(_VN_TZ).strftime("%Y%m%d_%H%M%S")
     return Response(
         buf.read(),
         mimetype="application/zip",
@@ -4273,16 +4332,6 @@ if BOT_TOKEN or db_get_bots():
                             f"📊 Report\nUsers: {len(bot_subs)}\nOK: {success}\nFail: {fail}",
                         )
 
-        async def daily_backup_job(context: ContextTypes.DEFAULT_TYPE):
-            try:
-                url = run_daily_backup()
-                if bot_admin_id:
-                    await context.bot.send_message(bot_admin_id, f"✅ Backup completed!\n🔗 {url}")
-            except Exception as e:
-                log.error(f"Daily backup failed: {e}")
-                if bot_admin_id:
-                    await context.bot.send_message(bot_admin_id, f"❌ Backup failed: {e}")
-
         ptb_app = Application.builder().token(token).build()
         ptb_app.add_handler(CommandHandler("start", start))
         ptb_app.add_handler(CommandHandler("settudongguilink", set_time_cmd))
@@ -4304,7 +4353,6 @@ if BOT_TOKEN or db_get_bots():
             # silently skipped (which previously caused missed schedules).
             job_kwargs={"max_instances": 3, "coalesce": True, "misfire_grace_time": 30},
         )
-        ptb_app.job_queue.run_daily(daily_backup_job, time=dt_time(1, 0, 0, tzinfo=timezone.utc))
         return ptb_app
 
     class _BotManager:
@@ -4607,18 +4655,47 @@ def run_bot_thread():
 
 
 # ===== APSCHEDULER — automated daily backup at 0:01 AM Vietnam Time =====
+@contextlib.contextmanager
+def _exclusive_scheduled_backup_lock():
+    """Serialize scheduled backup so only one Gunicorn worker runs it at a time."""
+    try:
+        import fcntl as _fcntl_mod
+    except ImportError:
+        yield
+        return
+    lock_path = os.path.join(BACKUP_DIR, ".scheduled_daily_backup.lock")
+    fd = open(lock_path, "a+", encoding="utf-8")
+    try:
+        _fcntl_mod.flock(fd, _fcntl_mod.LOCK_EX)
+        try:
+            yield
+        finally:
+            try:
+                _fcntl_mod.flock(fd, _fcntl_mod.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        fd.close()
+
+
 try:
     from apscheduler.schedulers.background import BackgroundScheduler as _BGScheduler
     import pytz as _pytz
 
     def _scheduled_daily_backup():
-        """Called by APScheduler to run the daily backup."""
-        log.info("APScheduler: starting daily backup...")
-        try:
-            url = run_daily_backup()
-            log.info(f"APScheduler: daily backup complete → {url}")
-        except Exception as e:
-            log.error(f"APScheduler: daily backup failed: {e}")
+        """Called by APScheduler — at most once per Vietnam calendar day across workers."""
+        log.info("APScheduler: scheduled backup job fired (pid=%s)", os.getpid())
+        with _exclusive_scheduled_backup_lock():
+            today_vn = datetime.now(_VN_TZ).strftime("%Y-%m-%d")
+            if db_get_scheduled_backup_last_vn_day() == today_vn:
+                log.info("APScheduler: skip — scheduled backup already completed for %s", today_vn)
+                return
+            try:
+                url = run_daily_backup()
+                db_set_scheduled_backup_last_vn_day(today_vn)
+                log.info("APScheduler: daily backup complete → %s", url)
+            except Exception as e:
+                log.error("APScheduler: daily backup failed: %s", e)
 
     # Guard against Werkzeug debug reloader: in debug mode the parent process
     # (reloader) also imports app.py; only start the scheduler in the child
@@ -4630,7 +4707,7 @@ try:
         _scheduler.add_job(_scheduled_daily_backup, "cron", hour=0, minute=1,
                            id="daily_backup", replace_existing=True)
         _scheduler.start()
-        log.info("APScheduler started – daily backup scheduled at 0:01 AM Vietnam Time")
+        log.info("APScheduler started – daily backup 0:01 Asia/Ho_Chi_Minh; flock dedupes workers")
 except ImportError:
     log.warning("apscheduler not installed – automated backup disabled. Run: pip install apscheduler pytz")
 except Exception as _aps_err:
