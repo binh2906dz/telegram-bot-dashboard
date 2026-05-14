@@ -9,6 +9,17 @@ Repo: https://github.com/binh2906dz/telegram-bot-dashboard  (nhanh: main)
 Ung dung chinh: app.py (Flask) + templates/ + SQLite data.db + Gunicorn
 
 --------------------------------------------------------------------------------
+0) QUY TAC BAT BUOC — DOC TRUOC, GHI SAU (chu nha yeu cau)
+--------------------------------------------------------------------------------
+- Truoc bat ky hanh dong sua code / cau hinh / deploy / refactor: DOC het file
+  huongdan.txt (hoac lenh tuong duong: doc noi dung handoff trong repo).
+- Sau MOI lan nang cap hoac chinh sua dang ke (PR, commit, thay doi hanh vi,
+  env moi, script VPS, template, DB migration): THEM mot muc vao muc
+  "10) NHAT KY THAY DOI" ben duoi — ghi ngay (ISO), tom tat hanh dong,
+  file/commit chinh (KHONG ghi mat khau / token that).
+- Muc dich: phien chat / AI moi nap ngu canh ngay, giam rui ro hoi quy.
+
+--------------------------------------------------------------------------------
 1) MOI TRUONG TRIEN KHAI (VPS tieu bieu)
 --------------------------------------------------------------------------------
 - Thu muc: /root/telegram-bot-dashboard
@@ -111,19 +122,30 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 8) CACH DUNG FILE NAY CHO PHIEN CHAT / AI SAU
 --------------------------------------------------------------------------------
-- Mo repo, doc huongdan.txt truoc khi sua.
-- Neu nguoi dung dan: "Theo huongdan.txt, tiep tuc task X" thi giu nguyen
-  URL route, env, va luong BotManager/CSRF da mo ta.
-- Cap nhat file nay khi co nang cap lon moi (ghi commit + ngay + thay doi).
+- Bat buoc: doc huongdan.txt (muc 0) TRUOC khi sua / nang cap / goi y thay doi
+  kien truc.
+- Sau thay doi: bo sung muc "10) NHAT KY" + cap nhat "9) LICH SU GIT" neu co
+  commit moi day len main.
+- Nguoi dung co the dan: "Theo huongdan.txt, tiep tuc task X" — giu nguyen
+  route, env, BotManager, CSRF nhu da mo ta.
 
 --------------------------------------------------------------------------------
-9) LICH SU GIT GAN DAY (oneline — cap nhat bang: git log --oneline -15)
+9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+6f3b264 docs: add huongdan.txt handoff (chat history, upgrades, deploy notes)
 e699627 perf: faster Mini App token — parse initData once, album exists query, throttle token cleanup
 fcc64e7 P3: secure sessions/proxy, login rate limit, redact token logs, normalize WEBHOOK_URL, validate bot token on add
 b68e8e7 P2: CSRF protection, SECRET_KEY warnings, webhook allowed_updates, weak password logs
 26b367c P1: remove dead album lazy-load JS, safe webhook logs, deploy docs in scripts
 7d88524 P0: static media URLs in album view, remove webhook domain fallback, setup_vps main+env overrides
+
+--------------------------------------------------------------------------------
+10) NHAT KY THAY DOI (moi nhat o duoi cung — ghi sau moi dot chinh sua)
+--------------------------------------------------------------------------------
+[2026-05-14] Quy tac van hanh: them muc (0) "doc truoc — ghi sau"; cap lai muc (8);
+  bo sung commit 6f3b264 vao muc (9); them muc (10) nhat ky. Them
+  .cursor/rules/huongdan-handoff.mdc (alwaysApply) de agent doc huongdan.txt
+  truoc khi chinh sua dang ke va cap nhat nhat ky sau thay doi.
 
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.

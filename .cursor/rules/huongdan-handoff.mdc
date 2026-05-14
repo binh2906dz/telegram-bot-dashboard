@@ -1,0 +1,10 @@
+---
+description: Read huongdan.txt before edits; append changelog after upgrades (project handoff).
+alwaysApply: true
+---
+
+# Handoff — `huongdan.txt`
+
+1. **Before** any substantive change to this repo (code, config templates, deploy scripts, DB behavior, security): read **`huongdan.txt`** at the repository root end-to-end (especially section **0** and **6**).
+2. **After** each meaningful upgrade or edit: append one dated line/block to **`huongdan.txt` → section `10) NHAT KY THAY DOI`** (ISO date, summary, main files/commits). Never paste real passwords or bot tokens.
+3. If `git log` on `main` changed in a notable way, refresh **`huongdan.txt` → section `9`)** with recent oneline commits.
