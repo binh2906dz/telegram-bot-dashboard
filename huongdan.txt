@@ -132,6 +132,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+74974ca docs: huongdan nhật ký cho 7f058fc
 7f058fc docs: sync huongdan git log + nhật ký f50e262
 f50e262 docs: enforce read-then-log workflow in huongdan.txt + Cursor rule
 6f3b264 docs: add huongdan.txt handoff (chat history, upgrades, deploy notes)
