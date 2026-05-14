@@ -953,6 +953,37 @@ def db_get_all_subscriber_ids() -> set:
         return set()
 
 
+def db_count_reachable_recipients_for_bot(bot_id: str) -> int:
+    """Count unique user_ids this bot would target like web broadcast: subscribers for
+    this bot (fallback to 'global' if none) merged with telegram_ids.status='active'."""
+    db_key = "global" if not bot_id or bot_id == "env_default" else str(bot_id).strip()
+    if not db_key:
+        db_key = "global"
+    try:
+        with get_db() as conn:
+            rows = list(
+                conn.execute(
+                    "SELECT user_id FROM subscribers WHERE bot_id=?",
+                    (db_key,),
+                ).fetchall()
+            )
+            if not rows and db_key != "global":
+                rows = list(
+                    conn.execute(
+                        "SELECT user_id FROM subscribers WHERE bot_id='global'",
+                    ).fetchall()
+                )
+            combined: set[str] = {str(r["user_id"]) for r in rows}
+            for row in conn.execute(
+                "SELECT user_id FROM telegram_ids WHERE status = 'active'",
+            ).fetchall():
+                combined.add(str(row["user_id"]))
+        return len(combined)
+    except Exception as exc:
+        log.error("db_count_reachable_recipients_for_bot(%s) failed: %s", bot_id, exc)
+        return 0
+
+
 def db_get_slogans() -> dict:
     """Load slogans config from SQLite."""
     try:
@@ -2889,7 +2920,11 @@ def reply_menu_global_api():
 @app.route("/bots/health", methods=["GET"])
 @owner_required
 def bots_health():
-    """Return health status and per-bot stats for all bots in the database."""
+    """Return health status and per-bot stats for all bots in the database.
+
+    subs_count: unique recipients this bot would include when broadcasting like the web
+    flow — per-bot /start list (fallback global) plus all telegram_ids with status active.
+    """
     bots_list = db_get_bots()
     # Load analytics from DB
     analytics_map = {a["bot_id"]: a for a in get_all_analytics()}
@@ -2914,15 +2949,12 @@ def bots_health():
                         status = "ERROR"
                 except Exception:
                     status = "ERROR"
-            bot_subs = db_get_subscribers(bot_id)
-            if not bot_subs:
-                bot_subs = db_get_subscribers("global")
             a = analytics_map.get(bot_id, {})
             result.append({
                 "id": bot_id,
                 "status": status,
                 "auto_responder": bot.get("auto_responder", True),
-                "subs_count": len(bot_subs),
+                "subs_count": db_count_reachable_recipients_for_bot(bot_id),
                 "messages_sent": a.get("messages_sent", 0),
                 "starts_count": a.get("starts_count", 0),
                 "interactions_count": a.get("interactions_count", 0),

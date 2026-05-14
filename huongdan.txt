@@ -208,6 +208,11 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
 [2026-05-14] fix(ui): logo topbar dùng màu accent cố định nếu trình duyệt không hỗ trợ
   chữ gradient (background-clip: text). File: templates/index.html (818c82f).
 
+[2026-05-14] Quản lý Bot — API /bots/health: cột `subs_count` đếm theo phương án B — số
+  `user_id` duy nhất = (subscribers của `bot_id` đó, nếu rỗng thì fallback `global`) ∪
+  (`telegram_ids` có `status='active'`), cùng logic tập nhận như broadcast trên web.
+  Thêm `db_count_reachable_recipients_for_bot`. File: app.py.
+
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
 ================================================================================
