@@ -610,7 +610,7 @@
           <div class="dash-card">
             <div class="dash-card-header"><span class="dash-card-title"><i class="bi bi-megaphone-fill me-2" style="color:#00c853;"></i>Broadcast to IDs</span></div>
             <div class="dash-card-body">
-              <p style="font-size:.82rem;color:#aaa;">Gửi tới tất cả ID (unknown + active). <strong>Tất cả bot</strong> sẽ cùng gửi. Bot tự phân loại kết quả.</p>
+              <p style="font-size:.82rem;color:#aaa;">Gửi tới tất cả ID (unknown + active). <strong>Tất cả bot</strong> sẽ cùng gửi. Bot tự phân loại kết quả. Với mỗi bot, <strong>ID nào nhận tin thành công từ bot đó</strong> sẽ được thêm vào <strong>Subscribers</strong> của bot đó (trùng thì bỏ qua).</p>
               <textarea id="idBroadcastMessage" class="form-control mb-2" rows="3" placeholder="Nhập nội dung tin nhắn..."></textarea>
               <div class="mb-2">
                 <select id="idBroadcastMediaType" class="form-select form-select-sm" onchange="toggleIdBroadcastMedia(this.value)">
@@ -1985,7 +1985,7 @@ async function doIdBroadcast(btn) {
             document.getElementById('bpBotResults').style.display = '';
             _renderBotResultsTable(s.bot_results, 'bpBotResultsTable');
           }
-          if (!s.running) { clearInterval(_idBroadcastInterval); btn.disabled = false; btn.innerHTML = origHtml; showToast('&#9989; Hoàn tất! Active:' + s.active + ' Blocked:' + s.blocked + ' Invalid:' + s.invalid, 'success'); loadIdList(_idCurrentPage); refreshIdStats(); }
+          if (!s.running) { clearInterval(_idBroadcastInterval); btn.disabled = false; btn.innerHTML = origHtml; showToast('&#9989; Hoàn tất! Active:' + s.active + ' Blocked:' + s.blocked + ' Invalid:' + s.invalid + '. Đã đồng bộ Subscribers theo từng bot (ID gửi OK).', 'success'); loadIdList(_idCurrentPage); refreshIdStats(); if (typeof loadBotHealth === 'function') loadBotHealth(); }
         } catch(e) {}
       }, 2000);
     } else { showToast('&#10060; ' + (data.error || '?'), 'error'); btn.disabled = false; btn.innerHTML = origHtml; document.getElementById('broadcastProgress').style.display = 'none'; }

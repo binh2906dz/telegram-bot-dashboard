@@ -2255,6 +2255,11 @@ async def _async_run_ids_broadcast(
     After *all* bots have attempted a given uid, the best reachability status
     (active > blocked > invalid) is written to the DB and the global progress
     counter is incremented.
+
+    For each (bot, uid) pair where this bot's send returns success (message
+    delivered), the uid is inserted into ``subscribers`` for that ``bot_id``
+    (``INSERT OR IGNORE``) so Quản lý Bot /start-style lists reflect IDs the
+    bot can actually reach after this campaign.
     """
     if buttons is None:
         buttons = []
@@ -2360,6 +2365,15 @@ async def _async_run_ids_broadcast(
                             log.warning("Failed to send message to %s via bot %s: %s", uid, bot_id, e)
                             new_status = "invalid"
                             break
+
+                if new_status == "active" and str(bot_id).strip():
+                    try:
+                        uid_int = int(str(uid).strip())
+                        db_add_subscriber(str(bot_id).strip(), uid_int)
+                    except (ValueError, TypeError):
+                        pass
+                    except Exception as exc:
+                        log.warning("ids_broadcast subscriber sync bot=%s uid=%s: %s", bot_id, uid, exc)
 
                 # Merge this bot's result into the per-uid best status
                 async with stats_lock:
@@ -3422,6 +3436,10 @@ def ids_broadcast():
     """Broadcast a message to all uploaded IDs using ALL configured bots, classifying status via Telegram API errors.
 
     Supports optional rich media (image / video via URL or file upload) and inline keyboard buttons alongside the text message.
+
+    On successful delivery from a given bot to a user ID, that user_id is added
+    to ``subscribers`` for that bot (idempotent) so per-bot Subscribers match
+    who the bot can message.
     """
     import json as _json
 

@@ -221,6 +221,10 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
 
 [2026-05-14] docs: dong bo muc (9) git log sau push fix subscribers (commit cf1c360).
 
-================================================================================
+[2026-05-14] Quản lý ID Telegram — Broadcast to IDs: sau mỗi lần gửi thành công từ một
+  bot tới một User ID, tự động `INSERT OR IGNORE` vào bảng `subscribers` theo `bot_id`
+  đó (mỗi bot chỉ nhận ID mà chính bot đó gửi được). File: app.py (_async_run_ids_broadcast),
+  templates/index.html (mô tả + toast hoàn tất + gọi loadBotHealth).
+
 Het — luu y: khong luu mat khau / token that trong file nay.
 ================================================================================
