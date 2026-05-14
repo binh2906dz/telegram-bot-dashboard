@@ -901,6 +901,30 @@ def _validate_telegram_init_data(init_data: str, bot_token: str) -> bool:
         return False
 
 
+def _all_bot_tokens_for_webapp() -> list:
+    """Distinct non-empty bot tokens: env BOT_TOKEN plus every token in bots_config.
+
+    Mini Apps opened from bot B sign initData with B's secret; validating only
+    BOT_TOKEN from .env breaks all other bots in a multi-bot deployment.
+    """
+    out = []
+    seen = set()
+    for t in (BOT_TOKEN,):
+        t = (t or "").strip()
+        if t and t not in seen:
+            seen.add(t)
+            out.append(t)
+    try:
+        for b in db_get_bots():
+            t = (b.get("token") or "").strip()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+    except Exception as exc:
+        log.warning("_all_bot_tokens_for_webapp: db_get_bots failed: %s", exc)
+    return out
+
+
 def db_export_as_json() -> dict:
     """Export all DB-stored data as a dict mapping filename → JSON bytes.
     Used by the backup function to produce human-readable JSON exports."""
@@ -1744,23 +1768,15 @@ def api_generate_token(album_id):
     data = request.get_json(silent=True) or {}
     init_data = data.get("initData", "")
 
-    # Validate initData against the bot token
-    token_env = BOT_TOKEN
-    if not token_env:
-        # Try to find any configured bot token
-        bots = db_get_bots()
-        for b in bots:
-            t = (b.get("token") or "").strip()
-            if t:
-                token_env = t
-                break
-
-    if token_env and init_data:
-        if not _validate_telegram_init_data(init_data, token_env):
-            return jsonify({"ok": False, "error": "initData không hợp lệ"}), 403
-    elif not init_data:
-        # No initData provided – reject
+    if not init_data:
         return jsonify({"ok": False, "error": "Thiếu initData"}), 400
+
+    # initData is signed with the bot that opened the Mini App — must try every token.
+    tokens = _all_bot_tokens_for_webapp()
+    if not tokens:
+        return jsonify({"ok": False, "error": "Chưa cấu hình bot token"}), 500
+    if not any(_validate_telegram_init_data(init_data, t) for t in tokens):
+        return jsonify({"ok": False, "error": "initData không hợp lệ"}), 403
 
     # Clean up stale tokens periodically
     db_cleanup_expired_tokens()
