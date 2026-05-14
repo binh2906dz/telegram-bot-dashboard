@@ -135,6 +135,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+5e6c216 feat(ids): broadcast IDs thanh cong -> subscribers theo tung bot
 cf1c360 fix(bots): subs_count chi bang subscribers theo bot; GET /bots/<id>/subscribers + modal
 7423bef fix(bots): subs_count = reachable IDs per bot (subs ∪ active telegram_ids) — da thay boi cf1c360
 818c82f fix(ui): brand text fallback khi trình duyệt không clip gradient
@@ -224,7 +225,7 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
 [2026-05-14] Quản lý ID Telegram — Broadcast to IDs: sau mỗi lần gửi thành công từ một
   bot tới một User ID, tự động `INSERT OR IGNORE` vào bảng `subscribers` theo `bot_id`
   đó (mỗi bot chỉ nhận ID mà chính bot đó gửi được). File: app.py (_async_run_ids_broadcast),
-  templates/index.html (mô tả + toast hoàn tất + gọi loadBotHealth).
+  templates/index.html (mô tả + toast hoàn tất + gọi loadBotHealth). (commit 5e6c216).
 
 Het — luu y: khong luu mat khau / token that trong file nay.
 ================================================================================
