@@ -4,7 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Xác Thực Thành Công</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- Do not load telegram-web-app.js in <head>: it blocks first paint and leaves a white
+       Telegram loading screen for seconds if telegram.org is slow or unreachable. -->
+  <link rel="dns-prefetch" href="https://telegram.org">
+  <link rel="preconnect" href="https://telegram.org" crossorigin>
   <style>
     :root {
       --bg-color: var(--tg-theme-secondary-bg-color, #f4f4f5);
@@ -111,7 +114,7 @@
     #state-success { display: none; }
   </style>
 </head>
-<body>
+<body style="background-color:#f4f4f5">
   <div class="card">
     <div id="state-loading">
       <div class="spinner"></div>
@@ -139,6 +142,7 @@
     </div>
   </div>
 
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script>
     (function () {
       const ALBUM_ID  = {{ album_id | tojson }};
@@ -149,7 +153,8 @@
         const errEl = document.getElementById('error-msg');
         errEl.innerText = msg;
         errEl.style.display = 'block';
-        document.querySelector('.spinner').style.display = 'none';
+        const sp = document.querySelector('.spinner');
+        if (sp) sp.style.display = 'none';
       }
 
       async function init() {
@@ -157,8 +162,10 @@
           showError('Vui lòng mở từ ứng dụng Telegram.');
           return;
         }
-        tg.ready();
-        tg.expand();
+        try {
+          tg.ready();
+          tg.expand();
+        } catch (e) {}
         
         if(tg.themeParams.bg_color) {
             document.documentElement.style.setProperty('--bg-color', tg.themeParams.secondary_bg_color || '#f4f4f5');
@@ -174,12 +181,15 @@
           return;
         }
 
+        const ctrl = new AbortController();
+        const tmo = setTimeout(function () { ctrl.abort(); }, 25000);
         try {
-          // BÍ QUYẾT FIX LỖI FAILED TO FETCH NẰM Ở ĐÂY: DÙNG ĐƯỜNG DẪN TƯƠNG ĐỐI TỰ ĐỘNG
           const resp = await fetch(`/api/generate_token/${encodeURIComponent(ALBUM_ID)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ initData: initData })
+            body: JSON.stringify({ initData: initData }),
+            signal: ctrl.signal,
+            credentials: 'same-origin',
           });
 
           const result = await resp.json();
@@ -195,7 +205,13 @@
           document.getElementById('state-loading').style.display = 'none';
           document.getElementById('state-success').style.display = 'block';
         } catch (err) {
-          showError('Lỗi mạng: Vui lòng kiểm tra kết nối mạng của bạn (Failed to fetch).');
+          if (err && err.name === 'AbortError') {
+            showError('Hết thời gian chờ máy chủ. Thử tắt Mini App và mở lại, hoặc dùng mạng khác.');
+          } else {
+            showError('Lỗi mạng: Vui lòng kiểm tra kết nối (Failed to fetch).');
+          }
+        } finally {
+          clearTimeout(tmo);
         }
       }
 

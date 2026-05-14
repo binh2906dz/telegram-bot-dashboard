@@ -14,7 +14,7 @@ import zipfile
 import urllib.request
 from datetime import datetime, timezone, timedelta, time as dt_time
 from functools import wraps
-from flask import Flask, request, redirect, render_template, jsonify, Response, session, url_for
+from flask import Flask, request, redirect, render_template, jsonify, Response, session, url_for, make_response
 
 import subprocess
 
@@ -1755,7 +1755,10 @@ def miniapp_bridge(album_id):
     if album_id not in albums:
         return "Album không tồn tại", 404
     base_url = request.host_url.rstrip("/")
-    return render_template("miniapp_bridge.html", album_id=album_id, base_url=base_url)
+    html = render_template("miniapp_bridge.html", album_id=album_id, base_url=base_url)
+    resp = make_response(html)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
 
 
 @app.route("/api/generate_token/<album_id>", methods=["POST"])
