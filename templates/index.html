@@ -65,14 +65,19 @@
       font-size: 1.05rem;
       font-weight: 800;
       letter-spacing: -0.03em;
-      background: linear-gradient(105deg, var(--accent) 0%, #c2410c 55%, #ea580c 100%);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
+      color: var(--accent);
       white-space: nowrap;
       margin-right: auto;
     }
-    .topbar .brand i { color: var(--accent); -webkit-text-fill-color: initial; }
+    @supports ((-webkit-background-clip: text) or (background-clip: text)) {
+      .topbar .brand {
+        background: linear-gradient(105deg, var(--accent) 0%, #c2410c 55%, #ea580c 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .topbar .brand i { color: var(--accent); -webkit-text-fill-color: initial; }
+    }
     .topbar-user-chip {
       font-size: .8rem;
       font-weight: 600;
