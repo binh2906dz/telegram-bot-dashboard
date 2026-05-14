@@ -135,6 +135,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+7423bef fix(bots): subs_count = reachable IDs per bot (subs ∪ active telegram_ids)
 818c82f fix(ui): brand text fallback khi trình duyệt không clip gradient
 30af0af docs: huongdan chỉnh hash commit UI (6ee8a54)
 6ee8a54 feat(ui): premium layout — sidebar flow, Jakarta font, scoped nav active
@@ -211,7 +212,7 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
 [2026-05-14] Quản lý Bot — API /bots/health: cột `subs_count` đếm theo phương án B — số
   `user_id` duy nhất = (subscribers của `bot_id` đó, nếu rỗng thì fallback `global`) ∪
   (`telegram_ids` có `status='active'`), cùng logic tập nhận như broadcast trên web.
-  Thêm `db_count_reachable_recipients_for_bot`. File: app.py.
+  Thêm `db_count_reachable_recipients_for_bot`. File: app.py (commit 7423bef).
 
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
