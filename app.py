@@ -3820,7 +3820,9 @@ if BOT_TOKEN or db_get_bots():
     # Design notes:
     # 1. Multi-worker safety: A non-blocking exclusive file lock (fcntl.flock) ensures
     #    only ONE Gunicorn worker process starts the bot polling thread, even when
-    #    Gunicorn is launched with -w 2+ workers.
+    #    Gunicorn is launched with -w 2+ workers.  The lock file MUST live under the
+    #    app directory — a global /tmp/telegram_bot_manager.lock collides with other
+    #    projects on the same VPS and causes LOCK_NB to fail here forever.
     # 2. Werkzeug dev-server: When running flask with debug=True the reloader spawns a
     #    child process with WERKZEUG_RUN_MAIN="true".  Both parent and child execute this
     #    module-level code, but the file lock guarantees only whichever loads first
@@ -3833,18 +3835,20 @@ if BOT_TOKEN or db_get_bots():
     try:
         import fcntl as _fcntl
 
-        _bot_lock_path = os.path.join(tempfile.gettempdir(), "telegram_bot_manager.lock")
+        _bot_lock_path = os.path.join(_APP_DIR, "telegram_bot_manager.lock")
         log.info("Bot manager: attempting to acquire lock at %s (worker PID %s)", _bot_lock_path, os.getpid())
         _bot_lock_fd = open(_bot_lock_path, "w")  # noqa: WPS515 – intentionally kept open
         _fcntl.flock(_bot_lock_fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
         log.info("Bot manager: lock acquired – starting background thread (worker PID %s)", os.getpid())
         _bot_manager.start_in_thread()
         log.info("Bot manager started in background thread (worker PID %s)", os.getpid())
-    except (IOError, OSError):
+    except (IOError, OSError) as _flock_err:
         log.info(
-            "Bot manager lock held by another worker (PID %s) – "
-            "bot polling thread not started in this worker",
+            "Bot manager: flock not acquired in this process (PID %s): %s — "
+            "another Gunicorn worker likely holds %s; bot thread skipped here.",
             os.getpid(),
+            _flock_err,
+            _bot_lock_path,
         )
         if _bot_lock_fd is not None:
             _bot_lock_fd.close()
@@ -3894,7 +3898,7 @@ def run_bot_thread():
     # this function returns and the local variable is garbage-collected.
     try:
         import fcntl as _fcntl
-        _bot_lock_path = os.path.join(tempfile.gettempdir(), "telegram_bot_manager.lock")
+        _bot_lock_path = os.path.join(_APP_DIR, "telegram_bot_manager.lock")
         _bot_lock_fd = open(_bot_lock_path, "w")  # noqa: WPS515 – held open for lock lifetime
         log.info("run_bot_thread: waiting for bot manager lock (PID %s)…", os.getpid())
         _fcntl.flock(_bot_lock_fd, _fcntl.LOCK_EX)  # blocking – waits until the lock is free
