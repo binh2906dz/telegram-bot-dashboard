@@ -135,6 +135,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+4e9e553 fix(backup): APScheduler dedupe workers; retention 3 ngay VN; bo PTB daily backup
 5e6c216 feat(ids): broadcast IDs thanh cong -> subscribers theo tung bot
 cf1c360 fix(bots): subs_count chi bang subscribers theo bot; GET /bots/<id>/subscribers + modal
 7423bef fix(bots): subs_count = reachable IDs per bot (subs ∪ active telegram_ids) — da thay boi cf1c360
@@ -231,7 +232,7 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
   APScheduler: `fcntl` flock + `app_config` key `scheduled_backup_last_vn_day` để chỉ
   một lần/ngày VN khi nhiều Gunicorn worker. Dọn zip theo 3 ngày lịch VN (mtime), mỗi
   ngày giữ một bản mới nhất. Tên file backup theo giờ `Asia/Ho_Chi_Minh`. File: app.py,
-  templates/index.html.
+  templates/index.html. (commit 4e9e553).
 
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
