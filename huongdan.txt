@@ -132,6 +132,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+f50e262 docs: enforce read-then-log workflow in huongdan.txt + Cursor rule
 6f3b264 docs: add huongdan.txt handoff (chat history, upgrades, deploy notes)
 e699627 perf: faster Mini App token — parse initData once, album exists query, throttle token cleanup
 fcc64e7 P3: secure sessions/proxy, login rate limit, redact token logs, normalize WEBHOOK_URL, validate bot token on add
@@ -142,6 +143,9 @@ b68e8e7 P2: CSRF protection, SECRET_KEY warnings, webhook allowed_updates, weak 
 --------------------------------------------------------------------------------
 10) NHAT KY THAY DOI (moi nhat o duoi cung — ghi sau moi dot chinh sua)
 --------------------------------------------------------------------------------
+[2026-05-14] Day rule Cursor + cap nhat muc (9) git: commit f50e262 (doc quy tac
+  doc/ghi trong huongdan.txt + file .cursor/rules/huongdan-handoff.mdc).
+
 [2026-05-14] Quy tac van hanh: them muc (0) "doc truoc — ghi sau"; cap lai muc (8);
   bo sung commit 6f3b264 vao muc (9); them muc (10) nhat ky. Them
   .cursor/rules/huongdan-handoff.mdc (alwaysApply) de agent doc huongdan.txt
