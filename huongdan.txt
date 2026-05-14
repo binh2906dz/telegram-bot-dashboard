@@ -1,0 +1,130 @@
+================================================================================
+HUONG DAN / HANDOFF — Telegram Bot Dashboard
+================================================================================
+Muc dich: Khi het token chat hoac mo phien lam viec moi, dan file nay (hoac noi
+"doc huongdan.txt trong repo") de AI / nguoi doc hieu nhanh boi canh, lich su
+nang cap, va diem de gay loi — giam rui ro khi tiep tuc phat trien.
+
+Repo: https://github.com/binh2906dz/telegram-bot-dashboard  (nhanh: main)
+Ung dung chinh: app.py (Flask) + templates/ + SQLite data.db + Gunicorn
+
+--------------------------------------------------------------------------------
+1) MOI TRUONG TRIEN KHAI (VPS tieu bieu)
+--------------------------------------------------------------------------------
+- Thu muc: /root/telegram-bot-dashboard
+- Service systemd: bot  (Gunicorn app:app, thuong -w 1, port 127.0.0.1:5000)
+- Nginx: proxy_pass toi Gunicorn; co the phuc vu /static/uploads/ truc tiep
+- Cap nhat nhanh:
+    cd /root/telegram-bot-dashboard && git pull origin main && \
+    source venv/bin/activate && pip install -r requirements.txt && deactivate && \
+    sudo systemctl restart bot
+- Kiem tra:
+    curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5000/healthz
+    (mong doi: 200, body OK)
+
+--------------------------------------------------------------------------------
+2) LICH SU NANG CAP / CHINH SUA (theo cuoc tro chuyen + git log)
+--------------------------------------------------------------------------------
+P0 (commit 7d88524):
+- album_view: duong dan media dung /static/uploads/... (khong rewrite /media/)
+- app.py: bo fallback WEBHOOK_URL cung; canh bao khi WEBHOOK_URL trong
+- setup_vps.sh: REPO_BRANCH=main, co the ghi de DOMAIN / REPO_BRANCH
+
+P1 (commit 26b367c):
+- album_view: bo JS lazy-load khong dung
+- app.py: log webhook an toan (khong in full URL chua token trong path)
+- Comment / doc trong bot.py, run_bot.py, start.sh, setup_vps.sh
+
+P2 (commit b68e8e7):
+- Flask-WTF + CSRFProtect; WTF_CSRF_TIME_LIMIT=None; WTF_CSRF_SSL_STRICT=False
+- SECRET_KEY: canh bao khi thieu nhung da co DOMAIN/APP_BASE_URL/WEBHOOK_URL...
+- Canh bao log neu OWNER_PASS / MANAGER_PASS thuoc blocklist de doan
+- Webhook allowed_updates mo rong (edited_message, my_chat_member, chat_member...)
+- @csrf.exempt: POST /webhook/<token_path>, POST /api/generate_token/<album_id>
+- templates/index.html + login.html: csrf_token form + fetch X-CSRFToken
+- requirements.txt: Flask-WTF
+
+P3 (commit fcc64e7):
+- Redact token trong log khi start bot loi (InvalidToken / TelegramError tach;
+  Exception khac: redact chuoi giong token + exc_info)
+- BEHIND_PROXY=1 -> ProxyFix (X-Forwarded-*)
+- SESSION_COOKIE_HTTPONLY, SAME_SITE=Lax; SESSION_COOKIE_SECURE theo env
+- Flask-Limiter: gioi han POST /login (LOGIN_RATE_LIMIT, mac dinh 20/phut)
+- Header bao mat (nosniff, Referrer-Policy...), bo qua /miniapp/
+- Chuan hoa WEBHOOK_URL (DOMAIN chi hostname -> them https://)
+- /bots/add: goi Telegram getMe truoc khi luu token
+- requirements.txt: Flask-Limiter
+
+Toi uu Mini App / generate_token (commit e699627):
+- Khong con db_get_albums() day du cho check album; dung db_album_exists()
+- Parse initData mot lan, thu nhieu bot token (_init_data_matches_any_bot_token)
+- db_cleanup_expired_tokens() gioi han tan suat (~5 phut) de giam contention SQLite
+
+Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
+- 4b99a7b: defer telegram-web-app.js, fetch timeout, no-store
+- e29ae75: initData validate voi tat ca bot token (multi-bot)
+- 9121e85 / 73dfdd9: lock file BotManager trong thu muc app (tranh xung dot /tmp)
+
+--------------------------------------------------------------------------------
+3) XAC THUC DASHBOARD
+--------------------------------------------------------------------------------
+- Doc tu .env: OWNER_USER, OWNER_PASS, MANAGER_USER, MANAGER_PASS
+- Mac dinh neu khong set (theo code): admin/admin123, quanly/quanly123
+- P2 se log ERROR neu mat khau thuoc danh sach yeu — nen doi trong .env
+
+--------------------------------------------------------------------------------
+4) BIEN MOI TRUONG QUAN TRONG (.env — xem .env.example)
+--------------------------------------------------------------------------------
+- TELEGRAM_BOT_TOKEN / TOKEN / BOT_TOKEN
+- DOMAIN hoac APP_BASE_URL / WEBHOOK_URL (uu tien xem app.py)
+- SECRET_KEY (bat buoc on dinh khi production + CSRF/session)
+- BEHIND_PROXY, SESSION_COOKIE_SECURE (P3 — bat khi co HTTPS dung)
+- LOGIN_RATE_LIMIT, RATELIMIT_STORAGE_URI (P3)
+
+--------------------------------------------------------------------------------
+5) PHAN BIET LOI "WEB" VS "BOT TELEGRAM"
+--------------------------------------------------------------------------------
+- /healthz = 200 chi noi dich vu HTTP song.
+- Bot token invalid (InvalidToken): bot do KHONG start / KHONG set_webhook;
+  dashboard van mo duoc. Log sau P3: khong in full token.
+- Mini App cham sau khi xoa cache: thuong do tai lai telegram-web-app.js tu
+  telegram.org + cold TLS; server da toi uu nhanh generate_token (e699627).
+
+--------------------------------------------------------------------------------
+6) DIEM NHAY KHI SUA CODE (tranh hoi quy / loi ngam)
+--------------------------------------------------------------------------------
+- BotManager + khoi tao module-level: Gunicorn co the import app nhieu lan;
+  co file lock telegram_bot_manager.lock trong thu muc app — KHONG xoa nham
+  khi dang chay.
+- CSRF: moi POST dashboard can token; webhook + api_generate_token duoc exempt.
+- Khong log exception Telegram truc tiep neu co the chua token trong message
+  (da xu ly mot phan o P3).
+- SQLite: tranh chay DELETE nang tren moi request (da giam o generate_token).
+
+--------------------------------------------------------------------------------
+7) GOI Y REFACTOR app.py (neu lam sau)
+--------------------------------------------------------------------------------
+- Tach incremental + blueprint; tranh big bang mot commit.
+- Uu tien smoke test (healthz, login, 1 POST dashboard, generate_token) truoc
+  khi tach lon.
+
+--------------------------------------------------------------------------------
+8) CACH DUNG FILE NAY CHO PHIEN CHAT / AI SAU
+--------------------------------------------------------------------------------
+- Mo repo, doc huongdan.txt truoc khi sua.
+- Neu nguoi dung dan: "Theo huongdan.txt, tiep tuc task X" thi giu nguyen
+  URL route, env, va luong BotManager/CSRF da mo ta.
+- Cap nhat file nay khi co nang cap lon moi (ghi commit + ngay + thay doi).
+
+--------------------------------------------------------------------------------
+9) LICH SU GIT GAN DAY (oneline — cap nhat bang: git log --oneline -15)
+--------------------------------------------------------------------------------
+e699627 perf: faster Mini App token — parse initData once, album exists query, throttle token cleanup
+fcc64e7 P3: secure sessions/proxy, login rate limit, redact token logs, normalize WEBHOOK_URL, validate bot token on add
+b68e8e7 P2: CSRF protection, SECRET_KEY warnings, webhook allowed_updates, weak password logs
+26b367c P1: remove dead album lazy-load JS, safe webhook logs, deploy docs in scripts
+7d88524 P0: static media URLs in album view, remove webhook domain fallback, setup_vps main+env overrides
+
+================================================================================
+Het — luu y: khong luu mat khau / token that trong file nay.
+================================================================================
