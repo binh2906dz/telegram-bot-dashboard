@@ -132,6 +132,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+046f871 docs: huongdan (9) them hash reply keyboard (2046f30)
 2046f30 feat: reply keyboard menu JSON + dashboard + bot_reply_menus table
 74974ca docs: huongdan nhật ký cho 7f058fc
 7f058fc docs: sync huongdan git log + nhật ký f50e262
@@ -146,6 +147,9 @@ b68e8e7 P2: CSRF protection, SECRET_KEY warnings, webhook allowed_updates, weak 
 --------------------------------------------------------------------------------
 10) NHAT KY THAY DOI (moi nhat o duoi cung — ghi sau moi dot chinh sua)
 --------------------------------------------------------------------------------
+[2026-05-14] docs: huongdan.txt muc (9) them dong hash 2046f30 cho tinh nang reply
+  keyboard (commit 046f871).
+
 [2026-05-14] Reply keyboard (Telegram): bang SQLite bot_reply_menus, module
   reply_menu.py (normalize + mau JSON), PTB: sau /start gui them prompt + ReplyKeyboardMarkup
   neu enabled; unified_text_handler xu ly nhan nut truoc album-title match;
