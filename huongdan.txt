@@ -135,6 +135,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+5932331 feat(ui): pro VIP polish dashboard + login (glass, motion, toast)
 4e9e553 fix(backup): APScheduler dedupe workers; retention 3 ngay VN; bo PTB daily backup
 5e6c216 feat(ids): broadcast IDs thanh cong -> subscribers theo tung bot
 cf1c360 fix(bots): subs_count chi bang subscribers theo bot; GET /bots/<id>/subscribers + modal
@@ -238,7 +239,7 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
   glass mạnh hơn, nav active/hover, thẻ stat/dash-card nâng + stagger nhẹ, bảng hover accent,
   nút accent shimmer, toast gradient + slide-in, lightbox blur; `prefers-reduced-motion` tắt
   hiệu ứng. Trang login: orb nền, thẻ glass, nút đăng nhập gradient + shimmer. Chỉ CSS/HTML
-  style, không đổi route/JS logic.
+  style, không đổi route/JS logic. (commit 5932331).
 
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
