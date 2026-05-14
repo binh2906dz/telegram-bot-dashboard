@@ -377,6 +377,7 @@ def backup_db_to_bytes() -> bytes:
         except Exception:
             pass
 
+
 def _migrate_json_to_db():
     """One-time migration: import data from JSON files into SQLite tables.
 
@@ -1006,15 +1007,19 @@ _broadcast_all_status: dict = {
 init_db()
 
 class _BotManagerStub:
- """Minimal placeholder before the real BotManager is instantiated."""
- def notify_change(self):
- pass
- def start_in_thread(self):
- pass
- def get_app_by_token(self, token: str):
- return None
- def get_loop(self):
- return None
+    """Minimal placeholder before the real BotManager is instantiated."""
+
+    def notify_change(self):
+        pass
+
+    def start_in_thread(self):
+        pass
+
+    def get_app_by_token(self, token: str):
+        return None
+
+    def get_loop(self):
+        return None
 
 # Will be replaced with a real _BotManager instance once the bot block runs
 _bot_manager: _BotManagerStub = _BotManagerStub()
