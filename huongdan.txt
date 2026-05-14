@@ -135,6 +135,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+b41a919 feat(ui): premium layout — sidebar flow, Jakarta font, scoped nav active
 6a2f1fa docs: huongdan nhật ký + git log cho 3f2db93 (theme sáng, reply menu)
 3f2db93 feat(ui): light dashboard theme; reply menu inline category/menu + form wiring
 af4ac0a feat: reply keyboard dedicated page, global config sync all bots
@@ -193,6 +194,14 @@ reply_menu.py, app.py (commits 3f2db93, 6a2f1fa).
   bo sung commit 6f3b264 vao muc (9); them muc (10) nhat ky. Them
   .cursor/rules/huongdan-handoff.mdc (alwaysApply) de agent doc huongdan.txt
   truoc khi chinh sua dang ke va cap nhat nhat ky sau thay doi.
+
+[2026-05-14] UI/UX dashboard: font Plus Jakarta Sans; nền gradient nhẹ; topbar mờ (backdrop),
+chip tài khoản; sidebar rộng hơn, thanh accent màu, nhóm menu theo luồng vận hành
+(Bot & Telegram gồm Bot / Bàn phím / Cấu hình → Nội dung Album & Kịch bản → Khán giả
+& Analytics → Backup); mục nav dạng pill khi active; showSection chỉ gỡ active trên
+#sidebar .nav-item (tránh đụng tab Cấu hình). Modal/dash-card/shadow/bo góc; sửa modal
+danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Chỉ templates, không
+đổi logic server hay id section.
 
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
