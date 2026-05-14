@@ -216,7 +216,7 @@
           {% if bots %}
           <div class="table-responsive">
             <table class="table table-dark table-borderless data-table mb-0" id="botsTable">
-              <thead><tr><th class="ps-3">Tên Bot</th><th>Token</th><th>Admin ID</th><th>Trạng thái</th><th>Auto-Responder</th><th>Subscribers</th><th>▶ Start</th><th>📤 Gửi</th><th>🖱 Click</th><th>💬 Phản hồi</th><th style="width:60px;"></th></tr></thead>
+              <thead><tr><th class="ps-3">Tên Bot</th><th>Token</th><th>Admin ID</th><th>Trạng thái</th><th>Auto-Responder</th><th>Subscribers</th><th>▶ Start</th><th>📤 Gửi</th><th>🖱 Click</th><th>💬 Phản hồi</th><th class="text-center">⌨</th><th style="width:60px;"></th></tr></thead>
               <tbody>
                 {% for bot in bots %}
                 <tr id="bot-row-{{ bot.id }}">
@@ -250,6 +250,7 @@
                   <td id="bot-msgs-{{ bot.id }}">&#8212;</td>
                   <td id="bot-interactions-{{ bot.id }}">&#8212;</td>
                   <td id="bot-replies-{{ bot.id }}">&#8212;</td>
+                  <td class="text-center">{% if role == 'owner' %}<button type="button" class="btn btn-sm btn-outline-info" onclick="openReplyMenuEditor('{{ bot.id }}')" title="Bàn phím trả lời (Reply menu)"><i class="bi bi-keyboard"></i></button>{% else %}<span class="text-muted" style="font-size:.75rem;">&#8212;</span>{% endif %}</td>
                   <td>{% if role == 'owner' %}<button class="btn btn-sm btn-outline-danger" onclick="doDeleteBot('{{ bot.id }}', '{{ bot.name }}', this)"><i class="bi bi-trash3"></i></button>{% endif %}</td>
                 </tr>
                 {% endfor %}
@@ -972,6 +973,28 @@
   </div>
 </div>
 
+<!-- Reply keyboard menu (JSON) per bot -->
+<div class="modal fade" id="replyMenuModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-keyboard me-2" style="color:var(--accent);"></i>Bàn phím menu — <span id="replyMenuBotTitle" class="text-warning"></span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="replyMenuBotId" value="">
+        <p class="text-muted small mb-2">JSON: <code>enabled</code>, <code>prompt</code>, <code>ref_param_prefix</code>, <code>rows</code> (mỗi ô: <code>label</code>, <code>type</code>: text | ref_link | url | webapp | remove_keyboard | stats | stats_admin, …). Đặt <code>enabled: true</code> để hiện bàn phím sau tin /start.</p>
+        <textarea id="replyMenuJson" class="form-control font-monospace" rows="16" spellcheck="false" placeholder='{"enabled":false,"prompt":"...","rows":[]}'></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="loadReplyMenuSample()"><i class="bi bi-file-earmark-code me-1"></i>Tải mẫu</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+        <button type="button" class="btn btn-accent" onclick="saveReplyMenu(this)"><i class="bi bi-floppy me-1"></i>Lưu</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Flow Node Edit Modal -->
 <div class="modal fade" id="flowNodeModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
@@ -1166,6 +1189,58 @@ async function toggleAutoResponder(botId, checkbox) {
     }
   } catch(e) { checkbox.checked = !checkbox.checked; showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { checkbox.disabled = false; }
+}
+async function openReplyMenuEditor(botId) {
+  document.getElementById('replyMenuBotId').value = botId;
+  var tit = document.getElementById('replyMenuBotTitle');
+  var row = document.getElementById('bot-row-' + botId);
+  var nameCell = row ? row.querySelector('td.ps-3') : null;
+  if (tit) tit.textContent = nameCell ? nameCell.textContent.trim() : botId;
+  var ta = document.getElementById('replyMenuJson');
+  ta.value = '{"enabled":false,"prompt":"👇 Chọn một tùy chọn","ref_param_prefix":"REF","rows":[]}';
+  try {
+    const res = await fetch('/bots/' + encodeURIComponent(botId) + '/reply_menu', { credentials: 'same-origin' });
+    const data = await res.json();
+    if (data.ok && data.menu) ta.value = JSON.stringify(data.menu, null, 2);
+    else if (!data.ok) showToast('&#10060; ' + (data.error || '?'), 'error');
+  } catch (e) {
+    showToast('&#10060; Lỗi: ' + e.message, 'error');
+  }
+  new bootstrap.Modal(document.getElementById('replyMenuModal')).show();
+}
+async function loadReplyMenuSample() {
+  try {
+    const res = await fetch('/bots/reply_menu_sample', { credentials: 'same-origin' });
+    const data = await res.json();
+    if (!data.ok || !data.menu) { showToast('&#10060; ' + (data.error || 'Không tải được mẫu'), 'error'); return; }
+    document.getElementById('replyMenuJson').value = JSON.stringify(data.menu, null, 2);
+    showToast('&#9989; Đã nạp JSON mẫu (chỉnh sửa trước khi Lưu)', 'success');
+  } catch (e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+}
+async function saveReplyMenu(btn) {
+  const botId = document.getElementById('replyMenuBotId').value;
+  if (!botId) return;
+  var parsed;
+  try { parsed = JSON.parse(document.getElementById('replyMenuJson').value); }
+  catch (e) { showToast('&#10060; JSON không hợp lệ: ' + e.message, 'error'); return; }
+  var orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang lưu...';
+  try {
+    const res = await fetch('/bots/' + encodeURIComponent(botId) + '/reply_menu', {
+      method: 'POST',
+      headers: csrfHeaders({ 'Content-Type': 'application/json' }),
+      credentials: 'same-origin',
+      body: JSON.stringify(parsed)
+    });
+    const data = await res.json();
+    if (data.ok && data.menu) {
+      document.getElementById('replyMenuJson').value = JSON.stringify(data.menu, null, 2);
+      showToast('&#9989; Đã lưu bàn phím menu (áp dụng cho /start và nút ngay lập tức)', 'success');
+    } else {
+      showToast('&#10060; ' + (data.error || '?'), 'error');
+    }
+  } catch (e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = orig; }
 }
 async function loadAnalytics(btn) {
   const origHtml = btn ? btn.innerHTML : '';

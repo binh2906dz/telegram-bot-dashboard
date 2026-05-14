@@ -25,6 +25,14 @@ import subprocess
 
 import httpx
 
+from reply_menu import (
+    build_reply_keyboard_markup,
+    expand_placeholders,
+    find_menu_action_for_text,
+    normalize_reply_menu,
+    SAMPLE_REPLY_MENU,
+)
+
 # Load .env file automatically.  Our own parser runs unconditionally so that
 # empty-string env vars set by a misconfigured systemd unit or a stale shell
 # session never silently swallow the real token from the .env file.
@@ -431,6 +439,12 @@ def init_db():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS bot_reply_menus (
+                bot_id TEXT PRIMARY KEY,
+                data_json TEXT NOT NULL DEFAULT '{}'
+            )
+        ''')
 
         # --- Performance: add category_id shortcut column on albums ---
         # SQLite does not support "ADD COLUMN IF NOT EXISTS" before version 3.37,
@@ -771,6 +785,34 @@ def db_save_bots(bots: list):
                 "INSERT INTO bots_config (id, data_json, sort_order) VALUES (?, ?, ?)",
                 (bot.get("id", str(i)), json.dumps(bot, ensure_ascii=False), i),
             )
+        conn.commit()
+
+
+def db_get_reply_menu(bot_id: str) -> dict:
+    """Load per-bot reply keyboard menu config (normalized JSON)."""
+    key = bot_id or "env_default"
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT data_json FROM bot_reply_menus WHERE bot_id=?",
+                (key,),
+            ).fetchone()
+        if row:
+            return normalize_reply_menu(json.loads(row["data_json"]))
+    except Exception as exc:
+        log.error("db_get_reply_menu(%s) failed: %s", key, exc)
+    return normalize_reply_menu({})
+
+
+def db_save_reply_menu(bot_id: str, menu: dict):
+    """Save reply keyboard menu JSON for a bot."""
+    key = bot_id or "env_default"
+    norm = normalize_reply_menu(menu)
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO bot_reply_menus (bot_id, data_json) VALUES (?, ?)",
+            (key, json.dumps(norm, ensure_ascii=False)),
+        )
         conn.commit()
 
 
@@ -2752,6 +2794,12 @@ def delete_bot(bot_id):
     bots = db_get_bots()
     bots = [b for b in bots if b.get("id") != bot_id]
     db_save_bots(bots)
+    try:
+        with get_db() as conn:
+            conn.execute("DELETE FROM bot_reply_menus WHERE bot_id=?", (bot_id,))
+            conn.commit()
+    except Exception as exc:
+        log.warning("delete_bot: could not remove reply_menu for %s: %s", bot_id, exc)
     _bot_manager.notify_change()
     return jsonify({"ok": True})
 
@@ -2773,6 +2821,29 @@ def toggle_bot_responder(bot_id):
         return jsonify({"ok": False, "error": "Bot không tồn tại"}), 404
     db_save_bots(bots)
     return jsonify({"ok": True, "auto_responder": new_state})
+
+
+@app.route("/bots/reply_menu_sample", methods=["GET"])
+@owner_required
+def bot_reply_menu_sample():
+    """Example menu JSON for the dashboard editor."""
+    return jsonify({"ok": True, "menu": SAMPLE_REPLY_MENU})
+
+
+@app.route("/bots/<bot_id>/reply_menu", methods=["GET", "POST"])
+@owner_required
+def bot_reply_menu_api(bot_id):
+    """Get or save per-bot Telegram reply keyboard menu (JSON)."""
+    bots = db_get_bots()
+    if not any(b.get("id") == bot_id for b in bots):
+        return jsonify({"ok": False, "error": "Bot không tồn tại"}), 404
+    if request.method == "GET":
+        return jsonify({"ok": True, "menu": db_get_reply_menu(bot_id)})
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "JSON không hợp lệ"}), 400
+    db_save_reply_menu(bot_id, data)
+    return jsonify({"ok": True, "menu": db_get_reply_menu(bot_id)})
 
 
 @app.route("/bots/health", methods=["GET"])
@@ -3316,7 +3387,15 @@ def ids_broadcast():
 # ===== BOT HANDLERS =====
 
 if BOT_TOKEN or db_get_bots():
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo, WebAppInfo
+    from telegram import (
+        Update,
+        InlineKeyboardButton,
+        InlineKeyboardMarkup,
+        InputMediaPhoto,
+        InputMediaVideo,
+        ReplyKeyboardRemove,
+        WebAppInfo,
+    )
     from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
     # ---- Flow keyboard builder ----
@@ -3638,6 +3717,129 @@ if BOT_TOKEN or db_get_bots():
             task = asyncio.create_task(asyncio.to_thread(increment_bot_stat, bot_cfg_id, field, count))
             task.add_done_callback(_log_stat_error)
 
+        async def handle_reply_menu_cell(
+            update: Update,
+            context: ContextTypes.DEFAULT_TYPE,
+            action: dict,
+            menu_cfg: dict,
+        ):
+            """Execute one reply-menu button action (plain text, link, webapp, stats, etc.)."""
+            user = update.effective_user
+            if not user or not update.message:
+                return
+            uname = user.username or ""
+            fname = user.first_name or ""
+            bot_username = (context.bot.username or "").strip()
+            pref = (menu_cfg.get("ref_param_prefix") or "REF").strip() or "REF"
+            ref_link = ""
+            if bot_username:
+                ref_link = f"https://t.me/{bot_username}?start={pref}{user.id}"
+            ph = {
+                "user_id": str(user.id),
+                "username": uname,
+                "first_name": fname,
+                "ref_link": ref_link,
+                "bot_username": bot_username,
+            }
+
+            def _ex(s):
+                return expand_placeholders(str(s or ""), ph)
+
+            typ = str(action.get("type", "text")).lower()
+            try:
+                if typ == "text":
+                    await update.message.reply_text(_ex(action.get("body")) or "...")
+                    return
+                if typ == "ref_link":
+                    opening = (_ex(action.get("body")) or "🌟 Mời bạn bè").strip() or "🌟 Mời bạn bè"
+                    parts = [opening, f"🔗 Link mời của bạn:\n{ref_link}"]
+                    bonus = _ex(action.get("bonus_text")).strip()
+                    if bonus:
+                        parts.append(bonus)
+                    await update.message.reply_text("\n\n".join(parts))
+                    return
+                if typ == "url":
+                    body = (_ex(action.get("body")) or "Liên kết").strip() or "Liên kết"
+                    url = str(action.get("url", "")).strip()
+                    bl = (_ex(action.get("button_label")) or "Mở liên kết").strip() or "Mở liên kết"
+                    if url:
+                        kb = [[InlineKeyboardButton(bl, url=url)]]
+                        await update.message.reply_text(body, reply_markup=InlineKeyboardMarkup(kb))
+                    else:
+                        await update.message.reply_text(body)
+                    return
+                if typ == "webapp":
+                    body = (_ex(action.get("body")) or "Mở Mini App").strip() or "Mở Mini App"
+                    album_id = str(action.get("album_id", "")).strip()
+                    _base_url = os.environ.get("APP_BASE_URL", os.environ.get("DOMAIN", "")).rstrip("/")
+                    if _base_url and not _base_url.startswith("http"):
+                        _base_url = f"https://{_base_url}"
+                    if not _base_url or not album_id:
+                        await update.message.reply_text(
+                            "⚠️ Chưa cấu hình APP_BASE_URL/DOMAIN hoặc thiếu album_id."
+                        )
+                        return
+                    if not await asyncio.to_thread(db_album_exists, album_id):
+                        await update.message.reply_text("⚠️ Album không tồn tại.")
+                        return
+                    bridge_url = f"{_base_url}/miniapp/bridge/{album_id}"
+                    kb = [[InlineKeyboardButton("🔥 Xem ngay", web_app=WebAppInfo(url=bridge_url))]]
+                    await update.message.reply_text(body, reply_markup=InlineKeyboardMarkup(kb))
+                    return
+                if typ == "remove_keyboard":
+                    body = _ex(action.get("body")).strip()
+                    rmk = ReplyKeyboardRemove(selective=False)
+                    if body:
+                        await update.message.reply_text(body, reply_markup=rmk)
+                    else:
+                        await update.message.reply_text("⌨️ Đã ẩn bàn phím menu.", reply_markup=rmk)
+                    return
+                if typ == "stats":
+                    bot_subs = await asyncio.to_thread(db_get_subscribers, bot_cfg_id)
+                    albums = await asyncio.to_thread(db_get_albums)
+                    total = total_posts(albums)
+                    a_rows = await asyncio.to_thread(get_all_analytics)
+                    a_data = next((r for r in a_rows if r["bot_id"] == bot_cfg_id), {})
+                    block = (
+                        f"👥 Người đăng ký: {len(bot_subs)}\n"
+                        f"📁 Albums: {len(albums)}\n"
+                        f"📝 Bài viết: {total}\n"
+                        f"▶️ Lượt /start: {a_data.get('starts_count', 0)}\n"
+                        f"📤 Tin đã gửi: {a_data.get('messages_sent', 0)}\n"
+                        f"🖱️ Tương tác nút: {a_data.get('interactions_count', 0)}\n"
+                        f"💬 Phản hồi: {a_data.get('replies_count', 0)}"
+                    )
+                    head = _ex(action.get("body")).strip()
+                    if head:
+                        await update.message.reply_text(f"{head}\n\n{block}")
+                    else:
+                        await update.message.reply_text(f"📊 Thống kê bot\n\n{block}")
+                    return
+                if typ == "stats_admin":
+                    bot_subs = await asyncio.to_thread(db_get_subscribers, bot_cfg_id)
+                    albums = await asyncio.to_thread(db_get_albums)
+                    total = total_posts(albums)
+                    a_rows = await asyncio.to_thread(get_all_analytics)
+                    a_data = next((r for r in a_rows if r["bot_id"] == bot_cfg_id), {})
+                    await update.message.reply_text(
+                        f"📊 Thống kê Bot:\n"
+                        f"👥 Người đăng ký: {len(bot_subs)}\n"
+                        f"📁 Albums: {len(albums)}\n"
+                        f"📝 Bài viết: {total}\n"
+                        f"▶️ Lượt /start: {a_data.get('starts_count', 0)}\n"
+                        f"📤 Tin đã gửi: {a_data.get('messages_sent', 0)}\n"
+                        f"🖱️ Tương tác nút: {a_data.get('interactions_count', 0)}\n"
+                        f"💬 Phản hồi: {a_data.get('replies_count', 0)}"
+                    )
+                    return
+                await update.message.reply_text(_ex(action.get("body")) or "...")
+            except Exception as exc:
+                log.warning("handle_reply_menu_cell failed: %s", exc)
+                try:
+                    await update.message.reply_text("⚠️ Không xử lý được yêu cầu. Thử lại sau.")
+                except Exception:
+                    pass
+
         async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_id = update.effective_chat.id
             banned = db_get_banned()
@@ -3692,6 +3894,12 @@ if BOT_TOKEN or db_get_bots():
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
 
+            menu_cfg = await asyncio.to_thread(db_get_reply_menu, bot_cfg_id)
+            rk = build_reply_keyboard_markup(menu_cfg)
+            if rk:
+                prompt = (menu_cfg.get("prompt") or "👇 Chọn một tùy chọn").strip()
+                await update.message.reply_text(prompt, reply_markup=rk)
+
         async def track_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Handle incoming text: count for analytics and auto-reply with Mini App link when text matches an album title."""
             # DB write in thread pool — don't block event loop for analytics
@@ -3716,6 +3924,26 @@ if BOT_TOKEN or db_get_bots():
                         reply_markup=InlineKeyboardMarkup(keyboard),
                     )
                     return
+
+        async def unified_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            """Route reply-keyboard labels before album-title auto-reply."""
+            if not update.message:
+                return
+            raw_text = (update.message.text or "").strip()
+            menu_cfg = await asyncio.to_thread(db_get_reply_menu, bot_cfg_id)
+            if menu_cfg.get("enabled") and raw_text:
+                act = find_menu_action_for_text(menu_cfg, raw_text)
+                if act:
+                    uid = update.effective_user.id if update.effective_user else 0
+                    if act.get("owner_only") and (not bot_admin_id or uid != bot_admin_id):
+                        await update.message.reply_text(
+                            "🔒 Chức năng này chỉ dành cho quản trị viên bot."
+                        )
+                        return
+                    await _fire_stat("interactions_count")
+                    await handle_reply_menu_cell(update, context, act, menu_cfg)
+                    return
+            await track_reply(update, context)
 
         async def track_interaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Track callback query interactions before delegating to real handlers."""
@@ -3899,8 +4127,8 @@ if BOT_TOKEN or db_get_bots():
         ptb_app.add_handler(CallbackQueryHandler(category_page_tracked, pattern=r"^cat_"))
         ptb_app.add_handler(CallbackQueryHandler(flow_handler_tracked, pattern="^flow_"))
         ptb_app.add_handler(CallbackQueryHandler(album_click_tracked))
-        # Track non-command text messages as user replies
-        ptb_app.add_handler(MessageHandler(tg_filters.TEXT & ~tg_filters.COMMAND, track_reply))
+        # Non-command text: reply menu (if enabled) then album-title bridge
+        ptb_app.add_handler(MessageHandler(tg_filters.TEXT & ~tg_filters.COMMAND, unified_text_handler))
         ptb_app.job_queue.run_repeating(
             scheduler_job,
             interval=60,

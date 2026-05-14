@@ -132,6 +132,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+feat: reply keyboard menu JSON + dashboard + bot_reply_menus table (xem git log main)
 74974ca docs: huongdan nhật ký cho 7f058fc
 7f058fc docs: sync huongdan git log + nhật ký f50e262
 f50e262 docs: enforce read-then-log workflow in huongdan.txt + Cursor rule
@@ -145,6 +146,14 @@ b68e8e7 P2: CSRF protection, SECRET_KEY warnings, webhook allowed_updates, weak 
 --------------------------------------------------------------------------------
 10) NHAT KY THAY DOI (moi nhat o duoi cung — ghi sau moi dot chinh sua)
 --------------------------------------------------------------------------------
+[2026-05-14] Reply keyboard (Telegram): bang SQLite bot_reply_menus, module
+  reply_menu.py (normalize + mau JSON), PTB: sau /start gui them prompt + ReplyKeyboardMarkup
+  neu enabled; unified_text_handler xu ly nhan nut truoc album-title match;
+  loai hanh dong: text, ref_link, url, webapp, remove_keyboard, stats, stats_admin
+  (+ owner_only). Web: cot nut ban phim trong Quan ly Bot, modal JSON, GET/POST
+  /bots/<id>/reply_menu + GET /bots/reply_menu_sample (owner). Xoa bot xoa luon
+  menu. File: app.py, reply_menu.py, templates/index.html.
+
 [2026-05-14] Dong bo muc (9) + them dong nhat ky cho commit f50e262 (commit 7f058fc).
 
 [2026-05-14] Day rule Cursor + cap nhat muc (9) git: commit f50e262 (doc quy tac
