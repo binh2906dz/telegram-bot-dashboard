@@ -788,32 +788,59 @@ def db_save_bots(bots: list):
         conn.commit()
 
 
-def db_get_reply_menu(bot_id: str) -> dict:
-    """Load per-bot reply keyboard menu config (normalized JSON)."""
-    key = bot_id or "env_default"
+# Key in app_config: one reply-keyboard definition shared by every Telegram bot.
+GLOBAL_REPLY_MENU_KEY = "reply_menu_global"
+
+
+def db_get_global_reply_menu() -> dict:
+    """Load shared reply keyboard config from app_config (canonical)."""
     try:
         with get_db() as conn:
             row = conn.execute(
-                "SELECT data_json FROM bot_reply_menus WHERE bot_id=?",
-                (key,),
+                "SELECT value FROM app_config WHERE key=?",
+                (GLOBAL_REPLY_MENU_KEY,),
+            ).fetchone()
+        if row is not None:
+            return normalize_reply_menu(json.loads(row["value"] or "{}"))
+    except Exception as exc:
+        log.error("db_get_global_reply_menu failed: %s", exc)
+    # Legacy installs: first row in bot_reply_menus before global key existed
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT data_json FROM bot_reply_menus ORDER BY bot_id LIMIT 1"
             ).fetchone()
         if row:
             return normalize_reply_menu(json.loads(row["data_json"]))
     except Exception as exc:
-        log.error("db_get_reply_menu(%s) failed: %s", key, exc)
+        log.debug("db_get_global_reply_menu legacy: %s", exc)
     return normalize_reply_menu({})
 
 
-def db_save_reply_menu(bot_id: str, menu: dict):
-    """Save reply keyboard menu JSON for a bot."""
-    key = bot_id or "env_default"
+def db_save_global_reply_menu(menu: dict) -> dict:
+    """Persist shared menu to app_config and mirror the same JSON to every bot row."""
     norm = normalize_reply_menu(menu)
+    payload = json.dumps(norm, ensure_ascii=False)
+    bots_list = db_get_bots()
     with get_db() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO bot_reply_menus (bot_id, data_json) VALUES (?, ?)",
-            (key, json.dumps(norm, ensure_ascii=False)),
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)",
+            (GLOBAL_REPLY_MENU_KEY, payload),
         )
+        for bot in bots_list:
+            bid = bot.get("id")
+            if bid:
+                conn.execute(
+                    "INSERT OR REPLACE INTO bot_reply_menus (bot_id, data_json) VALUES (?, ?)",
+                    (bid, payload),
+                )
         conn.commit()
+    return norm
+
+
+def db_get_reply_menu(bot_id: str) -> dict:
+    """Telegram reply keyboard: same global config for every bot (bot_id ignored)."""
+    return db_get_global_reply_menu()
 
 
 def db_get_config() -> dict:
@@ -1589,6 +1616,17 @@ def index():
     end = start + ALBUMS_PER_PAGE
     paginated_keys = sorted_keys[start:end]
     albums = {k: all_albums[k] for k in paginated_keys}
+    reply_menu_albums = sorted(
+        [
+            {
+                "id": aid,
+                "title": (all_albums[aid].get("title") if isinstance(all_albums.get(aid), dict) else None)
+                or aid,
+            }
+            for aid in all_albums.keys()
+        ],
+        key=lambda x: (str(x.get("title") or "")).lower(),
+    )
     return render_template("index.html", albums=albums, subs=subs,
                            active_album=active_album, total_posts=total_posts(all_albums),
                            role=session.get("role", ""), username=session.get("username", ""),
@@ -1596,7 +1634,9 @@ def index():
                            id_stats=id_stats, page=page, total_pages=total_pages,
                            total_albums=total_albums,
                            categories=db_get_categories(),
-                           expired_warning_message=db_get_expired_warning_message())
+                           expired_warning_message=db_get_expired_warning_message(),
+                           reply_menu_albums=reply_menu_albums,
+                           reply_menu_sample=SAMPLE_REPLY_MENU)
 
 
 # --- Album management ---
@@ -2823,27 +2863,26 @@ def toggle_bot_responder(bot_id):
     return jsonify({"ok": True, "auto_responder": new_state})
 
 
-@app.route("/bots/reply_menu_sample", methods=["GET"])
+@app.route("/reply_menu", methods=["GET", "POST"])
 @login_required
-def bot_reply_menu_sample():
-    """Example menu JSON for the dashboard editor (owner + manager)."""
-    return jsonify({"ok": True, "menu": SAMPLE_REPLY_MENU})
-
-
-@app.route("/bots/<bot_id>/reply_menu", methods=["GET", "POST"])
-@login_required
-def bot_reply_menu_api(bot_id):
-    """Get or save per-bot Telegram reply keyboard menu (JSON)."""
-    bots = db_get_bots()
-    if not any(b.get("id") == bot_id for b in bots):
-        return jsonify({"ok": False, "error": "Bot không tồn tại"}), 404
+def reply_menu_global_api():
+    """Read or save the single shared Telegram reply keyboard (all bots)."""
     if request.method == "GET":
-        return jsonify({"ok": True, "menu": db_get_reply_menu(bot_id)})
+        bots_list = db_get_bots()
+        return jsonify({
+            "ok": True,
+            "menu": db_get_global_reply_menu(),
+            "bot_count": len(bots_list),
+        })
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"ok": False, "error": "JSON không hợp lệ"}), 400
-    db_save_reply_menu(bot_id, data)
-    return jsonify({"ok": True, "menu": db_get_reply_menu(bot_id)})
+    norm = db_save_global_reply_menu(data)
+    return jsonify({
+        "ok": True,
+        "menu": norm,
+        "bot_count": len(db_get_bots()),
+    })
 
 
 @app.route("/bots/health", methods=["GET"])

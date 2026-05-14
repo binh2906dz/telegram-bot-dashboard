@@ -111,6 +111,9 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 - Khong log exception Telegram truc tiep neu co the chua token trong message
   (da xu ly mot phan o P3).
 - SQLite: tranh chay DELETE nang tren moi request (da giam o generate_token).
+- Bàn phím Telegram (Reply menu): cấu hình chung key app_config
+  `reply_menu_global` + đồng bộ `bot_reply_menus`; chỉnh trên web mục sidebar
+  "Bàn phím Telegram", API GET/POST `/reply_menu`.
 
 --------------------------------------------------------------------------------
 7) GOI Y REFACTOR app.py (neu lam sau)
@@ -149,6 +152,12 @@ b68e8e7 P2: CSRF protection, SECRET_KEY warnings, webhook allowed_updates, weak 
 --------------------------------------------------------------------------------
 10) NHAT KY THAY DOI (moi nhat o duoi cung — ghi sau moi dot chinh sua)
 --------------------------------------------------------------------------------
+[2026-05-14] Bàn phím Telegram (web): trang riêng sidebar "Bàn phím Telegram", form
+  hàng/nút/chức năng (không cần JSON). Cấu hình chung: app_config key
+  reply_menu_global + đồng bộ cùng JSON vào mọi dòng bot_reply_menus; bot đọc
+  global (fallback 1 dòng legacy). API GET/POST /reply_menu (login). Bỏ modal
+  theo từng bot. File: app.py, templates/index.html.
+
 [2026-05-14] Web reply menu: API reply_menu + reply_menu_sample dung login_required
   (owner + manager); cot "Bàn phím", nut "Menu phím", huong dan trong Quan ly Bot;
   fetch bao loi JSON/HTTP. File: app.py, templates/index.html.
@@ -160,9 +169,8 @@ b68e8e7 P2: CSRF protection, SECRET_KEY warnings, webhook allowed_updates, weak 
   reply_menu.py (normalize + mau JSON), PTB: sau /start gui them prompt + ReplyKeyboardMarkup
   neu enabled; unified_text_handler xu ly nhan nut truoc album-title match;
   loai hanh dong: text, ref_link, url, webapp, remove_keyboard, stats, stats_admin
-  (+ owner_only). Web: cot "Bàn phím" + modal JSON, GET/POST /bots/<id>/reply_menu
-  + GET /bots/reply_menu_sample (dang nhap dashboard). Xoa bot xoa luon menu.
-  File: app.py, reply_menu.py, templates/index.html.
+  (+ owner_only). Dashboard: sau do chuyen sang trang "Bàn phím Telegram" + global
+  app_config (xem muc tren). File: app.py, reply_menu.py, templates/index.html.
 
 [2026-05-14] Dong bo muc (9) + them dong nhat ky cho commit f50e262 (commit 7f058fc).
 
