@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>Admin Dashboard 🔥</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
@@ -439,12 +440,14 @@
             <button class="btn btn-sm btn-success" onclick="toggleAddPost('{{ album_id }}')"><i class="bi bi-plus-lg"></i> Thêm bài</button>
             {% if role == 'owner' %}
             <form action="/albums/{{ album_id }}/delete" method="post" class="d-inline" onsubmit="return confirm('Xóa album ?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
               <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash3"></i></button>
             </form>
             {% endif %}
           </div>
           <div id="add-post-panel-{{ album_id }}" style="display:none;padding:16px 18px;background:rgba(255,94,0,.05);border-bottom:1px solid var(--border-color);">
             <form action="/albums/{{ album_id }}/posts" method="post" enctype="multipart/form-data" onsubmit="showSpinner(this)">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
               <div class="mb-2"><textarea name="caption" class="form-control" rows="3" placeholder="Caption / Nội dung bài viết..."></textarea></div>
               <div class="mb-2 position-relative drop-zone" id="dz-{{ album_id }}" onclick="document.getElementById('fi-{{ album_id }}').click()"
                    ondragover="event.preventDefault();this.classList.add('dragover')"
@@ -472,6 +475,7 @@
                   </div>
                   {% if role == 'owner' %}
                   <form action="/albums/{{ album_id }}/posts/{{ post.id }}/delete" method="post" onsubmit="return confirm('Xóa bài viết này?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                     <button type="submit" class="btn btn-sm btn-outline-danger" style="padding:2px 8px;"><i class="bi bi-x-lg"></i></button>
                   </form>
                   {% endif %}
@@ -898,6 +902,7 @@
       <div class="modal-header"><h5 class="modal-title"><i class="bi bi-tags me-2" style="color:#4d9fff;"></i>Quản lý Danh mục (Album lớn)</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <form action="/categories/create" method="post" class="mb-4">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
           <div class="input-group">
             <input type="text" name="name" class="form-control" placeholder="Tên Danh mục mới (VD: LINK THÁNG 4)" required>
             <button class="btn btn-accent" type="submit">Tạo mới</button>
@@ -910,6 +915,7 @@
             <li class="list-group-item d-flex justify-content-between align-items-center" style="background:#1a1d23; border-color:#2a2d35; color:#eee;">
               <span><i class="bi bi-folder-fill me-2" style="color:#ffc107;"></i>{{ cat.name }}</span>
               <form action="/categories/{{ cat.id }}/delete" method="post" onsubmit="return confirm('Xóa danh mục này? (Các album bên trong sẽ thành album độc lập)')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <button class="btn btn-sm btn-outline-danger" style="padding:2px 8px;"><i class="bi bi-trash3"></i></button>
               </form>
             </li>
@@ -928,6 +934,7 @@
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <form action="/albums/create" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <div class="modal-header"><h5 class="modal-title"><i class="bi bi-folder-plus me-2" style="color:var(--accent);"></i>Tạo Album mới</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
         <div class="modal-body">
           <div class="mb-3"><label class="form-label fw-semibold">Tên Album <span class="text-danger">*</span></label><input name="title" class="form-control" placeholder="VD: Album tháng 4" required autofocus></div>
@@ -1014,6 +1021,15 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+function getCsrfToken() {
+  var m = document.querySelector('meta[name="csrf-token"]');
+  return m && m.getAttribute('content') ? m.getAttribute('content') : '';
+}
+function csrfHeaders(extra) {
+  var h = { 'X-CSRFToken': getCsrfToken() };
+  if (extra) { for (var k in extra) { if (Object.prototype.hasOwnProperty.call(extra, k)) h[k] = extra[k]; } }
+  return h;
+}
 /* ====== SIDEBAR & NAVIGATION ====== */
 let _sidebarCollapsed = false;
 function toggleSidebar() {
@@ -1138,7 +1154,7 @@ async function toggleAutoResponder(botId, checkbox) {
   const label = document.getElementById('ar-label-' + botId);
   checkbox.disabled = true;
   try {
-    const res = await fetch('/bots/' + botId + '/toggle_responder', { method: 'POST' });
+    const res = await fetch('/bots/' + botId + '/toggle_responder', { method: 'POST', headers: csrfHeaders(), credentials: 'same-origin' });
     const data = await res.json();
     if (data.ok) {
       checkbox.checked = data.auto_responder;
@@ -1215,7 +1231,7 @@ async function doAddBot(btn) {
   const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang thêm...';
   try {
     const form = new FormData(); form.append('name', name); form.append('token', token); if (adminId) form.append('admin_id', adminId);
-    const res = await fetch('/bots/add', { method: 'POST', body: form }); const data = await res.json();
+    const res = await fetch('/bots/add', { method: 'POST', headers: csrfHeaders(), body: form, credentials: 'same-origin' }); const data = await res.json();
     if (data.ok) { showToast('&#9989; Đã thêm bot! Bot sẽ tự động bắt đầu polling trong vòng 30 giây.', 'success'); bootstrap.Modal.getInstance(document.getElementById('addBotModal')).hide(); setTimeout(function() { location.reload(); }, 1500); }
     else { showToast('&#10060; ' + (data.error || '?'), 'error'); }
   } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
@@ -1225,7 +1241,7 @@ async function doDeleteBot(botId, botName, btn) {
   if (!confirm('Xóa bot «' + botName + '»?')) return;
   const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
   try {
-    const res = await fetch('/bots/' + botId + '/delete', { method: 'POST' }); const data = await res.json();
+    const res = await fetch('/bots/' + botId + '/delete', { method: 'POST', headers: csrfHeaders(), credentials: 'same-origin' }); const data = await res.json();
     if (data.ok) { showToast('&#9989; Đã xóa bot!', 'success'); setTimeout(function() { location.reload(); }, 1500); }
     else { showToast('&#10060; ' + (data.error || '?'), 'error'); btn.disabled = false; btn.innerHTML = origHtml; }
   } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); btn.disabled = false; btn.innerHTML = origHtml; }
@@ -1249,7 +1265,7 @@ async function doUploadIds(btn) {
   const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang tải lên...';
   try {
     const form = new FormData(); form.append('file', _idFileSelected);
-    const res = await fetch('/ids/upload', { method: 'POST', body: form }); const data = await res.json();
+    const res = await fetch('/ids/upload', { method: 'POST', headers: csrfHeaders(), body: form, credentials: 'same-origin' }); const data = await res.json();
     if (data.ok) {
       showToast('&#9989; Đã tải ' + data.inserted + ' ID mới (bỏ qua ' + data.skipped + ' trùng)!', 'success');
       _idFileSelected = null; document.getElementById('idFileName').style.display = 'none';
@@ -1298,7 +1314,7 @@ async function doClearIds(statusFilter) {
   if (!confirm(statusFilter ? 'Xóa tất cả ID «' + statusFilter + '»?' : 'Xóa TẤT CẢ IDs?')) return;
   const form = new FormData(); if (statusFilter) form.append('status', statusFilter);
   try {
-    const res = await fetch('/ids/clear', { method: 'POST', body: form }); const data = await res.json();
+    const res = await fetch('/ids/clear', { method: 'POST', headers: csrfHeaders(), body: form, credentials: 'same-origin' }); const data = await res.json();
     if (data.ok) { showToast('&#9989; Đã xóa!', 'success'); loadIdList(1); refreshIdStats(); }
     else { showToast('&#10060; ' + (data.error || '?'), 'error'); }
   } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
@@ -1369,7 +1385,7 @@ async function doIdBroadcast(btn) {
     form.append('message', message); form.append('media_type', mediaType);
     if (mediaFile) { form.append('media_file', mediaFile); } else { form.append('media_url', mediaUrl); }
     form.append('buttons_json', JSON.stringify(buttons));
-    const res = await fetch('/ids/broadcast', { method: 'POST', body: form }); const data = await res.json();
+    const res = await fetch('/ids/broadcast', { method: 'POST', headers: csrfHeaders(), body: form, credentials: 'same-origin' }); const data = await res.json();
     if (data.ok) {
       showToast('&#9989; Broadcast bắt đầu! ' + data.total + ' ID · ' + (data.bots_count||1) + ' bot...', 'success');
       btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang gửi...';
@@ -1394,14 +1410,14 @@ async function doIdBroadcast(btn) {
 /* ====== BACKUP & SYSTEM ====== */
 async function doBackup(btn) {
   const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang sao lưu...';
-  try { const res = await fetch('/backup/manual', { method: 'POST' }); const data = await res.json(); showToast(data.ok ? '&#9989; Sao lưu thành công!' : '&#10060; ' + (data.error||'?'), data.ok ? 'success' : 'error'); }
+  try { const res = await fetch('/backup/manual', { method: 'POST', headers: csrfHeaders(), credentials: 'same-origin' }); const data = await res.json(); showToast(data.ok ? '&#9989; Sao lưu thành công!' : '&#10060; ' + (data.error||'?'), data.ok ? 'success' : 'error'); }
   catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = origHtml; }
 }
 async function doRestore(btn) {
   if (!confirm('Khôi phục từ Cloudinary? Dữ liệu hiện tại bị ghi đè!')) return;
   const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang khôi phục...';
-  try { const res = await fetch('/backup/restore', { method: 'POST' }); const data = await res.json(); if (data.ok) { showToast('&#9989; Khôi phục thành công! Trang sẽ làm mới...', 'success'); setTimeout(function() { location.reload(); }, 2000); } else { showToast('&#10060; ' + (data.error||'?'), 'error'); } }
+  try { const res = await fetch('/backup/restore', { method: 'POST', headers: csrfHeaders(), credentials: 'same-origin' }); const data = await res.json(); if (data.ok) { showToast('&#9989; Khôi phục thành công! Trang sẽ làm mới...', 'success'); setTimeout(function() { location.reload(); }, 2000); } else { showToast('&#10060; ' + (data.error||'?'), 'error'); } }
   catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = origHtml; }
 }
@@ -1440,7 +1456,7 @@ async function doBackupNow(btn) {
   var orig = btn.innerHTML;
   btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang sao lưu...';
   try {
-    var res = await fetch('/backup/manual', {method: 'POST', credentials: 'same-origin'});
+    var res = await fetch('/backup/manual', {method: 'POST', credentials: 'same-origin', headers: csrfHeaders()});
     var data = await res.json();
     if (data.ok) { showToast('✅ Sao lưu thành công!', 'success'); loadBackupsList(); }
     else { showToast('❌ ' + (data.error || 'Lỗi'), 'error'); }
@@ -1452,7 +1468,7 @@ async function deleteBackupFile(filename, btn) {
   if (!confirm('Xóa bản sao lưu này?\n' + filename)) return;
   var orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
   try {
-    var res = await fetch('/backups/' + encodeURIComponent(filename) + '/delete', {method: 'POST', credentials: 'same-origin'});
+    var res = await fetch('/backups/' + encodeURIComponent(filename) + '/delete', {method: 'POST', credentials: 'same-origin', headers: csrfHeaders()});
     var data = await res.json();
     if (data.ok) { showToast('✅ Đã xóa', 'success'); loadBackupsList(); }
     else { showToast('❌ ' + (data.error || 'Lỗi'), 'error'); btn.disabled = false; btn.innerHTML = orig; }
@@ -1531,7 +1547,7 @@ async function doBroadcast(btn) {
     form.append('message', message); form.append('media_type', mediaType);
     if (mediaFile) { form.append('media_file', mediaFile); } else { form.append('media_url', mediaUrl); }
     form.append('buttons_json', JSON.stringify(buttons));
-    const res = await fetch('/broadcast', { method: 'POST', body: form }); const data = await res.json();
+    const res = await fetch('/broadcast', { method: 'POST', headers: csrfHeaders(), body: form, credentials: 'same-origin' }); const data = await res.json();
     if (data.ok) {
       showToast('&#9989; Broadcast bắt đầu! ' + data.total + ' người · ' + (data.bots_count||1) + ' bot...', 'success');
       btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang gửi...';
@@ -1612,7 +1628,7 @@ async function doBroadcastAll(btn) {
     form.append('message', message); form.append('media_type', mediaType);
     if (mediaFile) { form.append('media_file', mediaFile); } else { form.append('media_url', mediaUrl); }
     form.append('buttons_json', JSON.stringify(buttons));
-    const res = await fetch('/broadcast/all', { method: 'POST', body: form }); const data = await res.json();
+    const res = await fetch('/broadcast/all', { method: 'POST', headers: csrfHeaders(), body: form, credentials: 'same-origin' }); const data = await res.json();
     if (data.ok) {
       showToast('&#9989; Broadcast All bắt đầu! ' + data.total + ' IDs · ' + (data.bots_count||1) + ' bot...', 'success');
       btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang gửi...';
@@ -1640,7 +1656,7 @@ async function doSaveSchedule(btn) {
   const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
   try {
     const form = new FormData(); form.append('hour', hour); form.append('minute', minute);
-    const res = await fetch('/settings/time', { method: 'POST', body: form }); const data = await res.json();
+    const res = await fetch('/settings/time', { method: 'POST', headers: csrfHeaders(), body: form, credentials: 'same-origin' }); const data = await res.json();
     showToast(data.ok ? '&#9989; Đã cài ' + String(data.hour).padStart(2,'0') + ':' + String(data.minute).padStart(2,'0') + ' (Giờ VN)' : '&#10060; ' + (data.error||'?'), data.ok?'success':'error');
   } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = origHtml; }
@@ -1652,7 +1668,8 @@ async function doSaveExpiredWarning(btn) {
   try {
     const res = await fetch('/settings/expired_warning_message', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: csrfHeaders({ 'Content-Type': 'application/json' }),
+      credentials: 'same-origin',
       body: JSON.stringify({ message: msg })
     });
     const data = await res.json();
@@ -1711,7 +1728,7 @@ async function doSaveNode(btn) {
   });
   const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
   try {
-    const res = await fetch('/messages/' + encodeURIComponent(nodeId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text, buttons: buttons }) });
+    const res = await fetch('/messages/' + encodeURIComponent(nodeId), { method: 'POST', headers: csrfHeaders({ 'Content-Type': 'application/json' }), credentials: 'same-origin', body: JSON.stringify({ text: text, buttons: buttons }) });
     const data = await res.json();
     if (data.ok) { _flowData[nodeId] = { text: text, buttons: buttons }; renderNodeList(); bootstrap.Modal.getInstance(document.getElementById('flowNodeModal')).hide(); showToast('&#9989; Đã lưu kịch bản «' + nodeId + '»!', 'success'); }
     else { showToast('&#10060; ' + (data.error||'?'), 'error'); }
@@ -1722,7 +1739,7 @@ async function doDeleteNode(nodeId, btn) {
   if (!confirm('Xóa kịch bản «' + nodeId + '»?')) return;
   const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
   try {
-    const res = await fetch('/messages/' + encodeURIComponent(nodeId) + '/delete', { method: 'POST' }); const data = await res.json();
+    const res = await fetch('/messages/' + encodeURIComponent(nodeId) + '/delete', { method: 'POST', headers: csrfHeaders(), credentials: 'same-origin' }); const data = await res.json();
     if (data.ok) { delete _flowData[nodeId]; renderNodeList(); showToast('&#9989; Đã xóa!', 'success'); }
     else { showToast('&#10060; ' + (data.error||'?'), 'error'); btn.disabled = false; btn.innerHTML = origHtml; }
   } catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); btn.disabled = false; btn.innerHTML = origHtml; }
@@ -1775,7 +1792,7 @@ function moveSloganUp(idx) { if (idx<=0) return; const tmp=_slogans.items[idx-1]
 function moveSloganDown(idx) { if (idx>=_slogans.items.length-1) return; const tmp=_slogans.items[idx+1]; _slogans.items[idx+1]=_slogans.items[idx]; _slogans.items[idx]=tmp; renderSloganList(); }
 async function doSaveSlogans(btn) {
   const origHtml = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Đang lưu...';
-  try { const res = await fetch('/slogans', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_slogans) }); const data = await res.json(); showToast(data.ok ? '&#9989; Đã lưu Slogan!' : '&#10060; ' + (data.error||'?'), data.ok?'success':'error'); }
+  try { const res = await fetch('/slogans', { method: 'POST', headers: csrfHeaders({ 'Content-Type': 'application/json' }), credentials: 'same-origin', body: JSON.stringify(_slogans) }); const data = await res.json(); showToast(data.ok ? '&#9989; Đã lưu Slogan!' : '&#10060; ' + (data.error||'?'), data.ok?'success':'error'); }
   catch(e) { showToast('&#10060; Lỗi: ' + e.message, 'error'); }
   finally { btn.disabled = false; btn.innerHTML = origHtml; }
 }
@@ -1878,7 +1895,8 @@ async function smSaveNode(nodeId, text, buttons, btn, label) {
   try {
     const res = await fetch('/messages/' + encodeURIComponent(nodeId), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: csrfHeaders({ 'Content-Type': 'application/json' }),
+      credentials: 'same-origin',
       body: JSON.stringify({ text: text, buttons: buttons })
     });
     const data = await res.json();

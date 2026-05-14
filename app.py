@@ -15,6 +15,7 @@ import urllib.request
 from datetime import datetime, timezone, timedelta, time as dt_time
 from functools import wraps
 from flask import Flask, request, redirect, render_template, jsonify, Response, session, url_for, make_response
+from flask_wtf.csrf import CSRFProtect
 
 import subprocess
 
@@ -128,20 +129,58 @@ WEBHOOK_UPDATE_TIMEOUT = 10
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
-_secret_key = os.environ.get("SECRET_KEY", "")
-if not _secret_key:
+# CSRF: token tied to session; None = no expiry until session ends (dashboard UX).
+app.config.setdefault("WTF_CSRF_TIME_LIMIT", None)
+app.config.setdefault("WTF_CSRF_SSL_STRICT", False)
+
+_secret_key_env = (os.environ.get("SECRET_KEY") or "").strip()
+_secret_key_from_env = bool(_secret_key_env)
+if _secret_key_env:
+    _secret_key = _secret_key_env
+else:
     _secret_key = os.urandom(24)
     log.warning(
-        "SECRET_KEY not set – using a random key (sessions will not persist across restarts). "
-        "Set SECRET_KEY env var in production!"
+        "SECRET_KEY not set in environment — using an ephemeral random key per process. "
+        "Flask admin sessions reset on every Gunicorn restart. Set SECRET_KEY in .env for stable logins."
     )
 app.secret_key = _secret_key
+
+# P2: public deployment without persistent SECRET_KEY breaks sessions across restarts
+if (
+    not _secret_key_from_env
+    and any(
+        (os.environ.get(k) or "").strip()
+        for k in ("DOMAIN", "APP_BASE_URL", "WEBHOOK_URL", "BASE_URL")
+    )
+):
+    log.error(
+        "P2: SECRET_KEY is missing while DOMAIN/APP_BASE_URL/WEBHOOK_URL/BASE_URL is set — "
+        "add SECRET_KEY to .env (e.g. python -c \"import secrets; print(secrets.token_hex(32))\")."
+    )
+
+csrf = CSRFProtect(app)
 
 # ===== AUTH CONFIG =====
 OWNER_USER = os.environ.get("OWNER_USER", "admin")
 OWNER_PASS = os.environ.get("OWNER_PASS", "admin123")
 MANAGER_USER = os.environ.get("MANAGER_USER", "quanly")
 MANAGER_PASS = os.environ.get("MANAGER_PASS", "quanly123")
+
+_weak_passwords = frozenset(
+    {
+        "admin123",
+        "admin",
+        "password",
+        "123456",
+        "changeme",
+        "quanly123",
+        "quanly",
+    }
+)
+if OWNER_PASS.lower() in _weak_passwords or MANAGER_PASS.lower() in _weak_passwords:
+    log.error(
+        "P2: OWNER_PASS or MANAGER_PASS matches a commonly-guessed value — change both in .env before exposing the dashboard publicly."
+    )
 
 # Absolute directory of this file – used to build robust file paths that do not
 # depend on the process's current working directory.
@@ -1705,6 +1744,7 @@ def backup_restore():
 
 # ===== TELEGRAM WEBHOOK ROUTE =====
 
+@csrf.exempt
 @app.route("/webhook/<path:token_path>", methods=["POST"])
 def telegram_webhook(token_path):
     """Receive Telegram update POSTs and feed them to the matching PTB application.
@@ -1766,6 +1806,7 @@ def miniapp_bridge(album_id):
     return resp
 
 
+@csrf.exempt
 @app.route("/api/generate_token/<album_id>", methods=["POST"])
 def api_generate_token(album_id):
     """Validate Telegram WebApp initData and return a 24-hour access token."""
@@ -3808,7 +3849,13 @@ if BOT_TOKEN or db_get_bots():
                     )
                     await ptb.bot.set_webhook(
                         url=webhook_endpoint,
-                        allowed_updates=["message", "callback_query"],
+                        allowed_updates=[
+                            "message",
+                            "callback_query",
+                            "edited_message",
+                            "my_chat_member",
+                            "chat_member",
+                        ],
                         drop_pending_updates=True,
                     )
                     self._running_apps[bot_id] = ptb
