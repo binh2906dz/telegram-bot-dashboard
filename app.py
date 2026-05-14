@@ -643,6 +643,19 @@ def db_get_albums() -> dict:
         return {}
 
 
+def db_album_exists(album_id: str) -> bool:
+    """Cheap existence check for Mini App token flow (avoid loading all albums JSON)."""
+    if not album_id or not isinstance(album_id, str):
+        return False
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT 1 FROM albums WHERE id = ? LIMIT 1", (album_id,)).fetchone()
+        return row is not None
+    except Exception as exc:
+        log.error("db_album_exists failed: %s", exc)
+        return False
+
+
 def db_save_album(album_id: str, album_data: dict):
     """Insert or replace a single album in SQLite.
 
@@ -999,26 +1012,82 @@ def db_cleanup_expired_tokens():
         log.error("db_cleanup_expired_tokens failed: %s", exc)
 
 
-def _validate_telegram_init_data(init_data: str, bot_token: str) -> bool:
-    """Verify Telegram WebApp initData using HMAC-SHA256 as per official docs."""
-    import hmac as _hmac
-    import hashlib as _hashlib
+_token_cleanup_lock = threading.Lock()
+_last_token_cleanup_monotonic: float = 0.0
+
+
+def _maybe_cleanup_expired_album_tokens(interval_sec: float = 300.0) -> None:
+    """Throttle token table cleanup — every Mini App open used to DELETE; that contends on SQLite."""
+    global _last_token_cleanup_monotonic
+    import time as _time
+
+    now = _time.monotonic()
+    with _token_cleanup_lock:
+        if now - _last_token_cleanup_monotonic < interval_sec:
+            return
+        _last_token_cleanup_monotonic = now
+    try:
+        db_cleanup_expired_tokens()
+    except Exception as exc:
+        log.warning("db_cleanup_expired_tokens (throttled): %s", exc)
+
+
+def _parse_init_data_for_hash_check(init_data: str) -> tuple[str, str] | None:
+    """Parse WebApp initData once: return (data_check_string, received_hash) or None."""
     from urllib.parse import parse_qsl as _parse_qsl
 
     try:
         params = dict(_parse_qsl(init_data, keep_blank_values=True))
         received_hash = params.pop("hash", "")
         if not received_hash:
-            return False
-        data_check_string = "\n".join(
-            f"{k}={v}" for k, v in sorted(params.items())
-        )
+            return None
+        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(params.items()))
+        return (data_check_string, received_hash)
+    except Exception as exc:
+        log.error("_parse_init_data_for_hash_check failed: %s", exc)
+        return None
+
+
+def _validate_telegram_init_data(init_data: str, bot_token: str) -> bool:
+    """Verify Telegram WebApp initData using HMAC-SHA256 as per official docs."""
+    import hmac as _hmac
+    import hashlib as _hashlib
+
+    parsed = _parse_init_data_for_hash_check(init_data)
+    if not parsed:
+        return False
+    data_check_string, received_hash = parsed
+    try:
         secret_key = _hmac.new(b"WebAppData", bot_token.encode(), _hashlib.sha256).digest()
         computed_hash = _hmac.new(secret_key, data_check_string.encode(), _hashlib.sha256).hexdigest()
         return _hmac.compare_digest(computed_hash, received_hash)
     except Exception as exc:
         log.error("_validate_telegram_init_data failed: %s", exc)
         return False
+
+
+def _init_data_matches_any_bot_token(init_data: str, tokens: list) -> bool:
+    """Try bot secrets against one parsed initData (parse once; many bots = much faster)."""
+    import hmac as _hmac
+    import hashlib as _hashlib
+
+    parsed = _parse_init_data_for_hash_check(init_data)
+    if not parsed:
+        return False
+    data_check_string, received_hash = parsed
+    body = data_check_string.encode()
+    try:
+        for bot_token in tokens:
+            if not bot_token:
+                continue
+            secret_key = _hmac.new(b"WebAppData", str(bot_token).encode(), _hashlib.sha256).digest()
+            computed_hash = _hmac.new(secret_key, body, _hashlib.sha256).hexdigest()
+            if _hmac.compare_digest(computed_hash, received_hash):
+                return True
+    except Exception as exc:
+        log.error("_init_data_matches_any_bot_token failed: %s", exc)
+        return False
+    return False
 
 
 def _all_bot_tokens_for_webapp() -> list:
@@ -1915,8 +1984,7 @@ def miniapp_bridge(album_id):
 @app.route("/api/generate_token/<album_id>", methods=["POST"])
 def api_generate_token(album_id):
     """Validate Telegram WebApp initData and return a 24-hour access token."""
-    albums = db_get_albums()
-    if album_id not in albums:
+    if not db_album_exists(album_id):
         return jsonify({"ok": False, "error": "Album không tồn tại"}), 404
 
     data = request.get_json(silent=True) or {}
@@ -1929,11 +1997,10 @@ def api_generate_token(album_id):
     tokens = _all_bot_tokens_for_webapp()
     if not tokens:
         return jsonify({"ok": False, "error": "Chưa cấu hình bot token"}), 500
-    if not any(_validate_telegram_init_data(init_data, t) for t in tokens):
+    if not _init_data_matches_any_bot_token(init_data, tokens):
         return jsonify({"ok": False, "error": "initData không hợp lệ"}), 403
 
-    # Clean up stale tokens periodically
-    db_cleanup_expired_tokens()
+    _maybe_cleanup_expired_album_tokens()
 
     access_token = db_create_album_token(album_id)
     return jsonify({"ok": True, "token": access_token})
