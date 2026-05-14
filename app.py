@@ -12,10 +12,14 @@ import tempfile
 import threading
 import zipfile
 import urllib.request
+from urllib.parse import urlparse
 from datetime import datetime, timezone, timedelta, time as dt_time
 from functools import wraps
 from flask import Flask, request, redirect, render_template, jsonify, Response, session, url_for, make_response
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import subprocess
 
@@ -87,6 +91,43 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+
+def _env_truthy(name: str, default: bool = False) -> bool:
+    v = (os.environ.get(name) or "").strip().lower()
+    if not v:
+        return default
+    return v in ("1", "true", "yes", "on")
+
+
+def _redact_bot_token_secrets(text: str) -> str:
+    """Mask Telegram bot-token-shaped strings in log messages."""
+    if not text:
+        return text
+    return re.sub(r"\b\d{5,12}:[A-Za-z0-9_-]{25,}\b", "<redacted bot token>", str(text))
+
+
+def _normalize_webhook_base(raw: str) -> str:
+    """Ensure DOMAIN/BASE_URL values become a proper absolute URL for Telegram webhooks."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    s = s.rstrip("/")
+    lo = s.lower()
+    if lo.startswith("http://") or lo.startswith("https://"):
+        return s
+    return "https://" + s.lstrip("/")
+
+
+try:
+    from telegram.error import InvalidToken as PTBInvalidToken
+    from telegram.error import TelegramError as PTBTelegramError
+except ImportError:
+    class PTBInvalidToken(Exception):
+        """Placeholder when python-telegram-bot is not installed."""
+
+    PTBTelegramError = Exception
+
+
 log.info(".env path: %s (exists=%s)", _DOTENV_PATH, os.path.isfile(_DOTENV_PATH))
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", os.environ.get("TOKEN", os.environ.get("BOT_TOKEN", "")))
@@ -106,7 +147,7 @@ if not BOT_TOKEN and os.path.isfile(_DOTENV_PATH):
 _admin_str = os.environ.get("ADMIN_CHAT_ID", os.environ.get("ADMIN_ID", ""))
 ADMIN_ID = int(_admin_str) if _admin_str.isdigit() else None
 
-WEBHOOK_URL = (
+_webhook_raw = (
     # Precedence: WEBHOOK_URL (explicit override) → BASE_URL / APP_BASE_URL / DOMAIN.
     # No hard-coded fallback domain — wrong default breaks other deployments and can
     # point webhooks at someone else's host. Set at least DOMAIN or APP_BASE_URL in .env.
@@ -115,7 +156,14 @@ WEBHOOK_URL = (
     or os.environ.get("APP_BASE_URL")
     or os.environ.get("DOMAIN")
     or ""
-).rstrip("/")
+)
+WEBHOOK_URL = _normalize_webhook_base(_webhook_raw)
+if WEBHOOK_URL:
+    try:
+        _wh_host = urlparse(WEBHOOK_URL).netloc or WEBHOOK_URL.replace("https://", "").replace("http://", "").split("/")[0]
+    except Exception:
+        _wh_host = "(configured)"
+    log.info("P3: public base URL for webhooks host=%s", _wh_host)
 if not WEBHOOK_URL:
     log.warning(
         "WEBHOOK_URL is empty after resolving env (WEBHOOK_URL, BASE_URL, APP_BASE_URL, DOMAIN). "
@@ -145,6 +193,14 @@ else:
     )
 app.secret_key = _secret_key
 
+# P3: hardened session cookies (Secure only when HTTPS — set SESSION_COOKIE_SECURE=1 behind TLS)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+_sess_secure = _env_truthy("SESSION_COOKIE_SECURE", False)
+app.config["SESSION_COOKIE_SECURE"] = _sess_secure
+if _sess_secure:
+    log.info("P3: SESSION_COOKIE_SECURE enabled")
+
 # P2: public deployment without persistent SECRET_KEY breaks sessions across restarts
 if (
     not _secret_key_from_env
@@ -159,6 +215,26 @@ if (
     )
 
 csrf = CSRFProtect(app)
+
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=[],
+    storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
+)
+
+LOGIN_RATE_LIMIT = os.environ.get("LOGIN_RATE_LIMIT", "20 per minute")
+
+if _env_truthy("BEHIND_PROXY", False):
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=1,
+        x_proto=1,
+        x_host=1,
+        x_port=1,
+        x_prefix=1,
+    )
+    log.info("P3: ProxyFix enabled (BEHIND_PROXY=1)")
 
 # ===== AUTH CONFIG =====
 OWNER_USER = os.environ.get("OWNER_USER", "admin")
@@ -1302,9 +1378,38 @@ def run_daily_backup():
     return f"/static/backups/{backup_filename}"
 
 
+@app.after_request
+def _p3_security_headers(response):
+    """Baseline HTTP security headers (skip Mini App bridge — Telegram WebView quirks)."""
+    if request.path.startswith("/miniapp/"):
+        return response
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "geolocation=(), microphone=(), camera=()",
+    )
+    return response
+
+
+@app.errorhandler(429)
+def _p3_rate_limit_exceeded(_e):
+    if request.path == "/login":
+        return (
+            render_template(
+                "login.html",
+                error="Đăng nhập thử quá nhiều lần. Vui lòng chờ một phút rồi thử lại.",
+            ),
+            429,
+        )
+    return Response("Too Many Requests", 429, mimetype="text/plain")
+
+
 # ===== FLASK ROUTES =====
 
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit(LOGIN_RATE_LIMIT, exempt_when=lambda: request.method != "POST")
 def login():
     error = None
     if request.method == "POST":
@@ -2547,6 +2652,19 @@ def add_bot():
     if admin_id_str and not admin_id_str.isdigit():
         return jsonify({"ok": False, "error": "Admin ID phải là số nguyên dương"}), 400
     admin_id_val = int(admin_id_str) if admin_id_str else None
+    try:
+        gmr = httpx.get(f"https://api.telegram.org/bot{token}/getMe", timeout=15.0)
+        if gmr.status_code == 401:
+            return jsonify({"ok": False, "error": "Token không hợp lệ hoặc đã bị thu hồi"}), 400
+        if gmr.status_code != 200:
+            log.warning("add_bot: getMe returned HTTP %s", gmr.status_code)
+            return jsonify({
+                "ok": False,
+                "error": "Không xác minh được token với Telegram (HTTP %s)" % gmr.status_code,
+            }), 400
+    except httpx.RequestError as exc:
+        log.warning("add_bot: getMe request failed: %s", type(exc).__name__)
+        return jsonify({"ok": False, "error": "Không kết nối được Telegram để kiểm tra token"}), 503
     bots = db_get_bots()
     bots.append({
         "id": uuid.uuid4().hex,
@@ -3868,10 +3986,25 @@ if BOT_TOKEN or db_get_bots():
                         WEBHOOK_URL,
                         len(token),
                     )
+                except PTBInvalidToken:
+                    log.error(
+                        "Failed to start bot %s (%s): Telegram rejected the bot token (invalid or revoked).",
+                        bot_id,
+                        cfg_entry.get("name", "?"),
+                    )
+                except PTBTelegramError as exc:
+                    log.error(
+                        "Failed to start bot %s (%s): Telegram API error (%s).",
+                        bot_id,
+                        cfg_entry.get("name", "?"),
+                        type(exc).__name__,
+                    )
                 except Exception as exc:
                     log.error(
                         "Failed to start bot %s (%s): %s",
-                        bot_id, cfg_entry.get("name", "?"), exc,
+                        bot_id,
+                        cfg_entry.get("name", "?"),
+                        _redact_bot_token_secrets(str(exc)),
                         exc_info=True,
                     )
 
@@ -3896,7 +4029,11 @@ if BOT_TOKEN or db_get_bots():
                 try:
                     self._loop.run_until_complete(self._manage())
                 except Exception as exc:
-                    log.error("BotManager loop error: %s", exc, exc_info=True)
+                    log.error(
+                        "BotManager loop error: %s",
+                        _redact_bot_token_secrets(str(exc)),
+                        exc_info=True,
+                    )
                 finally:
                     log.warning("BotManager thread exiting (PID %s)", os.getpid())
             t = threading.Thread(target=_run, daemon=True, name="bot-manager")
