@@ -1845,6 +1845,7 @@ def index():
                            total_albums=total_albums,
                            categories=db_get_categories(),
                            expired_warning_message=db_get_expired_warning_message(),
+                           age_gate=db_get_age_gate_config(),
                            reply_menu_albums=reply_menu_albums,
                            reply_menu_categories=db_get_categories(),
                            reply_menu_sample=SAMPLE_REPLY_MENU)
