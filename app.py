@@ -4177,45 +4177,52 @@ if BOT_TOKEN or db_get_bots():
                     pass
 
         async def send_main_flow(chat_id: int, message: Any):
-            bots_cfg = db_get_bots()
-            bot_entry = next((b for b in bots_cfg if b.get("id") == bot_cfg_id), None)
-            auto_responder = bot_entry.get("auto_responder", True) if bot_entry else True
-            if not auto_responder:
-                return
+            try:
+                bots_cfg = db_get_bots()
+                bot_entry = next((b for b in bots_cfg if b.get("id") == bot_cfg_id), None)
+                auto_responder = bot_entry.get("auto_responder", True) if bot_entry else True
+                if not auto_responder:
+                    return
 
-            slogans_cfg = db_get_slogans()
-            if slogans_cfg.get("enabled") and slogans_cfg.get("items"):
-                slogan_msgs = []
-                for item in slogans_cfg["items"]:
-                    text = str(item.get("text", "")).strip()
-                    try:
-                        delay = float(item.get("delay_after", 1))
-                        delay = max(0, min(30, delay))
-                    except (TypeError, ValueError):
-                        delay = 1.0
-                    if text:
-                        msg = await message.reply_text(text)
-                        slogan_msgs.append(msg)
-                        await asyncio.sleep(delay)
-                for m in slogan_msgs:
-                    try:
-                        await m.delete()
-                    except Exception:
-                        pass
+                slogans_cfg = db_get_slogans()
+                if slogans_cfg.get("enabled") and slogans_cfg.get("items"):
+                    slogan_msgs = []
+                    for item in slogans_cfg["items"]:
+                        text = str(item.get("text", "")).strip()
+                        try:
+                            delay = float(item.get("delay_after", 1))
+                            delay = max(0, min(30, delay))
+                        except (TypeError, ValueError):
+                            delay = 1.0
+                        if text:
+                            msg = await message.reply_text(text)
+                            slogan_msgs.append(msg)
+                            await asyncio.sleep(delay)
+                    for m in slogan_msgs:
+                        try:
+                            await m.delete()
+                        except Exception:
+                            pass
 
-            flow = get_messages_flow()
-            start_node = flow.get("start", {"text": "Chào mừng bạn! 👋", "buttons": []})
-            start_text = start_node.get("text", "Chào mừng bạn! 👋") or "Chào mừng bạn! 👋"
-            keyboard = _build_flow_keyboard(start_node.get("buttons", []))
-            if not keyboard:
-                keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
-            await message.reply_text(start_text, reply_markup=InlineKeyboardMarkup(keyboard))
+                flow = get_messages_flow()
+                start_node = flow.get("start", {"text": "Chào mừng bạn! 👋", "buttons": []})
+                start_text = start_node.get("text", "Chào mừng bạn! 👋") or "Chào mừng bạn! 👋"
+                keyboard = _build_flow_keyboard(start_node.get("buttons", []))
+                if not keyboard:
+                    keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
+                await message.reply_text(start_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
-            menu_cfg = await asyncio.to_thread(db_get_reply_menu, bot_cfg_id)
-            rk = build_reply_keyboard_markup(menu_cfg)
-            if rk:
-                prompt = (menu_cfg.get("prompt") or "👇 Chọn một tùy chọn").strip()
-                await message.reply_text(prompt, reply_markup=rk)
+                try:
+                    menu_cfg = await asyncio.to_thread(db_get_reply_menu, bot_cfg_id)
+                    rk = build_reply_keyboard_markup(menu_cfg)
+                    if rk:
+                        prompt = (menu_cfg.get("prompt") or "👇 Chọn một tùy chọn").strip()
+                        await message.reply_text(prompt, reply_markup=rk)
+                except Exception as exc:
+                    log.error("send_main_flow: reply menu failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
+            except Exception as exc:
+                log.error("send_main_flow failed for bot %s chat=%s: %s", bot_cfg_id, chat_id, exc, exc_info=True)
+                raise
 
         async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_id = update.effective_chat.id if update.effective_chat else 0
