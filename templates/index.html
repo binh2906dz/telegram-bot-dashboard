@@ -454,9 +454,47 @@
     .preview-grid img { width: 70px; height: 70px; object-fit: cover; border-radius: 8px; }
     .photo-thumb { width: 80px; height: 80px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border-color); cursor: pointer; transition: transform .15s, box-shadow .15s; }
     .photo-thumb:hover { transform: scale(1.04); box-shadow: var(--shadow-md); }
+    .album-caption-preview {
+      color: #a3a3a3;
+      max-height: 4.8em;
+      overflow: hidden;
+      position: relative;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+      white-space: normal;
+    }
+    .album-caption-preview.expanded {
+      max-height: none;
+      -webkit-line-clamp: unset;
+      overflow: visible;
+      white-space: pre-wrap;
+      color: #374151;
+    }
     .album-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden; transition: box-shadow .18s; margin-bottom: 16px; }
     .album-card:hover { box-shadow: var(--shadow-md); }
     .album-card.active-album { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .album-posts-wrap {
+      border-top: 1px solid var(--border-color);
+      background: rgba(255,255,255,.02);
+    }
+    .album-posts-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      background: rgba(255,255,255,.35);
+    }
+    .album-posts-toggle {
+      white-space: nowrap;
+    }
+    .album-posts-hint {
+      font-size: .78rem;
+      color: #6b7280;
+    }
     .bot-token-mask { font-family: ui-monospace, monospace; letter-spacing: .04em; color: var(--text-muted); font-size: .78rem; }
     .progress { background: #e2e8f0; height: 9px; border-radius: 99px; }
     .empty-state { text-align: center; padding: 44px 20px; color: var(--text-muted); }
@@ -981,37 +1019,45 @@
               </div>
             </form>
           </div>
-          <div class="p-3">
-            {% set posts = album.posts if album.posts else [] %}
-            {% if posts %}
-              {% for post in posts %}
-              <div class="mb-2" style="border:1px solid var(--border-color);border-radius:10px;padding:14px;background:rgba(255,255,255,.02);">
-                <div class="d-flex justify-content-between align-items-start mb-2">
-                  <div style="font-size:.9rem;color:#ccc;flex:1;margin-right:8px;white-space:pre-wrap;word-break:break-word;">
-                    {% if post.caption %}{{ post.caption }}{% else %}<span class="text-muted fst-italic" style="font-size:.8rem;">(Không có caption)</span>{% endif %}
-                  </div>
-                  {% if role == 'owner' %}
-                  <form action="/albums/{{ album_id }}/posts/{{ post.id }}/delete" method="post" onsubmit="return confirm('Xóa bài viết này?')">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                    <button type="submit" class="btn btn-sm btn-outline-danger" style="padding:2px 8px;"><i class="bi bi-x-lg"></i></button>
-                  </form>
-                  {% endif %}
-                </div>
-                <div class="d-flex flex-wrap gap-2">
-                  {% for photo in post.photos %}
-                    {% if photo.get('type') == 'video' %}
-                    <a href="{{ photo.url }}" target="_blank" rel="noopener" class="d-flex align-items-center justify-content-center photo-thumb text-decoration-none" style="background:#e2e8f0;color:#475569;" title="Xem video" aria-label="Xem video trong tab mới">
-                      <i class="bi bi-camera-video-fill" style="font-size:1.8rem;color:#4d9fff;"></i>
-                    </a>
-                    {% else %}
-                    <img src="{{ photo.url }}" class="photo-thumb" onclick="openLightbox('{{ photo.url }}')" alt="photo">
-                    {% endif %}
-                  {% endfor %}
-                </div>
-                <div class="mt-1" style="font-size:.72rem;color:#555;"><i class="bi bi-collection me-1"></i>{{ post.photos|length }} ảnh/video{% if post.created_at %} &middot; <i class="bi bi-clock me-1"></i>{{ post.created_at[:10] }}{% endif %}</div>
+          <div class="album-posts-wrap" id="album-posts-wrap-{{ album_id }}">
+            <div class="album-posts-toolbar">
+              <div>
+                <div class="album-posts-hint">Bài viết của album này được ẩn bớt để tránh cuộn dài.</div>
               </div>
-              {% endfor %}
-            {% else %}<div class="empty-state py-3"><i class="bi bi-inbox"></i>Chưa có bài viết. Nhấn <strong>Thêm bài</strong>.</div>{% endif %}
+              <button type="button" class="btn btn-sm btn-outline-secondary album-posts-toggle" id="toggle-posts-btn-{{ album_id }}" onclick="toggleAlbumPosts('{{ album_id }}')"><i class="bi bi-eye me-1"></i>Xem bài viết</button>
+            </div>
+            <div class="p-3" id="album-posts-content-{{ album_id }}" style="display:none;">
+              {% set posts = album.posts if album.posts else [] %}
+              {% if posts %}
+                {% for post in posts %}
+                <div class="mb-2" style="border:1px solid var(--border-color);border-radius:10px;padding:14px;background:rgba(255,255,255,.02);">
+                  <div class="d-flex justify-content-between align-items-start mb-2 gap-2">
+                    <div class="album-caption-preview flex-grow-1" id="album-caption-{{ album_id }}-{{ post.id }}">
+                      {% if post.caption %}{{ post.caption }}{% else %}<span class="text-muted fst-italic" style="font-size:.8rem;">(Không có caption)</span>{% endif %}
+                    </div>
+                    {% if role == 'owner' %}
+                    <form action="/albums/{{ album_id }}/posts/{{ post.id }}/delete" method="post" onsubmit="return confirm('Xóa bài viết này?')">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                      <button type="submit" class="btn btn-sm btn-outline-danger" style="padding:2px 8px;"><i class="bi bi-x-lg"></i></button>
+                    </form>
+                    {% endif %}
+                  </div>
+                  <div class="d-flex flex-wrap gap-2">
+                    {% for photo in post.photos %}
+                      {% if photo.get('type') == 'video' %}
+                      <a href="{{ photo.url }}" target="_blank" rel="noopener" class="d-flex align-items-center justify-content-center photo-thumb text-decoration-none" style="background:#e2e8f0;color:#475569;" title="Xem video" aria-label="Xem video trong tab mới">
+                        <i class="bi bi-camera-video-fill" style="font-size:1.8rem;color:#4d9fff;"></i>
+                      </a>
+                      {% else %}
+                      <img src="{{ photo.url }}" class="photo-thumb" onclick="openLightbox('{{ photo.url }}')" alt="photo">
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                  <div class="mt-1" style="font-size:.72rem;color:#555;"><i class="bi bi-collection me-1"></i>{{ post.photos|length }} ảnh/video{% if post.created_at %} &middot; <i class="bi bi-clock me-1"></i>{{ post.created_at[:10] }}{% endif %}</div>
+                </div>
+                {% endfor %}
+              {% else %}<div class="empty-state py-3"><i class="bi bi-inbox"></i>Chưa có bài viết. Nhấn <strong>Thêm bài</strong>.</div>{% endif %}
+            </div>
           </div>
         </div>
         {% endfor %}
@@ -1645,6 +1691,14 @@ function showToast(message, type) {
 function toggleAddPost(albumId) {
   const panel = document.getElementById('add-post-panel-' + albumId);
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+function toggleAlbumPosts(albumId) {
+  const content = document.getElementById('album-posts-content-' + albumId);
+  const btn = document.getElementById('toggle-posts-btn-' + albumId);
+  if (!content || !btn) return;
+  const isHidden = content.style.display === 'none' || !content.style.display;
+  content.style.display = isHidden ? 'block' : 'none';
+  btn.innerHTML = isHidden ? '<i class="bi bi-eye-slash me-1"></i>Ẩn bài viết' : '<i class="bi bi-eye me-1"></i>Xem bài viết';
 }
 function previewImages(event, albumId) { renderPreviews(event.target.files, albumId); }
 function previewMedia(event, albumId) { renderPreviews(event.target.files, albumId); }

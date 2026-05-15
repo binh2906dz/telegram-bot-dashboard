@@ -245,6 +245,8 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
 
 [2026-05-15] Backup scheduler: rà soát và chỉnh `app.py` để APScheduler backup ổn định hơn — dùng `CronTrigger` 0:01 Asia/Ho_Chi_Minh, `coalesce=True`, `max_instances=1`, `misfire_grace_time=3600`, giữ logic flock + kiểm tra ngày VN để tránh chạy trùng giữa nhiều worker. File: `app.py` (chưa commit).
 
+[2026-05-15] Album admin UI: ẩn nội dung bài viết mặc định trong mỗi album và thêm nút `Xem bài viết` để mở chi tiết khi cần; caption được preview ngắn, ảnh/video vẫn hiển thị trong khối chi tiết. File: `templates/index.html`.
+
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
 ================================================================================
