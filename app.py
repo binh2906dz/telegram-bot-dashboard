@@ -2226,7 +2226,9 @@ def telegram_webhook(token_path):
     ptb_app = _bot_manager.get_app_by_token(token_key)
     if ptb_app is None:
         log.warning("telegram_webhook: no running bot found for token (length=%d)", len(token_key))
-        return "Not found", 404
+        # Return 200 so Telegram does not keep retrying a webhook for a bot that
+        # is intentionally offline, revoked, or not loaded in this worker.
+        return "OK", 200
 
     update_data = request.get_json(force=True, silent=True)
     if not update_data:
@@ -4506,6 +4508,7 @@ if BOT_TOKEN or db_get_bots():
         def __init__(self):
             self._running_apps: dict = {}  # {bot_id: ptb_app}
             self._token_to_app: dict = {}  # {token: ptb_app} — O(1) webhook dispatch
+            self._disabled_bots: set[str] = set()  # bots proven invalid; skip until config changes
             self._loop: asyncio.AbstractEventLoop | None = None
             self._reload_event: asyncio.Event | None = None
 
@@ -4567,8 +4570,8 @@ if BOT_TOKEN or db_get_bots():
             # Stop apps for bots that have been removed
             for bot_id in list(running_ids - current_ids):
                 ptb = self._running_apps.pop(bot_id)
-                # Remove from O(1) lookup dict as well
                 self._token_to_app.pop(ptb.bot.token, None)
+                self._disabled_bots.discard(bot_id)
                 try:
                     await ptb.bot.delete_webhook(drop_pending_updates=True)
                     await ptb.stop()
@@ -4589,6 +4592,9 @@ if BOT_TOKEN or db_get_bots():
                     continue
                 if bot_id in self._running_apps:
                     log.debug("BotManager._reload() – bot %s already running, skipping", bot_id)
+                    continue
+                if bot_id in self._disabled_bots:
+                    log.debug("BotManager._reload() – bot %s disabled from prior invalid token; skipping", bot_id)
                     continue
                 if not (WEBHOOK_URL or "").strip():
                     log.error(
@@ -4640,12 +4646,14 @@ if BOT_TOKEN or db_get_bots():
                         len(token),
                     )
                 except PTBInvalidToken:
+                    self._disabled_bots.add(bot_id)
                     log.error(
                         "Failed to start bot %s (%s): Telegram rejected the bot token (invalid or revoked).",
                         bot_id,
                         cfg_entry.get("name", "?"),
                     )
                 except PTBTelegramError as exc:
+                    self._disabled_bots.add(bot_id)
                     log.error(
                         "Failed to start bot %s (%s): Telegram API error (%s).",
                         bot_id,
