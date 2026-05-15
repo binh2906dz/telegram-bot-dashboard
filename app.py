@@ -19,6 +19,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, request, redirect, render_template, jsonify, Response, session, url_for, make_response
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, ReplyKeyboardRemove
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect
@@ -1192,7 +1193,7 @@ def _random_age_emojis(count: int = 3) -> list:
     return random.sample(pool, k=count if count <= len(pool) else len(pool))
 
 
-def _age_gate_keyboard(bot_id: str, user_id: int, age_gate: dict) -> InlineKeyboardMarkup:
+def _age_gate_keyboard(bot_id: str, user_id: int, age_gate: dict):
     choices = _random_age_emojis(3)
     key = f"age:{bot_id}:{user_id}"
     _age_gate_captcha_store[key] = choices[0]

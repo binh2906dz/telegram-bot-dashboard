@@ -247,7 +247,7 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
 
 [2026-05-15] Album admin UI: ẩn nội dung bài viết mặc định trong mỗi album và thêm nút `Xem bài viết` để mở chi tiết khi cần; caption được preview ngắn, ảnh/video vẫn hiển thị trong khối chi tiết. File: `templates/index.html`.
 
-[2026-05-15] 18+ gate: thêm xác minh theo từng bot, lưu vĩnh viễn bằng SQLite, hiển thị câu hỏi 18+ trước flow bot, nút xác nhận + captcha icon cảm xúc, web admin trong Cấu hình Bot để chỉnh câu hỏi / nhãn nút / thông báo. File: `app.py`, `templates/index.html`.
+[2026-05-15] 18+ gate: thêm xác minh theo từng bot, lưu vĩnh viễn bằng SQLite, hiển thị câu hỏi 18+ trước flow bot, nút xác nhận + captcha icon cảm xúc, web admin trong Cấu hình Bot để chỉnh câu hỏi / nhãn nút / thông báo. File: `app.py`, `templates/index.html`. (commit 7c8f7c1)
 
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
