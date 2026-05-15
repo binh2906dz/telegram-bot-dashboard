@@ -4218,25 +4218,38 @@ if BOT_TOKEN or db_get_bots():
                 await message.reply_text(prompt, reply_markup=rk)
 
         async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            user_id = update.effective_chat.id
-            banned = db_get_banned()
-            if user_id in banned:
-                await update.message.reply_text("⛔ Bạn đã bị cấm sử dụng bot này.")
-                return
+            try:
+                user_id = update.effective_chat.id if update.effective_chat else 0
+                message = update.effective_message or update.message
+                if not message:
+                    log.warning("start handler: missing effective_message (bot=%s user=%s)", bot_cfg_id, user_id)
+                    return
 
-            await _fire_stat("starts_count")
-            db_add_subscriber(bot_cfg_id, user_id)
+                banned = db_get_banned()
+                if user_id in banned:
+                    await message.reply_text("⛔ Bạn đã bị cấm sử dụng bot này.")
+                    return
 
-            age_gate = db_get_age_gate_config()
-            if age_gate.get("enabled", True) and not db_has_age_verification(bot_cfg_id, user_id):
-                q = str(age_gate.get("question") or _DEFAULT_AGE_GATE["question"]).strip()
-                confirm_label = str(age_gate.get("confirm_label") or _DEFAULT_AGE_GATE["confirm_label"]).strip()
-                age_keyboard = _age_gate_keyboard(bot_cfg_id, user_id, age_gate)
-                age_keyboard.inline_keyboard[0][0] = InlineKeyboardButton(confirm_label, callback_data="age_confirm")
-                await update.message.reply_text(q, reply_markup=age_keyboard)
-                return
+                await _fire_stat("starts_count")
+                db_add_subscriber(bot_cfg_id, user_id)
 
-            await send_main_flow(user_id, update.message)
+                age_gate = db_get_age_gate_config()
+                if age_gate.get("enabled", True) and not db_has_age_verification(bot_cfg_id, user_id):
+                    q = str(age_gate.get("question") or _DEFAULT_AGE_GATE["question"]).strip()
+                    confirm_label = str(age_gate.get("confirm_label") or _DEFAULT_AGE_GATE["confirm_label"]).strip()
+                    age_keyboard = _age_gate_keyboard(bot_cfg_id, user_id, age_gate)
+                    age_keyboard.inline_keyboard[0][0] = InlineKeyboardButton(confirm_label, callback_data="age_confirm")
+                    await message.reply_text(q, reply_markup=age_keyboard)
+                    return
+
+                await send_main_flow(user_id, message)
+            except Exception as exc:
+                log.error("start handler failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
+                try:
+                    if update.effective_message:
+                        await update.effective_message.reply_text("⚠️ Bot đang gặp lỗi tạm thời. Vui lòng thử lại sau ít phút.")
+                except Exception:
+                    pass
 
         async def track_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Handle incoming text: count for analytics and auto-reply with Mini App link when text matches an album title."""
