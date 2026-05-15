@@ -4218,21 +4218,33 @@ if BOT_TOKEN or db_get_bots():
                 await message.reply_text(prompt, reply_markup=rk)
 
         async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            user_id = update.effective_chat.id if update.effective_chat else 0
+            message = update.effective_message or update.message
+            if not message:
+                log.warning("start handler: missing effective_message (bot=%s user=%s)", bot_cfg_id, user_id)
+                return
+
             try:
-                user_id = update.effective_chat.id if update.effective_chat else 0
-                message = update.effective_message or update.message
-                if not message:
-                    log.warning("start handler: missing effective_message (bot=%s user=%s)", bot_cfg_id, user_id)
-                    return
-
                 banned = db_get_banned()
-                if user_id in banned:
-                    await message.reply_text("⛔ Bạn đã bị cấm sử dụng bot này.")
-                    return
+            except Exception as exc:
+                log.error("start handler: db_get_banned failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
+                banned = set()
 
+            if user_id in banned:
+                await message.reply_text("⛔ Bạn đã bị cấm sử dụng bot này.")
+                return
+
+            try:
                 await _fire_stat("starts_count")
-                db_add_subscriber(bot_cfg_id, user_id)
+            except Exception as exc:
+                log.error("start handler: stats increment failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
 
+            try:
+                db_add_subscriber(bot_cfg_id, user_id)
+            except Exception as exc:
+                log.error("start handler: db_add_subscriber failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
+
+            try:
                 age_gate = db_get_age_gate_config()
                 if age_gate.get("enabled", True) and not db_has_age_verification(bot_cfg_id, user_id):
                     q = str(age_gate.get("question") or _DEFAULT_AGE_GATE["question"]).strip()
@@ -4241,13 +4253,17 @@ if BOT_TOKEN or db_get_bots():
                     age_keyboard.inline_keyboard[0][0] = InlineKeyboardButton(confirm_label, callback_data="age_confirm")
                     await message.reply_text(q, reply_markup=age_keyboard)
                     return
+            except Exception as exc:
+                log.error("start handler: age gate failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
+                await message.reply_text("⚠️ Bot đang gặp lỗi tạm thời. Vui lòng thử lại sau ít phút.")
+                return
 
+            try:
                 await send_main_flow(user_id, message)
             except Exception as exc:
                 log.error("start handler failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
                 try:
-                    if update.effective_message:
-                        await update.effective_message.reply_text("⚠️ Bot đang gặp lỗi tạm thời. Vui lòng thử lại sau ít phút.")
+                    await message.reply_text("⚠️ Bot đang gặp lỗi tạm thời. Vui lòng thử lại sau ít phút.")
                 except Exception:
                     pass
 
