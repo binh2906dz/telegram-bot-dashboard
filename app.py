@@ -4263,7 +4263,16 @@ if BOT_TOKEN or db_get_bots():
                     return
             except Exception as exc:
                 log.error("start handler: age gate failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
-                await message.reply_text("⚠️ Bot đang gặp lỗi tạm thời. Vui lòng thử lại sau ít phút.")
+                # Fallback gracefully: if age-gate rendering breaks, still continue
+                # to the normal flow instead of showing a generic failure message.
+                try:
+                    await send_main_flow(user_id, message)
+                except Exception as inner_exc:
+                    log.error("start handler fallback flow failed for bot %s: %s", bot_cfg_id, inner_exc, exc_info=True)
+                    try:
+                        await message.reply_text("Chào mừng bạn! 👋", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]))
+                    except Exception:
+                        pass
                 return
 
             try:
