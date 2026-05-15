@@ -1223,6 +1223,7 @@
       <ul class="nav config-tabs mb-4" style="border-bottom:1px solid var(--border-color);">
         <li class="nav-item"><button class="nav-link active" id="tab-slogans-btn" onclick="showConfigTab('slogans')"><i class="bi bi-chat-quote me-1"></i>Slogan</button></li>
         <li class="nav-item"><button class="nav-link" id="tab-flow-btn" onclick="showConfigTab('flow')"><i class="bi bi-diagram-3 me-1"></i>Kịch bản Bot</button></li>
+        <li class="nav-item"><button class="nav-link" id="tab-agegate-btn" onclick="showConfigTab('agegate')"><i class="bi bi-shield-lock me-1"></i>18+ Gate</button></li>
         <li class="nav-item"><button class="nav-link" id="tab-miniapp-btn" onclick="showConfigTab('miniapp')"><i class="bi bi-phone me-1"></i>Mini App</button></li>
       </ul>
       <!-- Slogans Tab -->
@@ -1255,6 +1256,39 @@
           <div class="dash-card-body"><div id="flowNodesList"><div class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2" role="status"></span>Đang tải...</div></div></div>
         </div>
       </div>
+      <!-- Age Gate Tab -->
+      <div id="config-tab-agegate" style="display:none;">
+        <div class="dash-card mb-3">
+          <div class="dash-card-header">
+            <span class="dash-card-title"><i class="bi bi-shield-lock me-2" style="color:#4d9fff;"></i>Xác minh 18+</span>
+          </div>
+          <div class="dash-card-body">
+            <p style="font-size:.85rem;color:#aaa;margin-bottom:14px;">Áp dụng cho tất cả bot nhưng lưu trạng thái theo từng bot. Người dùng sẽ phải xác nhận lại khi sang bot khác lần đầu.</p>
+            <div class="row g-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label" style="font-size:.82rem;">Câu hỏi hiển thị</label>
+                <textarea id="ageGateQuestion" class="form-control mb-3" rows="3" style="background:var(--input-bg,#1a1a1a);color:#eee;border:1px solid var(--border-color);border-radius:8px;resize:vertical;">{{ age_gate.question }}</textarea>
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" style="font-size:.82rem;">Nhãn nút xác nhận</label>
+                <input id="ageGateConfirmLabel" class="form-control mb-3" value="{{ age_gate.confirm_label }}" style="background:var(--input-bg,#1a1a1a);color:#eee;border:1px solid var(--border-color);border-radius:8px;">
+                <label class="form-label" style="font-size:.82rem;">Thông báo khi từ chối</label>
+                <textarea id="ageGateDenyMessage" class="form-control mb-3" rows="3" style="background:var(--input-bg,#1a1a1a);color:#eee;border:1px solid var(--border-color);border-radius:8px;resize:vertical;">{{ age_gate.deny_message }}</textarea>
+              </div>
+            </div>
+            <label class="form-label" style="font-size:.82rem;">Prompt captcha</label>
+            <textarea id="ageGateCaptchaPrompt" class="form-control mb-3" rows="2" style="background:var(--input-bg,#1a1a1a);color:#eee;border:1px solid var(--border-color);border-radius:8px;resize:vertical;">{{ age_gate.captcha_prompt }}</textarea>
+            <label class="form-label" style="font-size:.82rem;">Thông báo khi xác minh xong</label>
+            <textarea id="ageGateSuccessMessage" class="form-control mb-3" rows="2" style="background:var(--input-bg,#1a1a1a);color:#eee;border:1px solid var(--border-color);border-radius:8px;resize:vertical;">{{ age_gate.success_message }}</textarea>
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" id="ageGateEnabled" {% if age_gate.enabled %}checked{% endif %}>
+              <label class="form-check-label" for="ageGateEnabled">Bật xác minh 18+</label>
+            </div>
+            <button class="btn btn-accent btn-sm" onclick="doSaveAgeGate(this)"><i class="bi bi-floppy me-1"></i>Lưu cấu hình 18+</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Mini App Tab -->
       <div id="config-tab-miniapp" style="display:none;">
         <div class="dash-card">
@@ -1661,10 +1695,23 @@ function showSection(name) {
   window.location.hash = name;
 }
 function showConfigTab(tab) {
-  ['slogans','flow','miniapp'].forEach(function(t) {
+  ['slogans','flow','agegate','miniapp'].forEach(function(t) {
     document.getElementById('config-tab-' + t).style.display = t === tab ? '' : 'none';
     document.getElementById('tab-' + t + '-btn').classList.toggle('active', t === tab);
   });
+}
+async function doSaveAgeGate(btn) {
+  const payload = {
+    enabled: !!document.getElementById('ageGateEnabled').checked,
+    question: document.getElementById('ageGateQuestion').value,
+    confirm_label: document.getElementById('ageGateConfirmLabel').value,
+    deny_message: document.getElementById('ageGateDenyMessage').value,
+    captcha_prompt: document.getElementById('ageGateCaptchaPrompt').value,
+    success_message: document.getElementById('ageGateSuccessMessage').value,
+  };
+  const res = await fetch('/age_gate', { method: 'POST', headers: csrfHeaders({ 'Content-Type': 'application/json' }), credentials: 'same-origin', body: JSON.stringify(payload) });
+  const data = await res.json();
+  showToast(data.ok ? '✅ Đã lưu cấu hình 18+' : '❌ ' + (data.error || 'Lỗi'), data.ok ? 'success' : 'error');
 }
 /* ====== CLOCK ====== */
 function updateClock() {

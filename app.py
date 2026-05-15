@@ -440,6 +440,14 @@ def init_db():
             )
         ''')
         conn.execute('''
+            CREATE TABLE IF NOT EXISTS age_verifications (
+                bot_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                verified_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (bot_id, user_id)
+            )
+        ''')
+        conn.execute('''
             CREATE TABLE IF NOT EXISTS categories (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -1077,6 +1085,30 @@ def db_get_banned() -> list:
         return []
 
 
+def db_add_age_verification(bot_id: str, user_id: int):
+    """Persist an 18+ verification for a bot/user pair."""
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO age_verifications (bot_id, user_id) VALUES (?, ?)",
+            (bot_id, user_id),
+        )
+        conn.commit()
+
+
+def db_has_age_verification(bot_id: str, user_id: int) -> bool:
+    """Return True if the user has already verified for this bot."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM age_verifications WHERE bot_id=? AND user_id=?",
+                (bot_id, user_id),
+            ).fetchone()
+        return row is not None
+    except Exception as exc:
+        log.error("db_has_age_verification(%s, %s) failed: %s", bot_id, user_id, exc)
+        return False
+
+
 def db_add_ban(user_id: int):
     """Add a user to the ban list (idempotent)."""
     with get_db() as conn:
@@ -1098,6 +1130,17 @@ _DEFAULT_EXPIRED_WARNING = (
     "Vui lòng quay lại Bot Telegram và gõ /start để lấy link truy cập mới!"
 )
 
+_age_gate_captcha_store: dict[str, str] = {}
+
+_DEFAULT_AGE_GATE = {
+    "enabled": True,
+    "question": "Bạn có đủ 18 tuổi để tiếp tục không?",
+    "confirm_label": "✅ Xác nhận tôi đã trên 18 tuổi",
+    "captcha_prompt": "Chọn biểu tượng cảm xúc đúng để tiếp tục:",
+    "success_message": "✅ Xác minh thành công. Bạn có thể sử dụng bot như bình thường.",
+    "deny_message": "⛔ Bạn phải đủ 18 tuổi để sử dụng bot này.",
+}
+
 
 def db_get_expired_warning_message() -> str:
     """Return the expired-token warning message stored in app_config."""
@@ -1111,6 +1154,55 @@ def db_get_expired_warning_message() -> str:
     except Exception as exc:
         log.error("db_get_expired_warning_message failed: %s", exc)
     return _DEFAULT_EXPIRED_WARNING
+
+
+def db_get_age_gate_config() -> dict:
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key='age_gate'"
+            ).fetchone()
+        if row:
+            data = json.loads(row["value"] or "{}")
+            if isinstance(data, dict):
+                merged = dict(_DEFAULT_AGE_GATE)
+                merged.update(data)
+                return merged
+    except Exception as exc:
+        log.error("db_get_age_gate_config failed: %s", exc)
+    return dict(_DEFAULT_AGE_GATE)
+
+
+def db_save_age_gate_config(cfg: dict) -> dict:
+    merged = dict(_DEFAULT_AGE_GATE)
+    if isinstance(cfg, dict):
+        merged.update(cfg)
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO app_config (key, value) VALUES ('age_gate', ?)",
+            (json.dumps(merged, ensure_ascii=False),),
+        )
+        conn.commit()
+    return merged
+
+
+def _random_age_emojis(count: int = 3) -> list:
+    pool = list("😀😁😂😎😍🤩😏😉😊🥳😇🙃😋😌🤗🤔🙌🔥✨🌈🎉💥💫")
+    count = max(3, min(6, int(count or 3)))
+    return random.sample(pool, k=count if count <= len(pool) else len(pool))
+
+
+def _age_gate_keyboard(bot_id: str, user_id: int, age_gate: dict) -> InlineKeyboardMarkup:
+    choices = _random_age_emojis(3)
+    key = f"age:{bot_id}:{user_id}"
+    _age_gate_captcha_store[key] = choices[0]
+    buttons = [[InlineKeyboardButton(age_gate["confirm_label"], callback_data="age_confirm")]]
+    buttons.append([
+        InlineKeyboardButton(choices[0], callback_data="age_captcha:ok"),
+        InlineKeyboardButton(choices[1], callback_data="age_captcha:no1"),
+        InlineKeyboardButton(choices[2], callback_data="age_captcha:no2"),
+    ])
+    return InlineKeyboardMarkup(buttons)
 
 
 def db_save_expired_warning_message(msg: str):
@@ -2293,6 +2385,20 @@ def settings_expired_warning_message():
         return jsonify({"ok": True})
     except Exception as exc:
         log.error("settings_expired_warning_message failed: %s", exc)
+        return jsonify({"ok": False, "error": "Lỗi server"}), 500
+
+
+@app.route("/age_gate", methods=["POST"])
+@login_required
+def save_age_gate():
+    try:
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"ok": False, "error": "Dữ liệu không hợp lệ"}), 400
+        merged = db_save_age_gate_config(data)
+        return jsonify({"ok": True, "age_gate": merged})
+    except Exception as exc:
+        log.error("save_age_gate failed: %s", exc)
         return jsonify({"ok": False, "error": "Lỗi server"}), 500
 
 
@@ -4065,26 +4171,13 @@ if BOT_TOKEN or db_get_bots():
                 except Exception:
                     pass
 
-        async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            user_id = update.effective_chat.id
-            banned = db_get_banned()
-            if user_id in banned:
-                await update.message.reply_text("⛔ Bạn đã bị cấm sử dụng bot này.")
-                return
-
-            # Track starts analytics (always, regardless of auto_responder)
-            await _fire_stat("starts_count")
-
-            db_add_subscriber(bot_cfg_id, user_id)
-
-            # Check auto_responder flag dynamically (can be toggled without restart)
+        async def send_main_flow(chat_id: int, message: Any):
             bots_cfg = db_get_bots()
             bot_entry = next((b for b in bots_cfg if b.get("id") == bot_cfg_id), None)
             auto_responder = bot_entry.get("auto_responder", True) if bot_entry else True
             if not auto_responder:
                 return
 
-            # Send slogans sequentially if enabled
             slogans_cfg = db_get_slogans()
             if slogans_cfg.get("enabled") and slogans_cfg.get("items"):
                 slogan_msgs = []
@@ -4096,34 +4189,49 @@ if BOT_TOKEN or db_get_bots():
                     except (TypeError, ValueError):
                         delay = 1.0
                     if text:
-                        msg = await update.message.reply_text(text)
+                        msg = await message.reply_text(text)
                         slogan_msgs.append(msg)
                         await asyncio.sleep(delay)
-                # Delete all slogan messages
                 for m in slogan_msgs:
                     try:
                         await m.delete()
                     except Exception:
                         pass
 
-            # Load message flow in real-time
             flow = get_messages_flow()
             start_node = flow.get("start", {"text": "Chào mừng bạn! 👋", "buttons": []})
             start_text = start_node.get("text", "Chào mừng bạn! 👋") or "Chào mừng bạn! 👋"
             keyboard = _build_flow_keyboard(start_node.get("buttons", []))
             if not keyboard:
                 keyboard = [[InlineKeyboardButton("🔥 CHẠM LÀ NGHIỆN 🔥", callback_data="menu")]]
-
-            await update.message.reply_text(
-                start_text,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-            )
+            await message.reply_text(start_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
             menu_cfg = await asyncio.to_thread(db_get_reply_menu, bot_cfg_id)
             rk = build_reply_keyboard_markup(menu_cfg)
             if rk:
                 prompt = (menu_cfg.get("prompt") or "👇 Chọn một tùy chọn").strip()
-                await update.message.reply_text(prompt, reply_markup=rk)
+                await message.reply_text(prompt, reply_markup=rk)
+
+        async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            user_id = update.effective_chat.id
+            banned = db_get_banned()
+            if user_id in banned:
+                await update.message.reply_text("⛔ Bạn đã bị cấm sử dụng bot này.")
+                return
+
+            await _fire_stat("starts_count")
+            db_add_subscriber(bot_cfg_id, user_id)
+
+            age_gate = db_get_age_gate_config()
+            if age_gate.get("enabled", True) and not db_has_age_verification(bot_cfg_id, user_id):
+                q = str(age_gate.get("question") or _DEFAULT_AGE_GATE["question"]).strip()
+                confirm_label = str(age_gate.get("confirm_label") or _DEFAULT_AGE_GATE["confirm_label"]).strip()
+                age_keyboard = _age_gate_keyboard(bot_cfg_id, user_id, age_gate)
+                age_keyboard.inline_keyboard[0][0] = InlineKeyboardButton(confirm_label, callback_data="age_confirm")
+                await update.message.reply_text(q, reply_markup=age_keyboard)
+                return
+
+            await send_main_flow(user_id, update.message)
 
         async def track_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Handle incoming text: count for analytics and auto-reply with Mini App link when text matches an album title."""
@@ -4175,6 +4283,38 @@ if BOT_TOKEN or db_get_bots():
             # Only count once; actual handling is done by other handlers (menu/flow/album_click)
             # DB write in thread pool — don't block event loop for analytics
             await _fire_stat("interactions_count")
+
+        async def handle_age_gate_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            if not query or not query.data:
+                return False
+            if query.data not in ("age_confirm", "age_deny", "age_captcha:ok", "age_captcha:no1", "age_captcha:no2"):
+                return False
+            await query.answer()
+            user_id = query.message.chat.id if query.message else (update.effective_user.id if update.effective_user else 0)
+            age_gate = db_get_age_gate_config()
+            if query.data == "age_deny":
+                await query.edit_message_text(str(age_gate.get("deny_message") or _DEFAULT_AGE_GATE["deny_message"]))
+                return True
+            if query.data == "age_confirm":
+                captcha_prompt = str(age_gate.get("captcha_prompt") or _DEFAULT_AGE_GATE["captcha_prompt"]).strip()
+                keyboard = _age_gate_keyboard(bot_cfg_id, user_id, age_gate)
+                await query.edit_message_text(captcha_prompt, reply_markup=keyboard)
+                return True
+            expected = _age_gate_captcha_store.get(f"age:{bot_cfg_id}:{user_id}")
+            selected = query.data.split(":", 1)[1]
+            if selected != "ok":
+                await query.edit_message_text(str(age_gate.get("deny_message") or _DEFAULT_AGE_GATE["deny_message"]))
+                return True
+            if not expected:
+                await query.edit_message_text("⚠️ Phiên xác minh đã hết hạn. Vui lòng gõ /start lại.")
+                return True
+            db_add_age_verification(bot_cfg_id, user_id)
+            _age_gate_captcha_store.pop(f"age:{bot_cfg_id}:{user_id}", None)
+            msg = str(age_gate.get("success_message") or _DEFAULT_AGE_GATE["success_message"]).strip()
+            await query.edit_message_text(msg)
+            await start(update, context)
+            return True
 
         async def menu_tracked(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await track_interaction(update, context)
@@ -4338,6 +4478,7 @@ if BOT_TOKEN or db_get_bots():
         ptb_app.add_handler(CommandHandler("stats", stats_cmd))
         ptb_app.add_handler(CommandHandler("sendall", sendall_cmd))
         ptb_app.add_handler(CommandHandler("ban", ban_cmd))
+        ptb_app.add_handler(CallbackQueryHandler(handle_age_gate_callback, pattern=r"^age_(confirm|deny)$"))
         ptb_app.add_handler(CallbackQueryHandler(menu_tracked, pattern=r"^menu(_p\d+)?$"))
         ptb_app.add_handler(CallbackQueryHandler(category_page_tracked, pattern=r"^cat_"))
         ptb_app.add_handler(CallbackQueryHandler(flow_handler_tracked, pattern="^flow_"))
