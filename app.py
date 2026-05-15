@@ -4680,13 +4680,14 @@ def _exclusive_scheduled_backup_lock():
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler as _BGScheduler
+    from apscheduler.triggers.cron import CronTrigger as _CronTrigger
     import pytz as _pytz
 
     def _scheduled_daily_backup():
         """Called by APScheduler — at most once per Vietnam calendar day across workers."""
         log.info("APScheduler: scheduled backup job fired (pid=%s)", os.getpid())
+        today_vn = datetime.now(_VN_TZ).strftime("%Y-%m-%d")
         with _exclusive_scheduled_backup_lock():
-            today_vn = datetime.now(_VN_TZ).strftime("%Y-%m-%d")
             if db_get_scheduled_backup_last_vn_day() == today_vn:
                 log.info("APScheduler: skip — scheduled backup already completed for %s", today_vn)
                 return
@@ -4697,17 +4698,21 @@ try:
             except Exception as e:
                 log.error("APScheduler: daily backup failed: %s", e)
 
-    # Guard against Werkzeug debug reloader: in debug mode the parent process
-    # (reloader) also imports app.py; only start the scheduler in the child
-    # worker process (where WERKZEUG_RUN_MAIN == "true") or in production
-    # (where WERKZEUG_RUN_MAIN is unset).
+    # Start the scheduler only once per process tree in debug mode; in normal
+    # production imports the guard is harmless because the scheduler lives in
+    # the worker process that imports app.py.
     if os.environ.get("WERKZEUG_RUN_MAIN") != "false":
         _vn_tz = _pytz.timezone("Asia/Ho_Chi_Minh")
-        _scheduler = _BGScheduler(timezone=_vn_tz)
-        _scheduler.add_job(_scheduled_daily_backup, "cron", hour=0, minute=1,
-                           id="daily_backup", replace_existing=True)
+        _scheduler = _BGScheduler(timezone=_vn_tz, job_defaults={"coalesce": True, "max_instances": 1})
+        _scheduler.add_job(
+            _scheduled_daily_backup,
+            trigger=_CronTrigger(hour=0, minute=1, timezone=_vn_tz),
+            id="daily_backup",
+            replace_existing=True,
+            misfire_grace_time=3600,
+        )
         _scheduler.start()
-        log.info("APScheduler started – daily backup 0:01 Asia/Ho_Chi_Minh; flock dedupes workers")
+        log.info("APScheduler started – daily backup 0:01 Asia/Ho_Chi_Minh; max_instances=1")
 except ImportError:
     log.warning("apscheduler not installed – automated backup disabled. Run: pip install apscheduler pytz")
 except Exception as _aps_err:

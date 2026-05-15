@@ -241,7 +241,9 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
   hiệu ứng. Trang login: orb nền, thẻ glass, nút đăng nhập gradient + shimmer. Chỉ CSS/HTML
   style, không đổi route/JS logic. (commit 5932331).
 
-[2026-05-15] UI/UX dashboard: chuẩn hóa bộ lưới và phân cấp nội dung trong `templates/index.html` — thêm `main-shell`/`content-max-width`, sticky header cho bảng, giảm độ dày spacing, bổ sung intro + quick-start cho các section chính, tối ưu responsive mobile. Chỉ chỉnh presentation layer, không đổi route hay JS logic. (đang chốt commit/push).
+[2026-05-15] UI/UX dashboard: chuẩn hóa bộ lưới và phân cấp nội dung trong `templates/index.html` — thêm `main-shell`/`content-max-width`, sticky header cho bảng, giảm độ dày spacing, bổ sung intro + quick-start cho các section chính, tối ưu responsive mobile. Chỉ chỉnh presentation layer, không đổi route hay JS logic. (commit 452c2db).
+
+[2026-05-15] Backup scheduler: rà soát và chỉnh `app.py` để APScheduler backup ổn định hơn — dùng `CronTrigger` 0:01 Asia/Ho_Chi_Minh, `coalesce=True`, `max_instances=1`, `misfire_grace_time=3600`, giữ logic flock + kiểm tra ngày VN để tránh chạy trùng giữa nhiều worker. File: `app.py` (chưa commit).
 
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
