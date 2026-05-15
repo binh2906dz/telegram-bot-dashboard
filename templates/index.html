@@ -28,6 +28,7 @@
       --sidebar-bg: rgba(250, 251, 252, 0.98);
       --sidebar-width: 278px;
       --topbar-height: 60px;
+      --content-max-width: 1560px;
       --body-bg: #dce4f0;
       --border-color: rgba(148, 163, 184, 0.35);
       --radius: 14px;
@@ -142,6 +143,14 @@
       scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
     }
     .sidebar.collapsed { transform: translateX(calc(-1 * var(--sidebar-width))); }
+    .main-shell {
+      width: 100%;
+      max-width: var(--content-max-width);
+      margin: 0 auto;
+      display: flex;
+      min-height: 100%;
+    }
+    .main-content { min-width: 0; }
     .sidebar-accent-bar {
       height: 3px;
       margin: 12px 18px 4px;
@@ -197,21 +206,96 @@
       padding: 30px 28px 40px;
       position: relative;
     }
+    .main-content > * {
+      max-width: var(--content-max-width);
+      margin-left: auto;
+      margin-right: auto;
+    }
     .main-content.expanded { margin-left: 0; }
+    .section-page {
+      padding: 0 4px;
+    }
+    .section-page .row {
+      --bs-gutter-x: 1rem;
+      --bs-gutter-y: 1rem;
+    }
+    .section-page .dash-card,
+    .section-page .album-card,
+    .section-page .modal-content {
+      backdrop-filter: saturate(1.02);
+    }
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 0 2px;
+    }
+    .page-title {
+      font-size: 1.28rem;
+      font-weight: 800;
+      letter-spacing: -0.035em;
+      color: var(--text-primary);
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .page-title i { color: var(--accent); margin-right: 0; vertical-align: -2px; }
+    .section-intro {
+      color: var(--text-muted);
+      font-size: .88rem;
+      line-height: 1.65;
+      margin: 2px 0 14px;
+      max-width: 980px;
+    }
+    .section-intro strong { color: var(--text-primary); }
+    .section-intro code { color: var(--accent-deep); }
+    .quick-start {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .quick-start .qs-item {
+      background: rgba(255,255,255,.84);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 14px 16px;
+    }
+    .quick-start .qs-kicker {
+      font-size: .72rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: #64748b;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .quick-start .qs-title {
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .quick-start .qs-body {
+      color: var(--text-muted);
+      font-size: .84rem;
+      line-height: 1.55;
+    }
+    .section-page .text-muted {
+      color: #64748b !important;
+    }
+    .section-page .lead-note {
+      font-size: .8rem;
+      color: #718096;
+      line-height: 1.6;
+      margin-top: 8px;
+    }
     .section-page { display: none; animation: dashFade .38s var(--ease-out-expo) both; }
     .section-page.active { display: block; }
     @keyframes dashFade {
       from { opacity: 0; transform: translateY(12px) scale(0.992); filter: blur(2px); }
       to { opacity: 1; transform: none; filter: none; }
     }
-    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; flex-wrap: wrap; gap: 12px; }
-    .page-title {
-      font-size: 1.35rem;
-      font-weight: 800;
-      letter-spacing: -0.035em;
-      color: var(--text-primary);
-    }
-    .page-title i { color: var(--accent); margin-right: 10px; vertical-align: -2px; }
     .stat-card {
       background: linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.92));
       border: 1px solid rgba(255, 255, 255, 0.75);
@@ -241,6 +325,7 @@
       box-shadow: var(--shadow-md), 0 0 0 1px rgba(234, 88, 12, 0.12);
       border-color: rgba(234, 88, 12, 0.2);
     }
+    .stat-card.compact { padding: 16px 18px; }
     .stat-icon { width: 50px; height: 50px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 1.35rem; flex-shrink: 0; }
     .stat-icon.orange { background: var(--accent-soft); color: var(--accent); }
     .stat-icon.blue   { background: rgba(59, 130, 246, 0.12); color: #2563eb; }
@@ -275,6 +360,21 @@
     }
     .dash-card-title { font-size: .82rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; }
     .dash-card-body { padding: 18px 20px; }
+    .dash-card-body .row {
+      --bs-gutter-x: 0.85rem;
+      --bs-gutter-y: 0.85rem;
+    }
+    .dash-card-body .row.g-4 {
+      --bs-gutter-x: 1.1rem;
+      --bs-gutter-y: 1.1rem;
+    }
+    .dash-card-body .d-flex.flex-wrap.gap-2,
+    .dash-card-body .d-flex.flex-wrap.gap-3 {
+      row-gap: .5rem !important;
+    }
+    .dash-card-body p {
+      line-height: 1.65;
+    }
     .btn-accent {
       position: relative;
       overflow: hidden;
@@ -302,6 +402,18 @@
       transform: translateY(-1px);
     }
     .btn-accent:hover::after { transform: translateX(100%); }
+    .table-responsive {
+      border-radius: var(--radius-lg);
+    }
+    .data-table {
+      margin-bottom: 0;
+    }
+    .data-table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #f8fafc;
+    }
     .data-table th { font-size: .72rem; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.04em; border-bottom: 1px solid var(--border-color); }
     .data-table td { font-size: .86rem; vertical-align: middle; border-color: #eef2f7; }
     .table.data-table tbody tr {
@@ -365,10 +477,19 @@
       border-radius: var(--radius) !important;
     }
     .list-group-item.bg-surface { background: #f8fafc !important; border-color: var(--border-color) !important; color: var(--text-primary) !important; }
+    @media (max-width: 992px) {
+      .quick-start { grid-template-columns: 1fr; }
+    }
     @media (max-width: 768px) {
       .sidebar { transform: translateX(calc(-1 * var(--sidebar-width))); }
       .sidebar.mobile-open { transform: translateX(0); }
-      .main-content { margin-left: 0; padding: 20px 16px 28px; }
+      .main-content { margin-left: 0; padding: 18px 14px 24px; }
+      .main-content > * { max-width: 100%; }
+      .page-header { margin-bottom: 14px; }
+      .page-title { font-size: 1.14rem; }
+      .stat-value { font-size: 1.4rem; }
+      .dash-card-body { padding: 16px 14px; }
+      .dash-card-header { padding: 14px 16px; }
     }
     @media (min-width: 769px) {
       .sidebar.collapsed { transform: translateX(calc(-1 * var(--sidebar-width))); }
@@ -412,6 +533,7 @@
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
 <div class="layout">
+  <div class="main-shell">
   <!-- Sidebar -->
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-accent-bar" aria-hidden="true"></div>
@@ -438,8 +560,17 @@
     <!-- DASHBOARD SECTION -->
     <div class="section-page active" id="section-dashboard">
       <div class="page-header">
-        <span class="page-title"><i class="bi bi-speedometer2"></i>Dashboard</span>
+        <div>
+          <span class="page-title"><i class="bi bi-speedometer2"></i>Dashboard</span>
+          <p class="section-intro mb-0">Tổng quan nhanh về hệ thống: bot, subscriber, ID, album và bài viết. Mục này giúp bạn kiểm tra trạng thái trước khi đi vào các tác vụ vận hành sâu hơn.</p>
+          <p class="lead-note mb-0">Quy trình gợi ý: kiểm tra bot → chuẩn bị nội dung → vận hành bằng broadcast/backup.</p>
+        </div>
         <span class="text-muted" style="font-size:.8rem;"><i class="bi bi-clock me-1"></i><span id="dashClock"></span></span>
+      </div>
+      <div class="quick-start">
+        <div class="qs-item"><div class="qs-kicker">Bước 1</div><div class="qs-title">Kiểm tra bot</div><div class="qs-body">Xem số bot đang hoạt động và nhấn kiểm tra trạng thái nếu cần cập nhật nhanh.</div></div>
+        <div class="qs-item"><div class="qs-kicker">Bước 2</div><div class="qs-title">Chuẩn bị nội dung</div><div class="qs-body">Tạo album, thêm bài viết và cấu hình kịch bản trước khi broadcast.</div></div>
+        <div class="qs-item"><div class="qs-kicker">Bước 3</div><div class="qs-title">Vận hành an toàn</div><div class="qs-body">Dùng backup, ID management và analytics để theo dõi kết quả.</div></div>
       </div>
       <div class="row g-3 mb-4">
         <div class="col-6 col-md-4 col-lg-2">
@@ -500,7 +631,11 @@
     <!-- BOT MANAGEMENT SECTION -->
     <div class="section-page" id="section-bots">
       <div class="page-header">
-        <span class="page-title"><i class="bi bi-robot"></i>Quản lý Bot</span>
+        <div>
+          <span class="page-title"><i class="bi bi-robot"></i>Quản lý Bot</span>
+          <p class="section-intro mb-0">Theo dõi danh sách bot, trạng thái, subscriber và các chỉ số hoạt động. Đây là nơi bắt đầu khi cần thêm bot hoặc kiểm tra kết nối.</p>
+          <p class="lead-note mb-0">Gợi ý: xem nhanh cột <strong>Subscribers</strong> trước, sau đó mở <strong>Kiểm tra trạng thái</strong> để cập nhật số liệu mới.</p>
+        </div>
         {% if role == 'owner' %}
         <div class="d-flex gap-2">
           <button class="btn btn-sm btn-outline-info" onclick="loadBotHealth(this)"><i class="bi bi-activity me-1"></i>Kiểm tra trạng thái</button>
@@ -573,7 +708,8 @@
       <div class="page-header flex-wrap gap-3">
         <div class="flex-grow-1" style="min-width:240px;">
           <span class="page-title"><i class="bi bi-keyboard"></i> Bàn phím Telegram</span>
-          <p class="text-muted mb-0 mt-2" style="font-size:.88rem;max-width:820px;">Một cấu hình dùng chung cho <strong>tất cả bot</strong> trong hệ thống. Khi bấm <strong>Lưu</strong>, dữ liệu được ghi vào cấu hình chung và <strong>đồng bộ</strong> sang từng bot. Người dùng Telegram cần gửi lại <code>/start</code> để thấy bàn phím mới (sau tin chào + nút inline như hiện tại).</p>
+          <p class="section-intro mb-0 mt-2" style="max-width:820px;">Một cấu hình dùng chung cho <strong>tất cả bot</strong> trong hệ thống. Khi bấm <strong>Lưu</strong>, dữ liệu được ghi vào cấu hình chung và <strong>đồng bộ</strong> sang từng bot. Người dùng Telegram cần gửi lại <code>/start</code> để thấy bàn phím mới.</p>
+          <p class="lead-note mb-0">Ưu tiên giữ nội dung ngắn gọn, mỗi hàng là một nhóm hành động rõ ràng để tránh nút quá dày trên điện thoại.</p>
         </div>
         <div class="d-flex flex-wrap gap-2 align-items-start">
           <button type="button" class="btn btn-sm btn-outline-secondary" onclick="rmReload()"><i class="bi bi-arrow-clockwise me-1"></i>Tải lại</button>
@@ -634,7 +770,11 @@
     <!-- MASTER ANALYTICS SECTION -->
     <div class="section-page" id="section-analytics">
       <div class="page-header">
-        <span class="page-title"><i class="bi bi-bar-chart-line-fill"></i>Master Analytics</span>
+        <div>
+          <span class="page-title"><i class="bi bi-bar-chart-line-fill"></i>Master Analytics</span>
+          <p class="section-intro mb-0">Bảng tổng hợp để xem bot nào đang tạo tương tác tốt nhất và so sánh hiệu suất giữa các bot theo cùng một nguồn dữ liệu.</p>
+          <p class="lead-note mb-0">Ưu tiên đọc biểu đồ tổng trước, sau đó xem bảng chi tiết từng bot để xác định bot nào cần tối ưu.</p>
+        </div>
         <button class="btn btn-sm btn-outline-info" onclick="loadAnalytics(this)"><i class="bi bi-arrow-clockwise me-1"></i>Làm mới</button>
       </div>
       <!-- Aggregated Stats -->
@@ -682,7 +822,13 @@
 
     <!-- ID MANAGEMENT SECTION -->
     <div class="section-page" id="section-ids">
-      <div class="page-header"><span class="page-title"><i class="bi bi-people-fill"></i>Quản lý ID Telegram</span></div>
+      <div class="page-header">
+        <div>
+          <span class="page-title"><i class="bi bi-people-fill"></i>Quản lý ID Telegram</span>
+          <p class="section-intro mb-0">Khu vực quản lý danh sách người dùng: tải lên ID, theo dõi trạng thái và broadcast theo nhóm. Đây là nơi dễ tạo tải lớn nên cần đọc kỹ trước khi gửi hàng loạt.</p>
+          <p class="lead-note mb-0">Gợi ý: upload ID trước, kiểm tra trạng thái, rồi mới broadcast để tránh gửi trùng hoặc sai nhóm.</p>
+        </div>
+      </div>
       <div class="row g-3 mb-4">
         <div class="col-6 col-md-3"><div class="stat-card"><div class="stat-icon blue"><i class="bi bi-database"></i></div><div><div class="stat-value" id="idStat-total">{{ id_stats.total }}</div><div class="stat-label">Tổng ID</div></div></div></div>
         <div class="col-6 col-md-3"><div class="stat-card"><div class="stat-icon green"><i class="bi bi-check-circle-fill"></i></div><div><div class="stat-value" id="idStat-active">{{ id_stats.active }}</div><div class="stat-label">Active</div></div></div></div>
@@ -785,9 +931,15 @@
     <!-- ALBUMS SECTION -->
     <div class="section-page" id="section-albums">
       <div class="page-header">
-        <span class="page-title"><i class="bi bi-collection"></i>Albums</span>
-        <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#createAlbumModal"><i class="bi bi-plus-lg me-1"></i>Tạo Album mới</button>
-        <button class="btn btn-sm btn-outline-info ms-2" data-bs-toggle="modal" data-bs-target="#categoryModal"><i class="bi bi-tags me-1"></i>Quản lý Danh mục</button>
+        <div>
+          <span class="page-title"><i class="bi bi-collection"></i>Albums</span>
+          <p class="section-intro mb-0">Danh sách album là lõi nội dung. Mỗi album có thể thuộc danh mục, có mô tả, nhiều bài viết ảnh/video và được dùng trong flow bot hoặc Mini App.</p>
+          <p class="lead-note mb-0">Gợi ý: tạo danh mục trước nếu bạn có nhiều album theo chiến dịch, sau đó mới thêm bài để dễ quản lý.</p>
+        </div>
+        <div>
+          <button class="btn btn-sm btn-accent" data-bs-toggle="modal" data-bs-target="#createAlbumModal"><i class="bi bi-plus-lg me-1"></i>Tạo Album mới</button>
+          <button class="btn btn-sm btn-outline-info ms-2" data-bs-toggle="modal" data-bs-target="#categoryModal"><i class="bi bi-tags me-1"></i>Quản lý Danh mục</button>
+        </div>
       </div>
       {% if albums %}
         {% for album_id, album in albums.items() %}
@@ -892,7 +1044,11 @@
     <!-- SCRIPT & ALBUM MANAGER SECTION -->
     <div class="section-page" id="section-script">
       <div class="page-header">
-        <span class="page-title"><i class="bi bi-diagram-3"></i>Kịch bản &amp; Album</span>
+        <div>
+          <span class="page-title"><i class="bi bi-diagram-3"></i>Kịch bản &amp; Album</span>
+          <p class="section-intro mb-0">Đây là nơi điều phối luồng tương tác của bot từ lời chào đến kết thúc album. Bạn có thể xem toàn bộ flow và chỉnh từng node khi cần.</p>
+          <p class="lead-note mb-0">Gợi ý: sửa nội dung chào mừng trước, sau đó kiểm tra album list và tin nhắn kết thúc để giữ trải nghiệm nhất quán.</p>
+        </div>
         <span style="font-size:.78rem;color:#888;">Luồng tương tác đầy đủ từ /start đến kết thúc album</span>
       </div>
       <!-- Flow Visualization -->
@@ -1012,7 +1168,12 @@
 
     <!-- CONFIG SECTION -->
     <div class="section-page" id="section-config">
-      <div class="page-header"><span class="page-title"><i class="bi bi-gear-fill"></i>Cấu hình Bot</span></div>
+      <div class="page-header">
+        <div>
+          <span class="page-title"><i class="bi bi-gear-fill"></i>Cấu hình Bot</span>
+          <p class="section-intro mb-0">Tập hợp các thiết lập hành vi của bot: slogan, flow tương tác và Mini App. Đây là phần nên thay đổi có kiểm soát vì ảnh hưởng trực tiếp tới trải nghiệm người dùng.</p>
+        </div>
+      </div>
       <ul class="nav config-tabs mb-4" style="border-bottom:1px solid var(--border-color);">
         <li class="nav-item"><button class="nav-link active" id="tab-slogans-btn" onclick="showConfigTab('slogans')"><i class="bi bi-chat-quote me-1"></i>Slogan</button></li>
         <li class="nav-item"><button class="nav-link" id="tab-flow-btn" onclick="showConfigTab('flow')"><i class="bi bi-diagram-3 me-1"></i>Kịch bản Bot</button></li>
@@ -1069,7 +1230,13 @@
 
     <!-- SYSTEM SECTION -->
     <div class="section-page" id="section-system">
-      <div class="page-header"><span class="page-title"><i class="bi bi-shield-fill"></i>Backup &amp; Hệ thống</span></div>
+      <div class="page-header">
+        <div>
+          <span class="page-title"><i class="bi bi-shield-fill"></i>Backup &amp; Hệ thống</span>
+          <p class="section-intro mb-0">Khu vực vận hành an toàn: backup, restore, lịch gửi tự động và các thao tác hệ thống. Những nút ở đây thường có tác động lớn nên cần xác nhận rõ ràng.</p>
+          <p class="lead-note mb-0">Gợi ý: kiểm tra bản backup gần nhất rồi mới chạy restore hoặc thay đổi lịch tự động.</p>
+        </div>
+      </div>
       <div class="row g-3">
         <div class="col-12 col-md-6">
           <div class="dash-card">
@@ -1170,6 +1337,7 @@
     </div>
 
   </main>
+  </div>
 </div><!-- /layout -->
 
 <!-- Lightbox -->
