@@ -4529,7 +4529,7 @@ if BOT_TOKEN or db_get_bots():
         ptb_app.add_handler(CommandHandler("stats", stats_cmd))
         ptb_app.add_handler(CommandHandler("sendall", sendall_cmd))
         ptb_app.add_handler(CommandHandler("ban", ban_cmd))
-        ptb_app.add_handler(CallbackQueryHandler(handle_age_gate_callback, pattern=r"^age_(confirm|deny)$"))
+        ptb_app.add_handler(CallbackQueryHandler(handle_age_gate_callback, pattern=r"^age_(confirm|deny|captcha:(?:ok|no1|no2))$"))
         ptb_app.add_handler(CallbackQueryHandler(menu_tracked, pattern=r"^menu(_p\d+)?$"))
         ptb_app.add_handler(CallbackQueryHandler(category_page_tracked, pattern=r"^cat_"))
         ptb_app.add_handler(CallbackQueryHandler(flow_handler_tracked, pattern="^flow_"))
