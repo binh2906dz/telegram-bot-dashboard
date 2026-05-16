@@ -1176,6 +1176,16 @@ def db_get_age_gate_config() -> dict:
     return dict(_DEFAULT_AGE_GATE)
 
 
+def _age_gate_is_enabled(age_gate: dict) -> bool:
+    """Interpret age-gate config conservatively: enabled unless explicitly false."""
+    if not isinstance(age_gate, dict):
+        return True
+    enabled = age_gate.get("enabled", True)
+    if isinstance(enabled, str):
+        return enabled.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+    return bool(enabled)
+
+
 def db_save_age_gate_config(cfg: dict) -> dict:
     merged = dict(_DEFAULT_AGE_GATE)
     if isinstance(cfg, dict):
@@ -4254,7 +4264,7 @@ if BOT_TOKEN or db_get_bots():
 
             try:
                 age_gate = db_get_age_gate_config()
-                if age_gate.get("enabled", True) and not db_has_age_verification(bot_cfg_id, user_id):
+                if _age_gate_is_enabled(age_gate) and not db_has_age_verification(bot_cfg_id, user_id):
                     q = str(age_gate.get("question") or _DEFAULT_AGE_GATE["question"]).strip()
                     confirm_label = str(age_gate.get("confirm_label") or _DEFAULT_AGE_GATE["confirm_label"]).strip()
                     age_keyboard = _age_gate_keyboard(bot_cfg_id, user_id, age_gate)
@@ -4349,12 +4359,20 @@ if BOT_TOKEN or db_get_bots():
                 return True
             if query.data == "age_confirm":
                 captcha_prompt = str(age_gate.get("captcha_prompt") or _DEFAULT_AGE_GATE["captcha_prompt"]).strip()
-                keyboard = _age_gate_keyboard(bot_cfg_id, user_id, age_gate)
+                try:
+                    keyboard = _age_gate_keyboard(bot_cfg_id, user_id, age_gate)
+                except Exception as exc:
+                    log.error("age gate captcha build failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
+                    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Tiếp tục", callback_data="age_captcha:ok")]])
                 await query.edit_message_text(captcha_prompt, reply_markup=keyboard)
                 return True
             expected = _age_gate_captcha_store.get(f"age:{bot_cfg_id}:{user_id}")
             selected = query.data.split(":", 1)[1]
             if selected != "ok":
+                try:
+                    _age_gate_captcha_store.pop(f"age:{bot_cfg_id}:{user_id}", None)
+                except Exception:
+                    pass
                 await query.edit_message_text(str(age_gate.get("deny_message") or _DEFAULT_AGE_GATE["deny_message"]))
                 return True
             if not expected:
