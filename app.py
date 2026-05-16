@@ -1218,7 +1218,8 @@ def _age_gate_captcha_keyboard(bot_id: str, user_id: int, age_gate: dict):
         InlineKeyboardButton(choices[1], callback_data="age_captcha:no1"),
         InlineKeyboardButton(choices[2], callback_data="age_captcha:no2"),
     ]]
-    return InlineKeyboardMarkup(buttons)
+    prompt = f"{str(age_gate.get('captcha_prompt') or _DEFAULT_AGE_GATE['captcha_prompt']).strip()} {choices[0]}"
+    return InlineKeyboardMarkup(buttons), prompt
 
 
 def db_save_expired_warning_message(msg: str):
@@ -4359,12 +4360,12 @@ if BOT_TOKEN or db_get_bots():
                 await query.edit_message_text(str(age_gate.get("deny_message") or _DEFAULT_AGE_GATE["deny_message"]))
                 return True
             if query.data == "age_confirm":
-                captcha_prompt = str(age_gate.get("captcha_prompt") or _DEFAULT_AGE_GATE["captcha_prompt"]).strip()
                 try:
-                    keyboard = _age_gate_captcha_keyboard(bot_cfg_id, user_id, age_gate)
+                    keyboard, captcha_prompt = _age_gate_captcha_keyboard(bot_cfg_id, user_id, age_gate)
                 except Exception as exc:
                     log.error("age gate captcha build failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
                     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Tiếp tục", callback_data="age_captcha:ok")]])
+                    captcha_prompt = str(age_gate.get("captcha_prompt") or _DEFAULT_AGE_GATE["captcha_prompt"]).strip()
                 await query.edit_message_text(captcha_prompt, reply_markup=keyboard)
                 return True
             expected = _age_gate_captcha_store.get(f"age:{bot_cfg_id}:{user_id}")
