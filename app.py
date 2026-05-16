@@ -1205,16 +1205,19 @@ def _random_age_emojis(count: int = 3) -> list:
     return random.sample(pool, k=count if count <= len(pool) else len(pool))
 
 
-def _age_gate_keyboard(bot_id: str, user_id: int, age_gate: dict):
+def _age_gate_confirm_keyboard(age_gate: dict):
+    return InlineKeyboardMarkup([[InlineKeyboardButton(age_gate["confirm_label"], callback_data="age_confirm")]])
+
+
+def _age_gate_captcha_keyboard(bot_id: str, user_id: int, age_gate: dict):
     choices = _random_age_emojis(3)
     key = f"age:{bot_id}:{user_id}"
     _age_gate_captcha_store[key] = choices[0]
-    buttons = [[InlineKeyboardButton(age_gate["confirm_label"], callback_data="age_confirm")]]
-    buttons.append([
+    buttons = [[
         InlineKeyboardButton(choices[0], callback_data="age_captcha:ok"),
         InlineKeyboardButton(choices[1], callback_data="age_captcha:no1"),
         InlineKeyboardButton(choices[2], callback_data="age_captcha:no2"),
-    ])
+    ]]
     return InlineKeyboardMarkup(buttons)
 
 
@@ -4267,15 +4270,7 @@ if BOT_TOKEN or db_get_bots():
                 if _age_gate_is_enabled(age_gate) and not db_has_age_verification(bot_cfg_id, user_id):
                     q = str(age_gate.get("question") or _DEFAULT_AGE_GATE["question"]).strip()
                     confirm_label = str(age_gate.get("confirm_label") or _DEFAULT_AGE_GATE["confirm_label"]).strip()
-                    age_keyboard = _age_gate_keyboard(bot_cfg_id, user_id, age_gate)
-                    try:
-                        rows = [list(row) for row in age_keyboard.inline_keyboard]
-                        if rows and rows[0]:
-                            rows[0][0] = InlineKeyboardButton(confirm_label, callback_data="age_confirm")
-                        age_keyboard = InlineKeyboardMarkup(rows)
-                    except Exception as exc:
-                        log.error("age gate keyboard normalize failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
-                    await message.reply_text(q, reply_markup=age_keyboard)
+                    await message.reply_text(q, reply_markup=_age_gate_confirm_keyboard(age_gate))
                     return
             except Exception as exc:
                 log.error("start handler: age gate failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
@@ -4366,7 +4361,7 @@ if BOT_TOKEN or db_get_bots():
             if query.data == "age_confirm":
                 captcha_prompt = str(age_gate.get("captcha_prompt") or _DEFAULT_AGE_GATE["captcha_prompt"]).strip()
                 try:
-                    keyboard = _age_gate_keyboard(bot_cfg_id, user_id, age_gate)
+                    keyboard = _age_gate_captcha_keyboard(bot_cfg_id, user_id, age_gate)
                 except Exception as exc:
                     log.error("age gate captcha build failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
                     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Tiếp tục", callback_data="age_captcha:ok")]])
