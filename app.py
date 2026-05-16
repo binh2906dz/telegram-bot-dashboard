@@ -4268,7 +4268,13 @@ if BOT_TOKEN or db_get_bots():
                     q = str(age_gate.get("question") or _DEFAULT_AGE_GATE["question"]).strip()
                     confirm_label = str(age_gate.get("confirm_label") or _DEFAULT_AGE_GATE["confirm_label"]).strip()
                     age_keyboard = _age_gate_keyboard(bot_cfg_id, user_id, age_gate)
-                    age_keyboard.inline_keyboard[0][0] = InlineKeyboardButton(confirm_label, callback_data="age_confirm")
+                    try:
+                        rows = [list(row) for row in age_keyboard.inline_keyboard]
+                        if rows and rows[0]:
+                            rows[0][0] = InlineKeyboardButton(confirm_label, callback_data="age_confirm")
+                        age_keyboard = InlineKeyboardMarkup(rows)
+                    except Exception as exc:
+                        log.error("age gate keyboard normalize failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
                     await message.reply_text(q, reply_markup=age_keyboard)
                     return
             except Exception as exc:
