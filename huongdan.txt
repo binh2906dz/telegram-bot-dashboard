@@ -219,6 +219,32 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
   trang per_page tối đa 50000, mặc định 12000) và nút trên bảng bot để xem danh sách
   User ID. File: app.py, templates/index.html.
 
+[2026-05-16] Bot runtime ổn định lại sau chuỗi lỗi deploy: thiếu `Any` ở handler /start,
+  thiếu `random` cho age gate, start handler/safe flow chưa có fallback đủ sâu, BotManager
+  từng bị cạnh tranh lock với tiến trình `run_bot.py`/worker cũ, và webhook không map
+  được bot khi process sai. Đã giữ nguyên multi-bot, không xoá dữ liệu bot đang sống.
+  File/commit chính: app.py (9d53311, 60d837f, ff9a538, 6aa5c3f, 3338582, f19dcec).
+
+[2026-05-16] Age gate/captcha đã fix đủ để hoạt động đúng flow:
+  - Age gate dùng `db_get_age_gate_config()` và hiển thị câu hỏi 18+ khi start lần đầu
+  - Captcha callback được nhận đủ `age_confirm`, `age_deny`, `age_captcha:ok`,
+    `age_captcha:no1`, `age_captcha:no2`
+  - Sửa lỗi tuple/immutable khi set nút xác nhận tuổi bằng cách tạo markup mutable
+  - Tách confirm 18+ khỏi captcha, captcha prompt hiển thị icon mục tiêu để người dùng
+    biết phải chọn gì
+  - Nếu age gate/captcha lỗi nhỏ thì fallback an toàn, không làm sập bot đang sống
+  File/commit chính: app.py (ad0c1b3, 8d21d6b, d7e57ea, 68bdf08, 23e57a6, 28fc05b).
+
+[2026-05-16] Ghi chú vận hành multi-bot:
+  - Hệ thống có nhiều bot, một số token OK (`getMe` OK), một số bot đã bị Telegram ban/
+    revoke (`Unauthorized`)
+  - Bot revoke có thể webhook rỗng hoặc start fail; đây là trạng thái dữ liệu, không phải
+    lỗi hệ thống web
+  - Không xoá hàng loạt bot chết nếu chưa xác nhận; chỉ disable/ẩn bot chết nếu cần
+  - Khi test `/start`, nhớ đúng bot còn sống; bot bị ban sẽ không phản hồi chuẩn
+  - Nếu thấy log `no running bot found` hãy kiểm tra BotManager, lock, hoặc bot đang
+    bị disable do token invalid/revoked
+
 [2026-05-14] (đã thay) Trước đây ghi nhận phương án B cộng union với telegram_ids — đã
   bỏ vì làm Subscribers gần như giống nhau giữa các bot.
 
@@ -232,6 +258,63 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
 [2026-05-14] Backup VPS: bỏ PTB `run_daily` backup (01:00 UTC = 8h VN, mỗi bot một job).
   APScheduler: `fcntl` flock + `app_config` key `scheduled_backup_last_vn_day` để chỉ
   một lần/ngày VN khi nhiều Gunicorn worker. Dọn zip theo 3 ngày lịch VN (mtime), mỗi
+
+[2026-05-16] Bổ sung bối cảnh lỗi hệ thống đã gặp và nguyên nhân để tránh tái phạm:
+  - Lỗi thiếu import `Any` làm start handler/bot start crash hàng loạt; log sẽ báo
+    `name 'Any' is not defined`.
+  - Lỗi thiếu import `random` làm age gate/captcha crash; log sẽ báo
+    `name 'random' is not defined`.
+  - Lỗi lock BotManager do tiến trình cũ `run_bot.py` / worker khác giữ lock file,
+    khiến gunicorn worker hiện tại skip bot thread; cần chỉ 1 luồng quản lý bot.
+  - Lỗi callback captcha không khớp pattern làm captcha bấm nhưng không được xử lý.
+  - Lỗi age gate nhánh confirm/captcha từng dùng cấu trúc tuple/immutable nên khi
+    sửa nút bị `tuple object does not support item assignment`.
+  - Lỗi `/start` từng trả "Bot đang gặp lỗi tạm thời" do age gate/send_main_flow
+    ném lỗi; đã tách từng lớp fallback để bot còn sống không bị sập cả flow.
+  - Hệ thống nhiều bot: có bot OK và bot bị Telegram ban/revoke (`Unauthorized`).
+    Bot bị ban không thể cứu bằng code; chỉ có thể thay token hoặc disable/ẩn.
+  - Khi debug, phải phân biệt: lỗi web/gunicorn, lỗi BotManager, lỗi handler `/start`,
+    và lỗi token Telegram. Không nên sửa bừa một lớp rồi kết luận toàn hệ thống hỏng.
+  - Nếu bot phản hồi nhưng sai nội dung, kiểm tra `age_gate` trong DB, callback pattern,
+    và các fallback trong start handler trước khi đụng phần lớn logic khác.
+
+[2026-05-16] Ghi chú để phiên sau ít gây lỗi hơn:
+  - Đọc `huongdan.txt` trước khi sửa code hoặc deploy.
+  - Ưu tiên fix nhỏ, chạy lint, restart, test lại từng bước.
+  - Tránh thay đổi lớn nhiều mục cùng lúc khi đang chẩn đoán bot webhooks/multi-bot.
+  - Nếu sửa tính năng age gate/captcha, luôn kiểm tra cả: config DB, handler start,
+    callback pattern, và cách render keyboard.
+  - Với repo này, file `.txt` là bối cảnh vận hành/handoff; file `.md` thường dành cho
+    tài liệu mô tả/hướng dẫn. Cả hai có thể chứa bối cảnh nhưng `huongdan.txt` là file
+    phải đọc đầu tiên trước mọi thay đổi đáng kể.
+
+[2026-05-16] Cách chẩn đoán nhanh bot không phản hồi:
+  1) Kiểm tra service web còn sống: `curl http://127.0.0.1:5000/healthz` phải trả 200.
+  2) Kiểm tra log `journalctl -u bot` để phân biệt: webhook đăng ký OK, start handler
+     lỗi, age gate/captcha lỗi, hay bot start fail vì token.
+  3) Với bot riêng lẻ, dùng `getMe`/`getWebhookInfo` để biết token còn hợp lệ và webhook
+     có trỏ đúng URL hay không.
+  4) Nếu log báo `no running bot found`, kiểm tra BotManager, lock file, và xem có
+     worker/process cũ đang giữ lock hoặc bot đang bị disable do token invalid/revoked.
+  5) Nếu bot phản hồi nhưng sai nội dung, kiểm tra `age_gate` trong DB, flow config,
+     và các callback pattern trước khi chạm vào luồng chính.
+  6) Nếu nhiều bot cùng lỗi, ưu tiên nghi ngờ lỗi code dùng chung; nếu chỉ một vài bot lỗi,
+     ưu tiên nghi ngờ token/webhook/dữ liệu của bot đó.
+
+[2026-05-16] Giải thích nhanh về file `.txt` và `.md` trên repo:
+  - `.txt` như `huongdan.txt` là file handoff/bối cảnh vận hành, dùng để giữ lịch sử
+    lỗi, các commit đã sửa, và quy ước an toàn khi tiếp tục làm việc.
+  - `.md` là file Markdown dùng cho tài liệu đọc được định dạng tốt hơn, thường là
+    hướng dẫn, ghi chú, hoặc mô tả tính năng.
+  - Khi sửa repo, nên đọc `huongdan.txt` trước; nếu thay đổi lớn thì chỉ **bổ sung**
+    nhật ký vào cuối file, không xoá bối cảnh cũ.
+
+[2026-05-16] Bối cảnh mới nhất từ cuộc chat:
+  - Người dùng yêu cầu cập nhật thêm bối cảnh vào `huongdan.txt` nhưng không xoá nội dung cũ.
+  - Mục tiêu là giữ nguyên toàn bộ lịch sử xử lý lỗi age gate/captcha, multi-bot,
+    bot bị Telegram ban, và các commit đã áp dụng.
+  - Quy ước tiếp theo: mọi thay đổi đáng kể cần được ghi thêm vào phần nhật ký ở cuối
+    `huongdan.txt` để phiên sau nạp nhanh bối cảnh, tránh lặp lỗi.
   ngày giữ một bản mới nhất. Tên file backup theo giờ `Asia/Ho_Chi_Minh`. File: app.py,
   templates/index.html. (commit 4e9e553).
 
