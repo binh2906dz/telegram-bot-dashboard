@@ -2220,6 +2220,61 @@ def set_album_category(album_id):
 
 # --- Post management ---
 
+@app.route("/albums/<album_id>/posts/edit", methods=["GET"])
+@login_required
+def edit_album_posts(album_id):
+    """Dedicated page: view and edit all posts in an album."""
+    albums = db_get_albums()
+    if album_id not in albums:
+        return "Album not found", 404
+    album = albums[album_id]
+    if not isinstance(album, dict):
+        return "Album not found", 404
+    return render_template(
+        "album_posts_edit.html",
+        album_id=album_id,
+        album=album,
+        posts=album.get("posts") or [],
+        role=session.get("role"),
+        username=session.get("username") or session.get("user") or "",
+        saved=request.args.get("saved") == "1",
+    )
+
+
+@app.route("/albums/<album_id>/posts/save", methods=["POST"])
+@login_required
+def save_album_posts(album_id):
+    """Save album metadata + post captions from the edit page."""
+    albums = db_get_albums()
+    if album_id not in albums:
+        return "Album not found", 404
+    album = albums[album_id]
+    if not isinstance(album, dict):
+        return "Album not found", 404
+
+    title = (request.form.get("album_title") or "").strip()
+    description = (request.form.get("album_description") or "").strip()
+    if title:
+        album["title"] = title
+    album["description"] = description
+
+    posts = album.get("posts") or []
+    if not isinstance(posts, list):
+        posts = []
+    for post in posts:
+        if not isinstance(post, dict):
+            continue
+        pid = post.get("id")
+        if not pid:
+            continue
+        key = f"caption_{pid}"
+        if key in request.form:
+            post["caption"] = request.form.get(key, "")
+    album["posts"] = posts
+    db_save_album(album_id, album)
+    return redirect(url_for("edit_album_posts", album_id=album_id, saved=1))
+
+
 @app.route("/albums/<album_id>/posts", methods=["POST"])
 @login_required
 def add_post(album_id):
@@ -2261,7 +2316,10 @@ def add_post(album_id):
         album["posts"] = []
     album["posts"].append(post)
     db_save_album(album_id, album)
-    return redirect(f"/?album={album_id}")
+    next_url = (request.form.get("next") or "").strip()
+    if next_url.startswith(f"/albums/{album_id}/"):
+        return redirect(next_url)
+    return redirect(url_for("edit_album_posts", album_id=album_id))
 
 
 @app.route("/albums/<album_id>/posts/<post_id>/delete", methods=["POST"])
@@ -2273,7 +2331,10 @@ def delete_post(album_id, post_id):
             p for p in albums[album_id].get("posts", []) if p["id"] != post_id
         ]
         db_save_album(album_id, albums[album_id])
-    return redirect(f"/?album={album_id}")
+    next_url = (request.form.get("next") or "").strip()
+    if next_url.startswith(f"/albums/{album_id}/"):
+        return redirect(next_url)
+    return redirect(url_for("edit_album_posts", album_id=album_id))
 
 
 # --- Legacy routes (kept for backward compatibility) ---

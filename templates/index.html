@@ -1022,41 +1022,9 @@
           <div class="album-posts-wrap" id="album-posts-wrap-{{ album_id }}">
             <div class="album-posts-toolbar">
               <div>
-                <div class="album-posts-hint">Bài viết của album này được ẩn bớt để tránh cuộn dài.</div>
+                <div class="album-posts-hint">Mở trang riêng để xem và chỉnh sửa toàn bộ bài viết, rồi bấm Lưu.</div>
               </div>
-              <button type="button" class="btn btn-sm btn-outline-secondary album-posts-toggle" id="toggle-posts-btn-{{ album_id }}" onclick="toggleAlbumPosts('{{ album_id }}')"><i class="bi bi-eye me-1"></i>Xem bài viết</button>
-            </div>
-            <div class="p-3" id="album-posts-content-{{ album_id }}" style="display:none;">
-              {% set posts = album.posts if album.posts else [] %}
-              {% if posts %}
-                {% for post in posts %}
-                <div class="mb-2" style="border:1px solid var(--border-color);border-radius:10px;padding:14px;background:rgba(255,255,255,.02);">
-                  <div class="d-flex justify-content-between align-items-start mb-2 gap-2">
-                    <div class="album-caption-preview flex-grow-1" id="album-caption-{{ album_id }}-{{ post.id }}">
-                      {% if post.caption %}{{ post.caption }}{% else %}<span class="text-muted fst-italic" style="font-size:.8rem;">(Không có caption)</span>{% endif %}
-                    </div>
-                    {% if role == 'owner' %}
-                    <form action="/albums/{{ album_id }}/posts/{{ post.id }}/delete" method="post" onsubmit="return confirm('Xóa bài viết này?')">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                      <button type="submit" class="btn btn-sm btn-outline-danger" style="padding:2px 8px;"><i class="bi bi-x-lg"></i></button>
-                    </form>
-                    {% endif %}
-                  </div>
-                  <div class="d-flex flex-wrap gap-2">
-                    {% for photo in post.photos %}
-                      {% if photo.get('type') == 'video' %}
-                      <a href="{{ photo.url }}" target="_blank" rel="noopener" class="d-flex align-items-center justify-content-center photo-thumb text-decoration-none" style="background:#e2e8f0;color:#475569;" title="Xem video" aria-label="Xem video trong tab mới">
-                        <i class="bi bi-camera-video-fill" style="font-size:1.8rem;color:#4d9fff;"></i>
-                      </a>
-                      {% else %}
-                      <img src="{{ photo.url }}" class="photo-thumb" onclick="openLightbox('{{ photo.url }}')" alt="photo">
-                      {% endif %}
-                    {% endfor %}
-                  </div>
-                  <div class="mt-1" style="font-size:.72rem;color:#555;"><i class="bi bi-collection me-1"></i>{{ post.photos|length }} ảnh/video{% if post.created_at %} &middot; <i class="bi bi-clock me-1"></i>{{ post.created_at[:10] }}{% endif %}</div>
-                </div>
-                {% endfor %}
-              {% else %}<div class="empty-state py-3"><i class="bi bi-inbox"></i>Chưa có bài viết. Nhấn <strong>Thêm bài</strong>.</div>{% endif %}
+              <a href="/albums/{{ album_id }}/posts/edit" class="btn btn-sm btn-outline-secondary album-posts-toggle"><i class="bi bi-pencil-square me-1"></i>Xem / Sửa bài viết</a>
             </div>
           </div>
         </div>

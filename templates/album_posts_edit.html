@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Sửa bài viết – {{ album.title if album.title else album_id }}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --font-sans: "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+      --accent: #ea580c;
+      --accent-deep: #c2410c;
+      --text-primary: #0b1220;
+      --text-muted: #5c6b82;
+      --card-bg: rgba(255, 255, 255, 0.94);
+      --body-bg: #dce4f0;
+      --border-color: rgba(148, 163, 184, 0.35);
+      --radius: 14px;
+      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+      --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: var(--font-sans);
+      color: var(--text-primary);
+      margin: 0;
+      min-height: 100vh;
+      background-color: var(--body-bg);
+      background-image:
+        radial-gradient(1000px 700px at 100% -10%, rgba(234, 88, 12, 0.11), transparent 55%),
+        radial-gradient(800px 560px at -5% 110%, rgba(37, 99, 235, 0.1), transparent 50%),
+        linear-gradient(165deg, #eef2f9 0%, var(--body-bg) 40%, #d4dce8 100%);
+      background-attachment: fixed;
+      padding-bottom: 96px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 14px 20px;
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border-color);
+      box-shadow: var(--shadow-sm);
+    }
+    .topbar .brand {
+      font-weight: 800;
+      color: var(--accent);
+      letter-spacing: -0.02em;
+      margin-right: auto;
+    }
+    .shell {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 20px 16px 24px;
+    }
+    .card-block {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .post-card {
+      background: #fff;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .post-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .post-head .title {
+      font-size: 0.92rem;
+      font-weight: 700;
+      margin: 0;
+    }
+    .meta { font-size: 0.75rem; color: var(--text-muted); }
+    textarea.form-control {
+      min-height: 140px;
+      font-size: 0.95rem;
+      line-height: 1.45;
+      border-radius: 10px;
+    }
+    .photo-thumb {
+      width: 84px;
+      height: 84px;
+      object-fit: cover;
+      border-radius: 10px;
+      border: 1px solid var(--border-color);
+      cursor: pointer;
+    }
+    .video-thumb {
+      width: 84px;
+      height: 84px;
+      border-radius: 10px;
+      border: 1px solid var(--border-color);
+      background: #e2e8f0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #4d9fff;
+      text-decoration: none;
+    }
+    .btn-accent {
+      background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+      border: none;
+      color: #fff;
+      font-weight: 600;
+    }
+    .btn-accent:hover { color: #fff; filter: brightness(1.05); }
+    .save-bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 50;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.96);
+      border-top: 1px solid var(--border-color);
+      box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08);
+    }
+    .save-bar-inner {
+      max-width: 920px;
+      margin: 0 auto;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .toast-saved {
+      position: fixed;
+      top: 76px;
+      right: 16px;
+      z-index: 60;
+      background: #16a34a;
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 10px;
+      box-shadow: var(--shadow-md);
+      font-size: 0.9rem;
+      display: none;
+    }
+    .toast-saved.show { display: block; }
+    #lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: rgba(15, 23, 42, 0.78);
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    #lightbox.show { display: flex; }
+    #lightbox img {
+      max-width: min(960px, 100%);
+      max-height: 90vh;
+      border-radius: 12px;
+      box-shadow: var(--shadow-md);
+    }
+    .empty-state {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 36px 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <a href="/?album={{ album_id }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Quay lại Album</a>
+    <div class="brand"><i class="bi bi-pencil-square me-1"></i>Sửa bài viết</div>
+    <span class="badge text-bg-light border">{{ posts|length }} bài</span>
+  </div>
+
+  <div id="toast-saved" class="toast-saved"><i class="bi bi-check-circle-fill me-1"></i>Đã lưu thay đổi</div>
+
+  <div class="shell">
+    <form id="edit-posts-form" action="/albums/{{ album_id }}/posts/save" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+      <div class="card-block">
+        <div class="mb-2" style="font-weight:700;font-size:1.05rem;">Thông tin album</div>
+        <div class="mb-3">
+          <label class="form-label meta mb-1">Tiêu đề album</label>
+          <input type="text" name="album_title" class="form-control" value="{{ album.title if album.title else '' }}" required>
+        </div>
+        <div>
+          <label class="form-label meta mb-1">Mô tả (tuỳ chọn)</label>
+          <textarea name="album_description" class="form-control" rows="2" placeholder="Mô tả ngắn...">{{ album.description if album.description else '' }}</textarea>
+        </div>
+      </div>
+
+      {% if posts %}
+        {% for post in posts %}
+        <div class="post-card">
+          <div class="post-head">
+            <p class="title mb-0"><i class="bi bi-file-earmark-text me-1" style="color:var(--accent);"></i>Bài {{ loop.index }}</p>
+            <div class="d-flex align-items-center gap-2">
+              <span class="meta">{% if post.created_at %}<i class="bi bi-clock me-1"></i>{{ post.created_at[:10] }}{% endif %}</span>
+              {% if role == 'owner' %}
+              <button type="submit" form="delete-post-{{ post.id }}" class="btn btn-sm btn-outline-danger" title="Xóa bài" onclick="return confirm('Xóa bài {{ loop.index }}?')"><i class="bi bi-trash3"></i></button>
+              {% endif %}
+            </div>
+          </div>
+          <label class="form-label meta mb-1">Nội dung / caption</label>
+          <textarea name="caption_{{ post.id }}" class="form-control mb-3" rows="6" placeholder="Nhập nội dung bài viết...">{{ post.caption if post.caption else '' }}</textarea>
+          <div class="d-flex flex-wrap gap-2 mb-2">
+            {% for photo in post.photos or [] %}
+              {% if photo.get('type') == 'video' %}
+              <a href="{{ photo.url }}" target="_blank" rel="noopener" class="video-thumb" title="Mở video"><i class="bi bi-camera-video-fill fs-3"></i></a>
+              {% else %}
+              <img src="{{ photo.url }}" class="photo-thumb" onclick="openLightbox('{{ photo.url }}')" alt="media">
+              {% endif %}
+            {% else %}
+              <span class="meta fst-italic">Không có ảnh/video</span>
+            {% endfor %}
+          </div>
+          <div class="meta"><i class="bi bi-collection me-1"></i>{{ (post.photos or [])|length }} ảnh/video</div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="card-block empty-state">
+          <i class="bi bi-inbox" style="font-size:2rem;color:var(--accent);"></i>
+          <p class="mt-2 mb-0">Album chưa có bài viết. Thêm bài ở khung bên dưới.</p>
+        </div>
+      {% endif %}
+    </form>
+
+    {% if role == 'owner' and posts %}
+      {% for post in posts %}
+      <form id="delete-post-{{ post.id }}" action="/albums/{{ album_id }}/posts/{{ post.id }}/delete" method="post" class="d-none">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <input type="hidden" name="next" value="/albums/{{ album_id }}/posts/edit"/>
+      </form>
+      {% endfor %}
+    {% endif %}
+
+    <div class="card-block">
+      <div class="mb-2" style="font-weight:700;">Thêm bài mới vào album này</div>
+      <form action="/albums/{{ album_id }}/posts" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+        <input type="hidden" name="next" value="/albums/{{ album_id }}/posts/edit"/>
+        <div class="mb-2">
+          <textarea name="caption" class="form-control" rows="3" placeholder="Caption / nội dung bài mới..."></textarea>
+        </div>
+        <div class="mb-2">
+          <input type="file" name="media" class="form-control" multiple accept="image/*,video/*">
+        </div>
+        <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-plus-lg me-1"></i>Đăng bài mới</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="save-bar">
+    <div class="save-bar-inner">
+      <a href="/?album={{ album_id }}" class="btn btn-outline-secondary btn-sm">Hủy / về Album</a>
+      <button type="submit" form="edit-posts-form" class="btn btn-accent btn-sm px-4"><i class="bi bi-check2-circle me-1"></i>Lưu thay đổi</button>
+    </div>
+  </div>
+
+  <div id="lightbox" onclick="closeLightbox()">
+    <img id="lightbox-img" src="" alt="preview">
+  </div>
+
+  <script>
+    function openLightbox(src) {
+      document.getElementById('lightbox-img').src = src;
+      document.getElementById('lightbox').classList.add('show');
+    }
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('show');
+    }
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeLightbox();
+    });
+    {% if saved %}
+    (function () {
+      var t = document.getElementById('toast-saved');
+      if (!t) return;
+      t.classList.add('show');
+      setTimeout(function () { t.classList.remove('show'); }, 2800);
+    })();
+    {% endif %}
+  </script>
+</body>
+</html>
