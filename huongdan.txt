@@ -350,7 +350,7 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
   `brain_ensure_user`. Helper đọc sẵn: `brain_get_user`, `brain_is_age_verified`,
   `brain_user_has_bot_link`, `brain_list_bots_for_user`, `brain_count_users`,
   `brain_try_record_delivery` — CHƯA đổi age-gate đa bot / broadcast dedupe / kéo bot.
-  File: `app.py`, `huongdan.txt`.
+  File: `app.py`, `huongdan.txt`. (commit 147b32a)
 
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
