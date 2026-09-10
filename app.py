@@ -463,6 +463,35 @@ def init_db():
                 data_json TEXT NOT NULL DEFAULT '{}'
             )
         ''')
+        # --- User brain (central identity across all bots; dual-write with legacy tables) ---
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                age_verified_at DATETIME,
+                captcha_ok INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_bot_links (
+                bot_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (bot_id, user_id)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS delivery_log (
+                campaign_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                bot_id TEXT,
+                sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (campaign_id, user_id)
+            )
+        ''')
 
         # --- Performance: add category_id shortcut column on albums ---
         # SQLite does not support "ADD COLUMN IF NOT EXISTS" before version 3.37,
@@ -487,6 +516,11 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_subscribers_bot_id ON subscribers(bot_id)")
         # Speeds up expired-token cleanup
         conn.execute("CREATE INDEX IF NOT EXISTS idx_album_tokens_expires ON album_tokens(expires_at)")
+        # User brain indexes
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_bot_links_user ON user_bot_links(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_bot_links_bot ON user_bot_links(bot_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_delivery_log_user ON delivery_log(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_age_verified ON users(age_verified_at)")
 
         conn.commit()
 
@@ -517,6 +551,7 @@ def init_db():
             log.warning("init_db: category_id backfill failed: %s", exc)
 
     _migrate_json_to_db()
+    _migrate_user_brain_from_legacy()
 
 
 def backup_db_to_bytes() -> bytes:
@@ -660,6 +695,60 @@ def _migrate_json_to_db():
             conn.commit()
     except Exception as exc:
         log.error("_migrate_json_to_db: unexpected error: %s", exc, exc_info=True)
+
+
+def _migrate_user_brain_from_legacy():
+    """Idempotent copy from legacy subscribers/age_verifications into user brain tables.
+
+    Safe to run on every startup (INSERT OR IGNORE / conditional UPDATE).
+    Does not delete or alter legacy tables — dual-write remains the live path.
+    """
+    try:
+        with get_db() as conn:
+            # Distinct users from subscribers + age_verifications
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO users (user_id)
+                SELECT DISTINCT user_id FROM subscribers
+                """
+            )
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO users (user_id)
+                SELECT DISTINCT user_id FROM age_verifications
+                """
+            )
+            # Bot links (keeps bot_id='global' if present — historical rows)
+            before_links = conn.execute("SELECT COUNT(*) AS c FROM user_bot_links").fetchone()["c"]
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO user_bot_links (bot_id, user_id, started_at)
+                SELECT bot_id, user_id, COALESCE(created_at, CURRENT_TIMESTAMP)
+                FROM subscribers
+                """
+            )
+            after_links = conn.execute("SELECT COUNT(*) AS c FROM user_bot_links").fetchone()["c"]
+            # Age/captcha: any legacy verification ⇒ mark brain user once
+            conn.execute(
+                """
+                UPDATE users
+                SET age_verified_at = COALESCE(age_verified_at, CURRENT_TIMESTAMP),
+                    captcha_ok = 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id IN (SELECT DISTINCT user_id FROM age_verifications)
+                  AND (age_verified_at IS NULL OR captcha_ok = 0)
+                """
+            )
+            users_n = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+            conn.commit()
+            log.info(
+                "_migrate_user_brain_from_legacy: users=%s links=%s (new_links≈%s)",
+                users_n,
+                after_links,
+                max(0, after_links - before_links),
+            )
+    except Exception as exc:
+        log.error("_migrate_user_brain_from_legacy failed: %s", exc, exc_info=True)
 
 
 # ===== DB HELPER FUNCTIONS (replacing JSON file read/write) =====
@@ -949,7 +1038,7 @@ def db_get_subscribers(bot_id: str) -> list:
 
 
 def db_add_subscriber(bot_id: str, user_id: int):
-    """Add a subscriber to SQLite (idempotent)."""
+    """Add a subscriber to SQLite (idempotent). Also dual-writes to user brain."""
     db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
     with get_db() as conn:
         conn.execute(
@@ -957,6 +1046,11 @@ def db_add_subscriber(bot_id: str, user_id: int):
             (db_key, user_id),
         )
         conn.commit()
+    # Brain dual-write must never break legacy subscriber path
+    try:
+        brain_touch_user_bot_link(db_key, int(user_id))
+    except Exception as exc:
+        log.error("db_add_subscriber brain dual-write failed bot=%s user=%s: %s", db_key, user_id, exc)
 
 
 def db_remove_subscriber(bot_id: str, user_id: int):
@@ -971,7 +1065,7 @@ def db_remove_subscriber(bot_id: str, user_id: int):
 
 
 def db_save_subscribers(bot_id: str, subs: list):
-    """Atomically replace the subscriber list for a bot."""
+    """Atomically replace the subscriber list for a bot. Dual-writes links to brain."""
     db_key = "global" if not bot_id or bot_id == "env_default" else bot_id
     with get_db() as conn:
         conn.execute("DELETE FROM subscribers WHERE bot_id=?", (db_key,))
@@ -981,6 +1075,16 @@ def db_save_subscribers(bot_id: str, subs: list):
                 (db_key, int(uid)),
             )
         conn.commit()
+    for uid in subs:
+        try:
+            brain_touch_user_bot_link(db_key, int(uid))
+        except Exception as exc:
+            log.error(
+                "db_save_subscribers brain dual-write failed bot=%s user=%s: %s",
+                db_key,
+                uid,
+                exc,
+            )
 
 
 def db_get_all_subscriber_ids() -> set:
@@ -1089,13 +1193,22 @@ def db_get_banned() -> list:
 
 
 def db_add_age_verification(bot_id: str, user_id: int):
-    """Persist an 18+ verification for a bot/user pair."""
+    """Persist an 18+ verification for a bot/user pair. Dual-writes captcha/age to brain."""
     with get_db() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO age_verifications (bot_id, user_id) VALUES (?, ?)",
             (bot_id, user_id),
         )
         conn.commit()
+    try:
+        brain_mark_age_captcha_ok(int(user_id))
+    except Exception as exc:
+        log.error(
+            "db_add_age_verification brain dual-write failed bot=%s user=%s: %s",
+            bot_id,
+            user_id,
+            exc,
+        )
 
 
 def db_has_age_verification(bot_id: str, user_id: int) -> bool:
@@ -1109,6 +1222,174 @@ def db_has_age_verification(bot_id: str, user_id: int) -> bool:
         return row is not None
     except Exception as exc:
         log.error("db_has_age_verification(%s, %s) failed: %s", bot_id, user_id, exc)
+        return False
+
+
+# ===== USER BRAIN HELPERS (central profile; read APIs for future features) =====
+
+def brain_ensure_user(user_id: int, username: str | None = None, first_name: str | None = None) -> None:
+    """Ensure a row exists in users; optionally refresh username/first_name."""
+    uid = int(user_id)
+    with get_db() as conn:
+        conn.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (uid,))
+        if username is not None or first_name is not None:
+            conn.execute(
+                """
+                UPDATE users
+                SET username = COALESCE(?, username),
+                    first_name = COALESCE(?, first_name),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                """,
+                (username, first_name, uid),
+            )
+        conn.commit()
+
+
+def brain_touch_user_bot_link(bot_id: str, user_id: int) -> None:
+    """Record that user_id started/interacted with bot_id (idempotent)."""
+    key = "global" if not bot_id or bot_id == "env_default" else str(bot_id).strip()
+    uid = int(user_id)
+    with get_db() as conn:
+        conn.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (uid,))
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO user_bot_links (bot_id, user_id, started_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            """,
+            (key, uid),
+        )
+        conn.execute(
+            "UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+            (uid,),
+        )
+        conn.commit()
+
+
+def brain_mark_age_captcha_ok(user_id: int) -> None:
+    """Mark age+captcha verified on the central user profile (does not change per-bot gate yet)."""
+    uid = int(user_id)
+    with get_db() as conn:
+        conn.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (uid,))
+        conn.execute(
+            """
+            UPDATE users
+            SET age_verified_at = COALESCE(age_verified_at, CURRENT_TIMESTAMP),
+                captcha_ok = 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+            """,
+            (uid,),
+        )
+        conn.commit()
+
+
+def brain_get_user(user_id: int) -> dict | None:
+    """Return central user row as dict, or None."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT user_id, username, first_name, age_verified_at, captcha_ok,
+                       created_at, updated_at
+                FROM users WHERE user_id = ?
+                """,
+                (int(user_id),),
+            ).fetchone()
+        if not row:
+            return None
+        return dict(row)
+    except Exception as exc:
+        log.error("brain_get_user(%s) failed: %s", user_id, exc)
+        return None
+
+
+def brain_is_age_verified(user_id: int) -> bool:
+    """True if brain marks age+captcha done (for future cross-bot skip; not wired to gate yet)."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT age_verified_at, captcha_ok FROM users WHERE user_id = ?",
+                (int(user_id),),
+            ).fetchone()
+        if not row:
+            return False
+        return bool(row["captcha_ok"]) and row["age_verified_at"] is not None
+    except Exception as exc:
+        log.error("brain_is_age_verified(%s) failed: %s", user_id, exc)
+        return False
+
+
+def brain_user_has_bot_link(user_id: int, bot_id: str) -> bool:
+    """True if user has a user_bot_links row for this bot_id."""
+    key = "global" if not bot_id or bot_id == "env_default" else str(bot_id).strip()
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM user_bot_links WHERE bot_id = ? AND user_id = ?",
+                (key, int(user_id)),
+            ).fetchone()
+        return row is not None
+    except Exception as exc:
+        log.error("brain_user_has_bot_link(%s, %s) failed: %s", user_id, bot_id, exc)
+        return False
+
+
+def brain_list_bots_for_user(user_id: int) -> list[str]:
+    """Return bot_id list linked to this user (started_at ascending)."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT bot_id FROM user_bot_links
+                WHERE user_id = ?
+                ORDER BY started_at ASC, bot_id ASC
+                """,
+                (int(user_id),),
+            ).fetchall()
+        return [str(r["bot_id"]) for r in rows]
+    except Exception as exc:
+        log.error("brain_list_bots_for_user(%s) failed: %s", user_id, exc)
+        return []
+
+
+def brain_count_users() -> int:
+    """Count distinct users in the brain."""
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()
+        return int(row["c"] or 0) if row else 0
+    except Exception as exc:
+        log.error("brain_count_users failed: %s", exc)
+        return 0
+
+
+def brain_try_record_delivery(campaign_id: str, user_id: int, bot_id: str | None = None) -> bool:
+    """Insert delivery_log row. Returns True if newly recorded, False if already sent.
+
+    Ready for future broadcast dedupe; unused by live send paths yet.
+    """
+    cid = (campaign_id or "").strip()
+    if not cid:
+        return False
+    try:
+        with get_db() as conn:
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO delivery_log (campaign_id, user_id, bot_id, sent_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (cid, int(user_id), bot_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+    except Exception as exc:
+        log.error(
+            "brain_try_record_delivery(%s, %s) failed: %s",
+            campaign_id,
+            user_id,
+            exc,
+        )
         return False
 
 
@@ -4265,6 +4546,22 @@ if BOT_TOKEN or db_get_bots():
                 db_add_subscriber(bot_cfg_id, user_id)
             except Exception as exc:
                 log.error("start handler: db_add_subscriber failed for bot %s: %s", bot_cfg_id, exc, exc_info=True)
+
+            try:
+                tg_user = update.effective_user
+                if tg_user is not None:
+                    brain_ensure_user(
+                        user_id,
+                        username=getattr(tg_user, "username", None),
+                        first_name=getattr(tg_user, "first_name", None),
+                    )
+            except Exception as exc:
+                log.error(
+                    "start handler: brain_ensure_user failed for bot %s: %s",
+                    bot_cfg_id,
+                    exc,
+                    exc_info=True,
+                )
 
             try:
                 age_gate = db_get_age_gate_config()

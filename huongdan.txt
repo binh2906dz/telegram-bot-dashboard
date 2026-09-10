@@ -114,6 +114,10 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 - Bàn phím Telegram (Reply menu): cấu hình chung key app_config
   `reply_menu_global` + đồng bộ `bot_reply_menus`; chỉnh trên web mục sidebar
   "Bàn phím Telegram", API GET/POST `/reply_menu`.
+- User brain (nền tảng): bảng `users` + `user_bot_links` + `delivery_log` trong
+  SQLite; dual-write từ `subscribers` / `age_verifications` (không đổi gate/broadcast
+  chưa). Helper `brain_*` sẵn cho tính năng sau. Migrate idempotent mỗi startup.
+  KHÔNG xóa bảng legacy; lỗi brain không được làm gãy /start.
 
 --------------------------------------------------------------------------------
 7) GOI Y REFACTOR app.py (neu lam sau)
@@ -135,6 +139,12 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+(pending) feat(brain): central users + user_bot_links dual-write foundation
+e567d9c fix(bot): route scheduled sends through a live bot
+f4f4c0e docs: sync handoff notes
+28fc05b fix(bot): show captcha target in prompt
+23e57a6 fix(bot): separate age confirmation from captcha
+68bdf08 fix(bot): normalize age gate inline keyboard
 5932331 feat(ui): pro VIP polish dashboard + login (glass, motion, toast)
 4e9e553 fix(backup): APScheduler dedupe workers; retention 3 ngay VN; bo PTB daily backup
 5e6c216 feat(ids): broadcast IDs thanh cong -> subscribers theo tung bot
@@ -331,6 +341,16 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
 [2026-05-15] Album admin UI: ẩn nội dung bài viết mặc định trong mỗi album và thêm nút `Xem bài viết` để mở chi tiết khi cần; caption được preview ngắn, ảnh/video vẫn hiển thị trong khối chi tiết. File: `templates/index.html`.
 
 [2026-05-15] 18+ gate: thêm xác minh theo từng bot, lưu vĩnh viễn bằng SQLite, hiển thị câu hỏi 18+ trước flow bot, nút xác nhận + captcha icon cảm xúc, web admin trong Cấu hình Bot để chỉnh câu hỏi / nhãn nút / thông báo. File: `app.py`, `templates/index.html`. (commit 077f8b4)
+
+[2026-09-10] User brain nền tảng (bước 1–4): thêm bảng SQLite `users`, `user_bot_links`,
+  `delivery_log` + index; migrate idempotent từ `subscribers`/`age_verifications` mỗi
+  startup (`_migrate_user_brain_from_legacy`); dual-write an toàn trong
+  `db_add_subscriber` / `db_save_subscribers` / `db_add_age_verification` (lỗi brain
+  chỉ log, không chặn legacy); `/start` cập nhật username/first_name qua
+  `brain_ensure_user`. Helper đọc sẵn: `brain_get_user`, `brain_is_age_verified`,
+  `brain_user_has_bot_link`, `brain_list_bots_for_user`, `brain_count_users`,
+  `brain_try_record_delivery` — CHƯA đổi age-gate đa bot / broadcast dedupe / kéo bot.
+  File: `app.py`, `huongdan.txt`.
 
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
