@@ -139,6 +139,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
+f0ee5ae feat(albums): dedicated page to view and edit posts
 147b32a feat(brain): add central user brain tables with safe dual-write
 e567d9c fix(bot): route scheduled sends through a live bot
 f4f4c0e docs: sync handoff notes
