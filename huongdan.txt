@@ -139,7 +139,7 @@ Cac commit lien quan Mini App / bot manager (truoc P0-P3, tham khao):
 --------------------------------------------------------------------------------
 9) LICH SU GIT GAN DAY (oneline — cap nhat sau moi lan day code)
 --------------------------------------------------------------------------------
-(pending) feat(brain): central users + user_bot_links dual-write foundation
+147b32a feat(brain): add central user brain tables with safe dual-write
 e567d9c fix(bot): route scheduled sends through a live bot
 f4f4c0e docs: sync handoff notes
 28fc05b fix(bot): show captcha target in prompt
