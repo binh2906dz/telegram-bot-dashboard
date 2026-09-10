@@ -357,7 +357,7 @@ danh mục + preview upload khỏi theme tối. login.html đồng bộ font. Ch
   GET `/albums/<id>/posts/edit`; lưu caption + tiêu đề/mô tả album qua
   POST `/albums/<id>/posts/save` (CSRF + login). Template mới
   `templates/album_posts_edit.html`. Thêm/xóa bài redirect về trang edit.
-  File: `app.py`, `templates/index.html`, `templates/album_posts_edit.html`.
+  File: `app.py`, `templates/index.html`, `templates/album_posts_edit.html`. (commit f0ee5ae)
 
 ================================================================================
 Het — luu y: khong luu mat khau / token that trong file nay.
